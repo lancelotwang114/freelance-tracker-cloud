@@ -36,7 +36,8 @@
 - 純載入依賴 + 設定常數，還沒任何 UI、沒任何登入邏輯（會在後續 commit 接上）
 
 ### 設定頁加雲端登入區塊 UI 骨架
-- 在「設定」分頁最上方新增「☁️ 雲端同步」卡片，置頂醒目（藍色邊框點綴）
+- 在「設定」分頁最上方新增「🔐 Google Drive 同步」卡片，置頂醒目（藍色邊框點綴）
+- 名稱刻意跟 v2 沿用的「☁️ 雲端同步」（Apps Script + Sheet）區隔，避免兩張卡同名造成混淆（v2 那張在 beta.1 才會移除）
 - 三個互斥狀態 div：
   - `#cloud-auth-pending`：GIS SDK 載入中（預設顯示）
   - `#cloud-auth-signed-out`：未登入（含 Google 4 色 G logo SVG 按鈕）
