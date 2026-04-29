@@ -28,8 +28,8 @@
 | v3.0.0-alpha.1 | Google 登入 / 登出 / 持久化 / sync indicator / 跟 v2 完全隔離 | ✅ 完成（2026-04-29） |
 | v3.0.0-alpha.2 | Drive 雙寫（debounce）、三方合併、衝突 modal、indicator 多態化、立即同步、snapshot 雲端化 + 自動每日 + 分層保留、隱藏 v2 Apps Script UI | ✅ 完成（2026-04-29） |
 | v3.0.0-alpha.3 | 存摺照片從 base64 遷移成 Drive 個別檔（schema 升 v8）+ 自動遷移 + 快取 + 孤兒清理 | ✅ 完成（2026-04-29） |
-| v3.0.0-beta.1 | localStorage 退化純快取、徹底移除 v2 Apps Script JS 邏輯 | 待辦 |
-| v3.0.0 | 正式 stable，移除「實驗版」警告 | 待辦 |
+| v3.0.0-beta.1 | localStorage 退化純快取（概念落地）、移除 v2 Apps Script 同步進入點、stub 化 HTML onclick 用到的 v2 函式 | ✅ 完成（2026-04-29） |
+| v3.0.0 | 正式 stable，砍 dead code、移除「實驗版」警告 | 待辦 |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)，alpha.3 之後的計畫看 [ROADMAP.md](./ROADMAP.md)。
 

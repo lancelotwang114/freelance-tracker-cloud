@@ -1,6 +1,37 @@
 ﻿# 版本更新歷史
 
-## v3.0.0-alpha.3 — 進行中（2026-04-29 起）
+## v3.0.0-beta.1 — 進行中（2026-04-29 起）
+
+### 移除 v2 Apps Script 同步進入點（β1-1）
+- `save()` 拿掉 `if (config.sheetSyncEnabled) schedulePush()` 觸發
+- init script 末段砍掉 v2 sync 啟動邏輯（`pullFromSheet(true)` / `setupAutoPoll()` / `maybeGenerateMonthlySnapshot()`）
+- init script 中段砍掉 `loadSheetConfigUI()` / `loadCalendarConfigUI()` / `updateSheetSyncBadge()` 呼叫（對應 hidden 卡片）
+- `setupAutoSave()` 拿掉 sheet-api / sheet-url / cal-* 的 listener
+- 砍掉 online listener（網路恢復補推 Apps Script）
+
+### Stub 化 HTML onclick 用到的 v2 函式（β1-1）
+（HTML hidden 卡片的按鈕雖然點不到，stub 化避免使用者把 hidden 拿掉時 ReferenceError）
+- `exportSettings()` / `importSettings()` — 跨裝置設定檔
+- `pullFromSheet()` / `pushToSheet()` — Apps Script pull/push
+- `enableSheetSync()` / `disableSheetSync()` — Apps Script 同步開關
+- `saveCalendarConfig()` / `testCalendarConnection()` / `syncCalendarNow()` — Apps Script 中介行事曆同步
+- `restoreSnapshot()` — v2 sheet-based 還原（v3 用 cloudRestoreSnapshot 從 Drive 還原）
+- 所有 stub 內部只 `console.warn('[deprecated] ...')`，無 side effect
+
+### 留作 dead code 暫不砍（v3.0.0 stable 再徹底移除）
+- `setSyncStatus` / `updateSheetSyncBadge` / `schedulePush` / `setupAutoPoll` / `checkCloudForUpdate`
+- 編輯鎖（acquireEditLock / releaseEditLock / startLockHeartbeat / stopLockHeartbeat / forceReleaseEditLock）
+- `manualSnapshot` / `setupDailyForceTrigger` / `maybeGenerateMonthlySnapshot`
+- `buildReminderEvents`（行事曆用）
+- `loadSheetConfigUI` / `loadCalendarConfigUI` / `saveSheetConfig`
+- 這些函式在 β1-1 後**已無任何 caller 會觸發**（init / save / runtime 的 entry chain 都被切斷），保留只是文字佔空間，不影響功能
+
+### localStorage 退化純快取（概念變更，無 code change）
+- alpha.2 起的同步策略已是「Drive 為 source of truth、localStorage 為 cache」
+- alpha.3 起 metadata wrapper 自記 version + lastModifiedAt、衝突走三方合併
+- beta.1 砍掉 v2 sync 後，這個架構正式落地——localStorage 唯一的角色就是「離線時還能讀」+「本機修改先寫進去再 debounce push」
+
+## v3.0.0-alpha.3 ✅ 結案（2026-04-29）
 
 ### Schema v7 → v8 + Drive 圖片 API（α3-1）
 - `CURRENT_SCHEMA_VERSION` 從 7 升到 8

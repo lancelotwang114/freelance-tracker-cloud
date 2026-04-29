@@ -36,12 +36,11 @@
 - [x] 換照片 / 刪除帳號時清舊 Drive 孤兒檔（fire-and-forget driveDeleteFile）（α3-2）
 - [x] 操作日誌：cloud-image-upload / cloud-image-delete / cloud-image-migrate（α3-2/4）
 
-## v3.0.0-beta.1 — Drive 為主
-- [ ] localStorage 退化為純快取
-- [ ] 啟動必拉 Drive，沒網路用 cache
-- [ ] 徹底移除 v2 Apps Script JS 邏輯（pollAppVersion / pushToSheet / pullFromSheet 等）
-- [ ] 移除「跨裝置設定檔匯出 / 匯入」JS 邏輯（UI 已在 alpha.2 隱藏）
-- [ ] 移除 Google 行事曆同步（依賴 Apps Script，UI 已隱藏；之後若要重做要走 OAuth）
+## v3.0.0-beta.1 ✅ 完成（2026-04-29）
+- [x] 移除 v2 Apps Script 同步所有進入點（save() 內 schedulePush call、init 末段 pullFromSheet 啟動、setupAutoSave 內 sheet 段、online listener）
+- [x] Stub 化 HTML onclick 用到的 v2 函式（pullFromSheet / pushToSheet / enableSheetSync / disableSheetSync / saveCalendarConfig / testCalendarConnection / syncCalendarNow / restoreSnapshot / exportSettings / importSettings）
+- [x] localStorage 正式退化為純快取（概念落地；alpha.2/3 架構已是 Drive 為 source of truth）
+- [-] dead code 暫留（setSyncStatus / schedulePush / 編輯鎖 / 行事曆事件建構等），所有 caller 都已切斷不會執行；v3.0.0 stable 再徹底移除
 
 ## v3.0.0 — 正式 stable
 - [ ] 完全移除 backend/ 相關引用
