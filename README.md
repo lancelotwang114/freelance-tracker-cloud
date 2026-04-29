@@ -1,10 +1,14 @@
 ﻿# Freelance Tracker (Cloud)
 
+**線上版（v3 / Cloud）：** https://lancelotwang114.github.io/freelance-tracker-cloud/
+**穩定版（v2 / Apps Script）：** https://lancelotwang114.github.io/freelance-tracker/
+
 > WARNING: 實驗版 — A 方案 Google Drive 後端開發中。
 >
 > - 穩定版（v2.10.x，Apps Script 後端）：[freelance-tracker](https://github.com/lancelotwang114/freelance-tracker) ([線上版](https://lancelotwang114.github.io/freelance-tracker/))
 > - 本版本目標：完全去除 Apps Script，改用 Google Drive App Folder 當後端
 > - 開發中切勿用於正式資料；請先到穩定版匯出 JSON 備份後再來測試
+> - v3 跟 v2 的瀏覽器資料完全隔離（localStorage 加 `cloud-` 前綴 + SW cache 獨立命名空間），不會互相影響
 
 ## 路線圖
 
