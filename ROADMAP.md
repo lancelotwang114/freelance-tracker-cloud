@@ -2,11 +2,15 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
-## v3.0.0-alpha.1（進行中）
-- [ ] GCP Console OAuth Client ID 申請
-- [ ] Google Identity Services SDK 整合
-- [ ] 登入 / 登出 UI
-- [ ] 顯示登入帳號
+## v3.0.0-alpha.1 ✅ 完成（2026-04-29）
+- [x] GCP Console OAuth Client ID 申請
+- [x] Google Identity Services SDK 整合
+- [x] 登入 / 登出 UI
+- [x] 顯示登入帳號
+- [x] 登入狀態持久化（重整不用重登）
+- [x] top-bar sync indicator 接通
+- [x] 操作日誌埋點（cloud-signin / cloud-signout）
+- [x] 全域 localStorage / Service Worker cache 加 cloud- 前綴與 v2 完全隔離
 
 ## v3.0.0-alpha.2 — Drive 雙寫期
 - [ ] Drive App Folder 自動建立 tracker.json

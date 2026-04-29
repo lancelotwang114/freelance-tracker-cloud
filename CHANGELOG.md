@@ -51,6 +51,46 @@
   - `cloudSignOut()`：清本機 state + UI 切回未登入 + 非同步 `google.accounts.oauth2.revoke(token)` 通知 Google 撤銷
 - 自啟動：`app.js` 載入完直接呼叫 `cloudInitGoogleAuth()`（不等 DOMContentLoaded，因為 `app.js` 是 body 尾端動態 append、DOM 已就緒）
 - 還沒做：access token 持久化（commit 6）、top-bar sync indicator 接通（commit 5）、操作日誌埋點（commit 7）
+
+### 修：登入後拿不到使用者基本資訊
+- 原 bug：scope 只有 `drive.appfolder`，access token 沒有讀 userinfo 的權限，導致 `oauth2/v3/userinfo` fetch 401，UI 顯示「已登入 / （無法取得帳號資訊）」、沒有大頭貼
+- 修法：新增 `AUTH_SCOPES` 常數合併 `openid email profile drive.appfolder` 一次請求；`initTokenClient` 的 scope 從 `DRIVE_SCOPE` 改為 `AUTH_SCOPES`
+- 影響：使用者授權畫面會多一行「See your name, email and profile picture」（都是非機敏 scope，Google 不需要重新審核）
+- 已登入的使用者要登出 → 再登入一次，才會拿到含新 scope 的 token
+
+### 登入狀態持久化（重整不用重登）
+- 新增 `CLOUD_AUTH_KEY = 'cloud-freelance-tracker-auth'`（cloud- 前綴與 v2 隔離）
+- 新增 3 個 storage helper：
+  - `cloudSaveAuthState()`：登入成功後寫入 `{ accessToken, tokenExpiresAt, user }`
+  - `cloudLoadAuthState()`：app 啟動時還原；過期或損壞自動清掉並回 false
+  - `cloudClearAuthState()`：登出時清掉
+- 改 `cloudInitGoogleAuth()`：先試還原 → 成功就立刻渲染為「已登入」（不用等 GIS SDK 載入）→ 同時背景 init token client 給後續登入流程用
+- 改 `cloudOnTokenResponse()`：登入成功 + userinfo 拿到後 → 呼叫 `cloudSaveAuthState()`
+- 改 `cloudSignOut()`：清掉 localStorage 防止重整又恢復為已登入
+- 過期判斷：`Date.now() > tokenExpiresAt - 60_000`（留 60 秒 buffer 避免邊界競爭）
+- **不存 refresh token**（GIS 隱式流根本不發 refresh token），1 小時 token 自然過期後使用者要重新點登入按鈕
+- 新增 2 個對外 API（alpha.2 寫 Drive 同步會用到）：
+  - `getValidAccessToken()`：拿可用 token，過期或未登入回 null
+  - `isCloudSignedIn()`：UI 顯示用
+
+### top-bar sync indicator 接通到登入狀態
+- 新增 `cloudUpdateSyncIndicator()`：依 `isCloudSignedIn()` 決定 indicator 顯示
+  - 已登入：綠燈「✓ 已連 Drive」+ tooltip 顯示帳號 email
+  - 未登入：灰燈「○ 未連雲端」+ tooltip「點擊開啟設定頁登入」
+- 在 `cloudRenderSignedIn()` / `cloudSignOut()` / `cloudInitGoogleAuth()` 三處呼叫
+- 改 v2 既有 `setSyncStatus()` 開頭加 short-circuit：若 v3 已登入則 indicator 由 `cloudUpdateSyncIndicator()` 接管，避免 v2 sync timer 把綠燈覆寫成灰燈造成閃爍（beta.1 整個 v2 sync 邏輯移除時這條 short-circuit 一起拆）
+
+### 操作日誌埋點
+- `ACTION_LABELS` 新增兩個 type：
+  - `cloud-signin`（🔐）：登入 Google Drive
+  - `cloud-signout`（🔓）：登出 Google Drive
+- `cloudOnTokenResponse()` 登入成功後 → `logAction('cloud-signin', { email })`
+- `cloudSignOut()` 登出後 → `logAction('cloud-signout', { email })`
+- 注意：日誌**只記 email、不記 token**
+
+### 文件收尾
+- `ROADMAP.md`：v3.0.0-alpha.1 全部 checkbox 打勾、標完成（2026-04-29）
+- `README.md`：路線圖表格 alpha.1 狀態 → ✅ 完成；alpha.2 → 進行中
 - 三個互斥狀態 div：
   - `#cloud-auth-pending`：GIS SDK 載入中（預設顯示）
   - `#cloud-auth-signed-out`：未登入（含 Google 4 色 G logo SVG 按鈕）

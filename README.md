@@ -14,8 +14,8 @@
 
 | 階段 | 內容 | 狀態 |
 |------|------|------|
-| v3.0.0-alpha.1 | Google Identity Services 登入流程接通 | 進行中 |
-| v3.0.0-alpha.2 | Drive App Folder 雙寫期（local + Drive 同步） | 待辦 |
+| v3.0.0-alpha.1 | Google Identity Services 登入 / 登出 / 持久化 / sync indicator | ✅ 完成（2026-04-29） |
+| v3.0.0-alpha.2 | Drive App Folder 雙寫期（local + Drive 同步） | 進行中 |
 | v3.0.0-beta.1 | Drive 為主，local 退化為快取 | 待辦 |
 | v3.0.0 | 移除所有 Apps Script 相關程式碼，正式取代 v2 | 待辦 |
 

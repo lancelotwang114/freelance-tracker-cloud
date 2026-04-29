@@ -29,7 +29,20 @@ const GOOGLE_CLIENT_ID = '571304600737-nfvsh00822f4b5p00msetkld6qq11vf2.apps.goo
 //   參考：https://developers.google.com/workspace/drive/api/guides/appdata
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appfolder';
 
-// ---------- 認證狀態（記憶體；持久化是 commit 6 的事）----------
+// AUTH_SCOPES
+//   登入時實際請求的全部 scope。drive.appfolder 不含使用者基本資訊，必須額外加：
+//     - openid：發 ID token（之後 commit 6 持久化登入狀態用得到）
+//     - email：oauth2/v3/userinfo 回傳 email
+//     - profile：oauth2/v3/userinfo 回傳 name / picture
+//   都是非機敏 scope，使用者授權畫面會多一行「See your name, email and profile」。
+const AUTH_SCOPES = `openid email profile ${DRIVE_SCOPE}`;
+
+// CLOUD_AUTH_KEY：access token + 過期時間 + user info 存在這個 localStorage key
+// 跟 v2 隔離（cloud- 前綴）；存的內容：{ accessToken, tokenExpiresAt, user: { name, email, picture } }
+// 不存 refresh token（GIS 隱式流不發 refresh token），1 小時後 token 自然過期再請使用者重登
+const CLOUD_AUTH_KEY = 'cloud-freelance-tracker-auth';
+
+// ---------- 認證狀態（記憶體 + localStorage 雙層）----------
 let cloudAuthState = {
   initialized: false,    // GIS SDK 是否 init 完成
   tokenClient: null,     // google.accounts.oauth2.TokenClient instance
@@ -37,6 +50,59 @@ let cloudAuthState = {
   tokenExpiresAt: 0,     // token 過期的 ms epoch
   user: null             // {name, email, picture} 或 null
 };
+
+// ---------- 持久化（v3.0.0-alpha.1 commit 6）----------
+
+// 把當前 cloudAuthState 寫入 localStorage（登入成功後呼叫）
+function cloudSaveAuthState() {
+  try {
+    const payload = {
+      accessToken: cloudAuthState.accessToken,
+      tokenExpiresAt: cloudAuthState.tokenExpiresAt,
+      user: cloudAuthState.user,
+    };
+    localStorage.setItem(CLOUD_AUTH_KEY, JSON.stringify(payload));
+  } catch (e) {
+    // localStorage 滿了 / 隱私模式禁寫 → 算了，下次重整就要重登
+    console.warn('[cloud-auth] save failed:', e);
+  }
+}
+
+// 從 localStorage 還原 cloudAuthState（app 啟動時呼叫）
+// 回傳 true = 還原成功且 token 還沒過期；false = 沒資料或過期或損壞
+function cloudLoadAuthState() {
+  let raw;
+  try {
+    raw = localStorage.getItem(CLOUD_AUTH_KEY);
+  } catch (_) { return false; }
+  if (!raw) return false;
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (_) {
+    // 損壞就清掉
+    try { localStorage.removeItem(CLOUD_AUTH_KEY); } catch (_) {}
+    return false;
+  }
+
+  // 過期就清掉並回 false（讓使用者重新登入）
+  // 留 60 秒 buffer，避免「剛還原就過期」的競爭狀況
+  if (!data.accessToken || !data.tokenExpiresAt || Date.now() > data.tokenExpiresAt - 60_000) {
+    try { localStorage.removeItem(CLOUD_AUTH_KEY); } catch (_) {}
+    return false;
+  }
+
+  cloudAuthState.accessToken = data.accessToken;
+  cloudAuthState.tokenExpiresAt = data.tokenExpiresAt;
+  cloudAuthState.user = data.user || null;
+  return true;
+}
+
+// 清掉 localStorage（登出時呼叫）
+function cloudClearAuthState() {
+  try { localStorage.removeItem(CLOUD_AUTH_KEY); } catch (_) {}
+}
 
 // 切換三個狀態 div 的顯示（pending / signed-out / signed-in）
 function cloudShowAuthState(state) {
@@ -66,20 +132,32 @@ function cloudWaitForGoogleSDK(maxAttempts = 50) {
 
 // app 啟動時自動呼叫一次（檔尾有自啟動 IIFE）
 async function cloudInitGoogleAuth() {
-  cloudShowAuthState('pending');
+  // Step 1：先試著從 localStorage 還原（v3.0.0-alpha.1 commit 6）
+  // 若 token 還沒過期，立刻渲染為「已登入」，不用等 GIS SDK 載入
+  const restored = cloudLoadAuthState();
+  if (restored) {
+    cloudRenderSignedIn();
+  } else {
+    cloudShowAuthState('pending');
+  }
+
+  // Step 2：等 GIS SDK ready（async 載入無保證）
   try {
     await cloudWaitForGoogleSDK();
   } catch (e) {
     console.error('[cloud-auth] init failed:', e);
-    cloudShowAuthState('signed-out');
-    const hint = document.getElementById('cloud-signin-disabled-hint');
-    if (hint) hint.textContent = '⚠️ Google 登入元件載入失敗，請檢查網路或刷新頁面';
+    if (!restored) {
+      cloudShowAuthState('signed-out');
+      const hint = document.getElementById('cloud-signin-disabled-hint');
+      if (hint) hint.textContent = '⚠️ Google 登入元件載入失敗，請檢查網路或刷新頁面';
+    }
+    // 若已從 localStorage 還原為已登入，就維持那個畫面（cached token 還能用，到期前不阻擋使用者）
     return;
   }
 
   cloudAuthState.tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
-    scope: DRIVE_SCOPE,
+    scope: AUTH_SCOPES,  // openid + email + profile + drive.appfolder
     callback: cloudOnTokenResponse,
   });
   cloudAuthState.initialized = true;
@@ -90,7 +168,12 @@ async function cloudInitGoogleAuth() {
   const hint = document.getElementById('cloud-signin-disabled-hint');
   if (hint) hint.style.display = 'none';
 
-  cloudShowAuthState('signed-out');
+  // 若還沒從還原進入「已登入」狀態，才需要切到 signed-out（已登入則維持）
+  if (!restored) {
+    cloudShowAuthState('signed-out');
+    cloudUpdateSyncIndicator();  // v3.0.0-alpha.1 commit 5：top-bar 顯示「○ 未連雲端」
+  }
+  // restored 的情境 cloudRenderSignedIn() 已經在前面呼叫過 cloudUpdateSyncIndicator()
 }
 
 // 點「使用 Google 登入」按鈕（index.html 的 onclick 直接呼叫）
@@ -133,7 +216,14 @@ async function cloudOnTokenResponse(resp) {
     cloudAuthState.user = { name: '已登入', email: '（無法取得帳號資訊）', picture: '' };
   }
 
+  // v3.0.0-alpha.1 commit 6：登入成功 → 寫入 localStorage 持久化
+  cloudSaveAuthState();
   cloudRenderSignedIn();
+
+  // v3.0.0-alpha.1 commit 7：寫進操作日誌（注意：不記 token，只記 email）
+  if (typeof logAction === 'function') {
+    logAction('cloud-signin', { email: cloudAuthState.user && cloudAuthState.user.email });
+  }
 }
 
 // 把 cloudAuthState.user 渲染到「已登入」區塊
@@ -159,16 +249,23 @@ function cloudRenderSignedIn() {
     }
   }
   cloudShowAuthState('signed-in');
+  cloudUpdateSyncIndicator();  // v3.0.0-alpha.1 commit 5：top-bar 顯示「✓ 已連 Drive」
 }
 
 // 點「登出」按鈕（index.html 的 onclick 直接呼叫）
 // 策略：先清本機 state + UI 切回未登入（即使 revoke 失敗也讓使用者有登出體驗），
 // 再非同步呼叫 google.accounts.oauth2.revoke 通知 Google 撤銷 token。
 function cloudSignOut() {
+  // v3.0.0-alpha.1 commit 7：先抓 email 再清 state，才記得到誰登出
+  const prevEmail = cloudAuthState.user && cloudAuthState.user.email;
+
   const token = cloudAuthState.accessToken;
   cloudAuthState.accessToken = null;
   cloudAuthState.tokenExpiresAt = 0;
   cloudAuthState.user = null;
+
+  // v3.0.0-alpha.1 commit 6：清 localStorage 防止下次重整又恢復為已登入
+  cloudClearAuthState();
 
   const setText = (id, txt) => {
     const el = document.getElementById(id);
@@ -176,12 +273,55 @@ function cloudSignOut() {
   };
   setText('cloud-auth-status', '未登入');
   cloudShowAuthState('signed-out');
+  cloudUpdateSyncIndicator();  // v3.0.0-alpha.1 commit 5：top-bar 切回「○ 未連雲端」
 
   if (token && window.google && window.google.accounts && window.google.accounts.oauth2 && window.google.accounts.oauth2.revoke) {
     google.accounts.oauth2.revoke(token, () => {
       // revoke 完成（不一定要做事；revoke 失敗也沒差，token 反正會自然過期）
     });
   }
+
+  // v3.0.0-alpha.1 commit 7：寫進操作日誌
+  if (typeof logAction === 'function') {
+    logAction('cloud-signout', { email: prevEmail });
+  }
+}
+
+// ---------- top-bar sync indicator 接通（v3.0.0-alpha.1 commit 5）----------
+
+// 把 top-bar 右上角 #sync-indicator 改成反映 v3 雲端登入狀態
+// 已登入：綠燈「✓ 已連 Drive」；未登入：灰燈「○ 未連雲端」
+// 注意：v2 既有 setSyncStatus() 會被 v2 timer 反覆呼叫，所以 setSyncStatus() 開頭也要 short-circuit 讓位給這個 helper
+function cloudUpdateSyncIndicator() {
+  const el = document.getElementById('sync-indicator');
+  if (!el) return;
+  if (isCloudSignedIn()) {
+    el.className = 'sync-indicator sync-synced';
+    el.innerHTML = '✓ 已連 Drive';
+    const email = (cloudAuthState.user && cloudAuthState.user.email) || '';
+    el.title = email
+      ? `Google Drive 已連線：${email}（點擊開啟設定頁）`
+      : 'Google Drive 已連線（點擊開啟設定頁）';
+  } else {
+    el.className = 'sync-indicator sync-idle';
+    el.innerHTML = '○ 未連雲端';
+    el.title = '尚未登入 Google Drive（點擊開啟設定頁登入）';
+  }
+}
+
+// ---------- 對外 API（alpha.2 開始寫 Drive API 同步時會用到）----------
+
+// 拿可用的 access token；過期或未登入回 null
+// 留 60 秒 buffer 避免「拿到但下一秒就過期」的競爭
+function getValidAccessToken() {
+  if (!cloudAuthState.accessToken) return null;
+  if (Date.now() > cloudAuthState.tokenExpiresAt - 60_000) return null;
+  return cloudAuthState.accessToken;
+}
+
+// 是否已登入（UI 顯示用；不等同於「token 立刻可用」，後者請用 getValidAccessToken）
+function isCloudSignedIn() {
+  return !!cloudAuthState.user && !!cloudAuthState.accessToken;
 }
 
 // 自啟動：app.js 在 body 尾端載入時 DOM 已就緒，直接 init
@@ -254,7 +394,10 @@ const ACTION_LABELS = {
   'snapshot-restore': { icon: '↩',    label: '還原 snapshot' },
   'sync-pull':        { icon: '⬇️',   label: '從雲端拉取' },
   'sync-push':        { icon: '⬆️',   label: '推送到雲端' },
-  'invoice-copy':     { icon: '📋',   label: '複製請款單' }
+  'invoice-copy':     { icon: '📋',   label: '複製請款單' },
+  // v3.0.0-alpha.1 commit 7：Google Drive 登入埋點
+  'cloud-signin':     { icon: '🔐',   label: '登入 Google Drive' },
+  'cloud-signout':    { icon: '🔓',   label: '登出 Google Drive' }
 };
 const COLORS = ['#ef4444','#f59e0b','#10b981','#2563eb','#8b5cf6','#ec4899','#14b8a6','#64748b'];
 
@@ -5537,6 +5680,15 @@ function setSyncStatus(status, err) {
   syncError = err || null;
   const el = document.getElementById('sync-indicator');
   if (!el) return;
+
+  // v3.0.0-alpha.1 commit 5：若已透過 Google 登入 v3 cloud，indicator 由 cloudUpdateSyncIndicator 接管
+  // 防止 v2 sync timer 把「✓ 已連 Drive」覆寫成「☁️ 未連雲端」造成閃爍
+  // beta.1 整個 v2 sync 邏輯會移除，這條 short-circuit 屆時連同此函式一起拆掉
+  if (typeof isCloudSignedIn === 'function' && isCloudSignedIn()) {
+    cloudUpdateSyncIndicator();
+    return;
+  }
+
   const cfg = config.sheetConfig || {};
   // 直接用日期+時間顯示，不用 hover
   const dt = cfg.cloudLastModifiedAt ? new Date(cfg.cloudLastModifiedAt) : null;
