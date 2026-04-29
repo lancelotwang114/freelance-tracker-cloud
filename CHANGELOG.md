@@ -35,6 +35,16 @@
   - `DRIVE_SCOPE`：`drive.appfolder`（只能存取本 app 建的應用程式資料夾，最小權限）
 - 純載入依賴 + 設定常數，還沒任何 UI、沒任何登入邏輯（會在後續 commit 接上）
 
+### 設定頁加雲端登入區塊 UI 骨架
+- 在「設定」分頁最上方新增「☁️ 雲端同步」卡片，置頂醒目（藍色邊框點綴）
+- 三個互斥狀態 div：
+  - `#cloud-auth-pending`：GIS SDK 載入中（預設顯示）
+  - `#cloud-auth-signed-out`：未登入（含 Google 4 色 G logo SVG 按鈕）
+  - `#cloud-auth-signed-in`：已登入（大頭貼 + 名稱 + email + 登出鈕）
+- `css/style.css` 加入 `.card-cloud-auth`、`.cloud-signin-btn`、`.cloud-account` 等樣式
+- 樣式統一用既有 CSS 變數（`--primary` / `--card` / `--text` / `--muted` / `--border` / `--bg`），暗色模式自動相容
+- **按鈕還沒接 handler**：`cloud-signin-btn` 預設 disabled、`onclick="cloudSignIn()"` 函式還沒實作；後續 commit 才會接上
+
 ### 待開發
 - 設定頁登入 / 登出 UI 區塊
 - Token Client 接通、登入流程、撤銷登出

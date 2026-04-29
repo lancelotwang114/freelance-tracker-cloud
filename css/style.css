@@ -1499,6 +1499,83 @@ input:focus, select:focus, textarea:focus {
 }
 .toast.show { opacity: 1; }
 
+/* ==================== ☁️ 雲端同步 卡片（v3.0.0-alpha.1）==================== */
+/* 設定頁最上方的 Sign in with Google 區塊。三個狀態互斥顯示：pending / signed-out / signed-in */
+
+.card-cloud-auth {
+  border: 1.5px solid var(--primary);
+}
+.card-cloud-auth .card-head {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.06), transparent);
+}
+
+/* Google Sign in 按鈕：依 Google Brand Guidelines 的最簡白底邊框版 */
+.cloud-signin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .05s;
+  user-select: none;
+}
+.cloud-signin-btn:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.06);
+  border-color: var(--primary);
+}
+.cloud-signin-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.cloud-signin-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.cloud-signin-btn svg {
+  flex-shrink: 0;
+}
+
+/* 已登入狀態的帳號列：大頭貼 + email + 登出按鈕 */
+.cloud-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cloud-account-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+.cloud-account-meta {
+  flex: 1;
+  min-width: 0;
+}
+.cloud-account-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cloud-account-email {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
 /* ==================== Print ==================== */
 @media print {
   .top-bar, header, nav.tabs, .fab, .no-print { display: none !important; }
