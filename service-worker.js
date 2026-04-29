@@ -1,8 +1,13 @@
 // 外包收益管理工具 — Service Worker
 // 策略：app shell（HTML/CSS/JS）走 Cache-First，雲端 API 一律走 Network-Only
 // 升 CACHE_VERSION 會讓使用者下次開頁時自動取得新版
-
-const CACHE_VERSION = 'ftracker-v2.10.15';
+//
+// v3.0.0-alpha.1：cache 名稱加 cloud- 前綴
+// 原因：v2（freelance-tracker）跟 v3（freelance-tracker-cloud）部署在同一個 origin
+//       lancelotwang114.github.io，Cache Storage 是 origin scope 共用，
+//       activate 時的 keys.filter(k => k !== CACHE_VERSION).delete() 會把對方的 cache 砍掉。
+//       前綴隔離後兩版互不干擾。
+const CACHE_VERSION = 'ftracker-cloud-v3.0.0-alpha.1';
 const APP_SHELL = [
   './',
   './index.html',

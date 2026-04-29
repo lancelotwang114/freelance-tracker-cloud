@@ -3,9 +3,10 @@
    ========================================= */
 
 // ============== Data Layer ==============
-const STORAGE_KEY = 'freelance-tracker-v1';
-const CONFIG_KEY = 'freelance-tracker-config';
-const APP_VERSION = '2026-04-27-v2.10.15';  // 與 index.html 的 meta 同步
+// v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
+const STORAGE_KEY = 'cloud-freelance-tracker-v1';
+const CONFIG_KEY = 'cloud-freelance-tracker-config';
+const APP_VERSION = '2026-04-29-v3.0.0-alpha.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // 版本比較（v2.10.1）
 // 修正 v2.9.7 vs v2.10.0 的字串比較 bug（'1' < '9' 字元碼，導致大版號被判舊）
@@ -30,7 +31,7 @@ function compareAppVersion(a, b) {
 }
 
 // ============== 操作日誌（v2.9.5）==============
-const ACTION_LOG_KEY = 'ftActionLog_v1';
+const ACTION_LOG_KEY = 'cloud-ftActionLog_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 const ACTION_LOG_MAX = 500;
 let actionLog = [];
 
@@ -2870,8 +2871,8 @@ function showIcalHelp() {
 }
 
 // ============== 瀏覽器原生通知（v2.5）==============
-const NOTIF_ENABLED_KEY = 'ftNotifEnabled_v1';
-const NOTIF_LAST_FIRED_KEY = 'ftNotifLastFired_v1';
+const NOTIF_ENABLED_KEY = 'cloud-ftNotifEnabled_v1';      // v3.0.0-alpha.1：cloud- 前綴隔離 v2
+const NOTIF_LAST_FIRED_KEY = 'cloud-ftNotifLastFired_v1'; // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 
 function notifSupported() {
   return 'Notification' in window;
@@ -3229,7 +3230,7 @@ function runHealthAction(i) {
 }
 
 // ============== 範本系統（案件描述常用片語）==============
-const TEMPLATES_KEY = 'ftJobTemplates_v1';
+const TEMPLATES_KEY = 'cloud-ftJobTemplates_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 
 function getTemplates() {
   try { return JSON.parse(localStorage.getItem(TEMPLATES_KEY) || '[]'); }
@@ -5779,7 +5780,7 @@ function schedulePush() {
 }
 
 // ============== 暗色模式 ==============
-const THEME_KEY = 'ftTheme_v1';
+const THEME_KEY = 'cloud-ftTheme_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 
 function applyTheme() {
   const saved = localStorage.getItem(THEME_KEY);
@@ -5930,7 +5931,7 @@ document.addEventListener('click', (e) => {
 });
 
 // ============== Lab / 開發模式（暫停同步）==============
-const LAB_MODE_KEY = 'ftLabMode_v1';
+const LAB_MODE_KEY = 'cloud-ftLabMode_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 function isLabMode() { return localStorage.getItem(LAB_MODE_KEY) === '1'; }
 function toggleLabMode() {
   const next = !isLabMode();
@@ -5984,8 +5985,8 @@ function showStaleClientBanner(cloudSchema, cloudAppVer) {
 // 注意：瀏覽器沙盒禁止讀取 OS 的電腦名稱（如 Windows 的 hostname），
 // 所以採用「OS 偵測 + 自動產生唯一識別碼」的折衷方案。
 // 使用者可在設定頁改成有意義的名字（例如「工作室 Win」）。
-const DEVICE_NAME_KEY = 'ftDeviceName_v1';
-const DEVICE_AUTO_KEY = 'ftDeviceAutoId_v1';
+const DEVICE_NAME_KEY = 'cloud-ftDeviceName_v1';   // v3.0.0-alpha.1：cloud- 前綴隔離 v2
+const DEVICE_AUTO_KEY = 'cloud-ftDeviceAutoId_v1'; // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 
 function getOsLabel() {
   const ua = navigator.userAgent;
@@ -6049,7 +6050,7 @@ function loadDeviceNameUI() {
 }
 
 // ============== IP + 地理位置（24 小時快取）==============
-const DEVICE_LOCATION_KEY = 'ftDeviceLocation_v1';
+const DEVICE_LOCATION_KEY = 'cloud-ftDeviceLocation_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 let cachedDeviceLocation = null;
 
 async function fetchDeviceLocation() {
@@ -6160,7 +6161,7 @@ function clearPreciseLocation() {
 }
 
 // ============== 裝置名稱提醒 modal ==============
-const DEVICE_PROMPT_DISMISSED_KEY = 'ftDeviceNamePromptDismissed_v1';
+const DEVICE_PROMPT_DISMISSED_KEY = 'cloud-ftDeviceNamePromptDismissed_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 
 function maybeShowDeviceNamePrompt() {
   // 已設過名稱 → 不顯示
@@ -6740,7 +6741,7 @@ async function restoreSnapshot(id) {
 
 // ============== 網頁版本偵測 ==============
 // APP_VERSION 已在檔案頂端宣告（v2.2 新增）；此處不再重複宣告
-const APP_VERSION_KEY = 'freelance-tracker-app-version';
+const APP_VERSION_KEY = 'cloud-freelance-tracker-app-version';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
 let serverAppVersion = null;  // 由 pollAppVersion 更新，給 UI 顯示用
 
 // v2.7.5+: 終極強制刷新 — 清掉所有可能讓網頁卡舊版的東西
