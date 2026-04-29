@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="app-version" content="2026-04-27-v2.10.15">
+<meta name="theme-color" content="#3b82f6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Freelance">
+<title>外包收益與排程管理</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon.svg">
+<script>
+  // v2.9.6: CSS 也加 cache buster（必須在 link 出現前用 document.write）
+  document.write('<link rel="stylesheet" href="css/style.css?v=' + encodeURIComponent(document.querySelector('meta[name="app-version"]').content) + '">');
+</script>
+<!-- 請款單匯出（PDF / PNG）— 點按鈕時才動態載入，啟動不變慢 -->
+<script>
+  // 註冊 Service Worker（PWA — 可加入主畫面、離線可開）
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    });
+  }
+  // 動態載入外部 lib（避免啟動成本）
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Failed to load: ' + src));
+      document.head.appendChild(s);
+    });
+  }
+</script>
+</head>
+<body>
+
+<div class="top-bar">
+  <header>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+      <div style="flex: 1; min-width: 0;">
+        <h1 id="page-title">外包收益與排程管理</h1>
+        <div class="sub" id="page-sub">
+          個人自由工作者工具 ·
+          <span id="app-version-badge" onclick="hardReload()" style="font-family: monospace; font-size: 11px; padding: 1px 6px; background: var(--bg); border-radius: 4px; cursor: pointer;" title="點擊強制刷新（清除快取）">載入中…</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <button id="hard-reload-btn" onclick="hardReload()" title="強制刷新（清除所有快取、Service Worker、Cookie）" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text); white-space: nowrap;">🔄 刷新頁面</button>
+        <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;">📜 日誌</button>
+        <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;">主題:系統</button>
+        <div id="sync-indicator" class="sync-indicator sync-idle" onclick="switchTab('settings')" title="點擊開啟設定頁">○ 未啟用</div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="dashboard" class="active">總覽<span class="badge hidden" id="dash-badge"></span></button>
+    <button data-tab="jobs">案件</button>
+    <button data-tab="calendar">行事曆</button>
+    <button data-tab="revenue">收益</button>
+    <button data-tab="clients">業主</button>
+    <button data-tab="invoice">請款單</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+
+  <!-- 全域搜尋列 -->
+  <div class="global-search-bar">
+    <input type="search" id="global-search" placeholder="🔍 搜尋業主、案件、備註…" oninput="onGlobalSearch()" autocomplete="off">
+    <div id="global-search-results" class="global-search-results hidden"></div>
+  </div>
+</div>
+
+<main>
+  <!-- Dashboard -->
+  <section id="tab-dashboard">
+    <div class="alerts" id="alerts"></div>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="label">本月已收款</div>
+        <div class="value" id="stat-paid">$0</div>
+        <div class="delta" id="stat-paid-sub">0 筆</div>
+      </div>
+      <div class="stat warning">
+        <div class="label">本月待收款</div>
+        <div class="value" id="stat-unpaid">$0</div>
+        <div class="delta" id="stat-unpaid-sub" style="color: var(--warning);">0 筆</div>
+      </div>
+      <div class="stat">
+        <div class="label">本月待完成</div>
+        <div class="value" id="stat-pending">$0</div>
+        <div class="delta" id="stat-pending-sub" style="color: var(--muted);">0 筆</div>
+      </div>
+      <div class="stat">
+        <div class="label">年度已收款</div>
+        <div class="value" id="stat-year">$0</div>
+        <div class="delta" id="stat-year-sub"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h3 style="margin: 0;">近期案件</h3>
+        <button class="btn btn-outline btn-sm" id="dash-bulk-btn" onclick="toggleDashBulkMode()">☑️ 批次操作</button>
+      </div>
+      <div id="recent-jobs"></div>
+    </div>
+    <div class="card">
+      <h3>月度趨勢（最近 6 個月）</h3>
+      <div id="month-chart"></div>
+    </div>
+
+    <div class="card">
+      <h3>📊 年度收入對比</h3>
+      <div id="year-comparison"></div>
+      <div class="cta-link" onclick="switchTab('revenue')">
+        查看完整年度趨勢 →
+      </div>
+    </div>
+  </section>
+
+  <!-- Jobs -->
+  <section id="tab-jobs" class="hidden">
+    <div class="filter-bar" id="job-filter"></div>
+    <div class="card">
+      <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+        <button class="btn btn-outline btn-sm" id="bulk-toggle" onclick="toggleBulkMode()">☑️ 批次操作</button>
+      </div>
+      <div id="bulk-bar" class="bulk-bar hidden">
+        <span class="bulk-count" id="bulk-count">已選 0 筆</span>
+        <button class="btn btn-outline btn-sm" onclick="bulkSelectAll()">全選</button>
+        <button class="btn btn-outline btn-sm" onclick="bulkInvert()">反選</button>
+        <button class="btn btn-primary btn-sm" onclick="bulkMarkDone()">✓ 標記完成</button>
+        <button class="btn btn-primary btn-sm" onclick="bulkMarkPaid()">$ 標記已收</button>
+        <button class="btn btn-danger btn-sm" onclick="bulkDelete()">🗑️ 刪除</button>
+      </div>
+      <div id="jobs-list"></div>
+    </div>
+  </section>
+
+  <!-- Calendar -->
+  <section id="tab-calendar" class="hidden">
+    <div class="card">
+      <div class="cal-nav">
+        <button class="btn-icon" onclick="calPrev()">◀</button>
+        <h2 id="cal-title">—</h2>
+        <button class="btn-icon" onclick="calNext()">▶</button>
+        <button class="btn btn-outline btn-sm" onclick="calToday()">今天</button>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <div style="font-size: 11px; color: var(--muted); text-align: center; margin-top: 8px;">
+        方框內顏色=業主色 · 黃框=完成未收款 · 淡化=已收款 · 點卡片可編輯
+      </div>
+    </div>
+    <div class="card">
+      <h3 id="cal-list-title">本月排程列表</h3>
+      <div id="cal-list"></div>
+    </div>
+
+    <div class="card">
+      <h3>📌 未來 30 天排程</h3>
+      <div id="cal-upcoming"></div>
+    </div>
+  </section>
+
+  <!-- Revenue / Stats -->
+  <section id="tab-revenue" class="hidden">
+    <div class="card">
+      <div class="revenue-controls">
+        <div class="revenue-toggle">
+          <button id="rev-mode-month" class="active" onclick="setRevenueMode('month')">📅 月度</button>
+          <button id="rev-mode-year" onclick="setRevenueMode('year')">📊 年度</button>
+        </div>
+        <span class="rev-control-label">範圍</span>
+        <select class="revenue-select" id="rev-range" onchange="onRangeChange()"></select>
+        <span class="rev-control-label">業主</span>
+        <select class="revenue-select" id="rev-client" onchange="renderRevenue()"></select>
+      </div>
+
+      <!-- 自訂範圍（月度模式）-->
+      <div id="rev-custom-month" class="hidden" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+        <span style="font-size: 13px; color: var(--muted);">月份範圍：</span>
+        <input type="month" id="rev-from-month" onchange="renderRevenue()" style="max-width: 140px;">
+        <span style="color: var(--muted);">~</span>
+        <input type="month" id="rev-to-month" onchange="renderRevenue()" style="max-width: 140px;">
+      </div>
+
+      <!-- 自訂範圍（年度模式）-->
+      <div id="rev-custom-year" class="hidden" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+        <span style="font-size: 13px; color: var(--muted);">年份範圍：</span>
+        <input type="number" id="rev-from-year" min="2000" max="2099" placeholder="2024" onchange="renderRevenue()" style="max-width: 100px;">
+        <span style="color: var(--muted);">~</span>
+        <input type="number" id="rev-to-year" min="2000" max="2099" placeholder="2026" onchange="renderRevenue()" style="max-width: 100px;">
+      </div>
+
+      <div class="summary-grid" id="rev-summary"></div>
+    </div>
+
+    <div class="card">
+      <h3 id="rev-chart-title">月度收益趨勢</h3>
+      <div class="chart-container">
+        <svg class="chart-svg" id="rev-chart" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="chart-legend">
+        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--success)"></div>已收款</div>
+        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--warning)"></div>待收款</div>
+        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--muted); opacity:.5"></div>進行中</div>
+        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--primary)"></div>當期趨勢</div>
+        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: #a855f7;"></div>累計收入</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>業主貢獻排行</h3>
+      <div id="rev-client-rank"></div>
+    </div>
+
+    <div class="card">
+      <h3>🥧 案件類型分佈</h3>
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">依「類型/標籤」欄位分類已收款案件（沒填類型 = 未分類）</p>
+      <div id="rev-tag-pie"></div>
+    </div>
+
+    <div class="card">
+      <h3>🔥 工作熱圖（最近 365 天）</h3>
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">每格代表一天的收款金額，顏色越深 = 那天越忙</p>
+      <div id="rev-heatmap"></div>
+    </div>
+
+    <!-- v2.9: 收款時間軸 -->
+    <div class="card">
+      <h3>💵 收款時間軸（最近 12 個月）</h3>
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">每個月實際入帳金額（按 payment 日期歸月）</p>
+      <div id="rev-payment-timeline"></div>
+    </div>
+
+    <!-- v2.7: 忙閒週期 -->
+    <div class="card">
+      <h3>📅 忙閒週期分析</h3>
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">過去全部歷史的月份分布與週幾分布</p>
+      <div id="rev-busy-cycle"></div>
+    </div>
+
+    <!-- v2.7: 時薪趨勢 -->
+    <div class="card">
+      <h3>💰 個人時薪趨勢</h3>
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">統計有填工時的案件，計算每月平均時薪</p>
+      <div id="rev-hourly-trend"></div>
+    </div>
+
+    <div class="card">
+      <h3>📋 月度業主彙整</h3>
+      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+        <label style="margin: 0;">月份：</label>
+        <select id="report-month" onchange="renderMonthlyReport()" class="revenue-select"></select>
+        <button class="btn btn-outline btn-sm" onclick="exportMonthlyReportCSV()">📊 匯出 CSV</button>
+      </div>
+      <div id="rev-monthly-report"></div>
+    </div>
+  </section>
+
+  <!-- Clients -->
+  <section id="tab-clients" class="hidden">
+    <div class="card">
+      <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;">
+        <input type="search" id="client-search" placeholder="🔍 搜尋業主名稱..." style="flex: 1; min-width: 180px;" oninput="renderClients()">
+        <select id="client-sort" onchange="renderClients()" class="revenue-select" style="min-width: 130px;">
+          <option value="recent">依最近活動</option>
+          <option value="total">依累計金額</option>
+          <option value="unpaid">依待收款</option>
+          <option value="name">依名稱</option>
+        </select>
+      </div>
+      <div id="clients-list"></div>
+    </div>
+  </section>
+
+  <!-- Invoice -->
+  <section id="tab-invoice" class="hidden">
+    <div class="card no-print">
+      <label>選擇業主</label>
+      <select id="inv-client"></select>
+
+      <label>請款範圍</label>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+        <select id="inv-mode" onchange="onInvModeChange()" style="flex: 0 0 auto;">
+          <option value="single">單月</option>
+          <option value="range">月份區間</option>
+        </select>
+        <select id="inv-month" style="flex: 1; min-width: 120px;"></select>
+        <span id="inv-range-sep" class="hidden" style="color: var(--muted);">~</span>
+        <select id="inv-month-end" class="hidden" style="flex: 1; min-width: 120px;"></select>
+      </div>
+
+      <!-- v2.10.13：選擇收款帳號（多筆收款資訊時用） -->
+      <label style="margin-top: 12px;">收款帳號</label>
+      <select id="inv-pay-account" onchange="onInvPayAccountChange()"></select>
+
+      <!-- v2.10.5：請款單狀態篩選 — preset 按鈕 + 常駐 checkbox -->
+      <label style="margin-top: 12px;">顯示狀態</label>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('pending')" title="只顯示已完成待收 + 部分收款">📋 請款</button>
+        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('reconcile')" title="所有已完成（含已收款）">✅ 對帳</button>
+        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('progress')" title="只顯示進行中">🔄 進度</button>
+        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('all')" title="所有狀態">📦 全部</button>
+        <span id="inv-status-hint" style="font-size: 12px; color: var(--muted); margin-left: 4px;"></span>
+      </div>
+      <!-- 5 個狀態 checkbox，常駐顯示 -->
+      <div style="margin-top: 8px; padding: 10px; background: var(--bg); border-radius: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px;">
+          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-done-unpaid" onchange="onInvoiceStatusChange()"><span>$ 已完成待收款</span></label>
+          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-partial" onchange="onInvoiceStatusChange()"><span>🔶 部分收款</span></label>
+          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-paid" onchange="onInvoiceStatusChange()"><span>✓ 已完成已收款</span></label>
+          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-pending" onchange="onInvoiceStatusChange()"><span>🔄 進行中</span></label>
+          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-cancelled" onchange="onInvoiceStatusChange()"><span>🚫 已取消</span></label>
+        </div>
+      </div>
+
+      <div style="display:flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;">
+        <button class="btn btn-primary" onclick="exportInvoicePDF()">📄 下載 PDF</button>
+        <button class="btn btn-primary" onclick="exportInvoicePNG()">🖼️ 下載圖片</button>
+        <button class="btn btn-outline" onclick="copyInvoiceImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email">📋 複製圖片</button>
+        <button class="btn btn-outline" onclick="window.print()">🖨️ 列印</button>
+        <button class="btn btn-outline" onclick="copyInvoiceText()">📋 複製純文字</button>
+      </div>
+    </div>
+    <div id="invoice-view"></div>
+  </section>
+
+  <!-- Settings -->
+  <section id="tab-settings" class="hidden">
+
+    <!-- ============== 一般設定 ============== -->
+    <!-- v2.10.3：重組分類 — 我的資料、通知與提醒、資料備份 -->
+    <div class="settings-section-title">🌟 常用設定</div>
+
+    <!-- 我的收款資訊（v2.10.13：bank/account 改成多筆收款帳號） -->
+    <div class="card collapsible" id="card-myinfo">
+      <div class="card-head" onclick="toggleCard('card-myinfo')">
+        <h3>👤 我的收款資訊</h3>
+        <span class="card-status">會顯示在請款單</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">填寫後，產生的請款單會自動帶入，業主拿到就知道怎麼付款。可以新增多組收款帳號，請款時再選擇要用哪一組。</p>
+        <div class="my-info-grid">
+          <div>
+            <label>姓名</label>
+            <input type="text" id="me-name" placeholder="王小明">
+          </div>
+          <div>
+            <label>電話</label>
+            <input type="text" id="me-phone" placeholder="0912-345-678">
+          </div>
+          <div>
+            <label>Email</label>
+            <input type="email" id="me-email" placeholder="you@example.com">
+          </div>
+          <div>
+            <label>發票抬頭（若有）</label>
+            <input type="text" id="me-title" placeholder="工作室名稱">
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong style="font-size: 14px;">💳 收款帳號</strong>
+            <button type="button" class="btn btn-outline btn-sm" onclick="addPaymentAccount()">+ 新增帳號</button>
+          </div>
+          <div id="payment-accounts-list"></div>
+        </div>
+
+        <label style="margin-top: 12px;">備註（列在請款單底部）</label>
+        <textarea id="me-note" placeholder="例：匯款後請告知末五碼..."></textarea>
+        <button class="btn btn-primary btn-sm" style="margin-top: 12px;" onclick="saveUserInfo()">儲存</button>
+      </div>
+    </div>
+
+    <!-- 通知與提醒（合併「桌面通知 + 提醒設定」）-->
+    <div class="card collapsible collapsed" id="card-reminder">
+      <div class="card-head" onclick="toggleCard('card-reminder')">
+        <h3>🔔 通知與提醒</h3>
+        <span class="card-status">桌面通知 + 提醒項目</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+
+        <!-- 瀏覽器桌面通知（從原「通知與訂閱」搬過來） -->
+        <div style="margin-bottom: 16px; padding: 12px; background: var(--bg); border-radius: 8px;">
+          <label style="font-size: 13px; font-weight: 600;">🖥️ 瀏覽器桌面通知</label>
+          <p style="font-size: 12px; color: var(--muted); margin: 2px 0 6px;">
+            開啟後，每天首次開頁時若有逾期、即將到期、拖款的案件，會跳系統通知。<br>
+            ⚠️ 僅在 APP 開啟時運作；若 PWA 安裝到桌面，效果類似原生 APP。
+          </p>
+          <div id="notif-status" style="font-size: 13px; padding: 6px 10px; background: var(--card); border-radius: 6px; margin-bottom: 6px;"></div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-primary btn-sm" id="notif-enable-btn" onclick="requestNotifPermission()">啟用通知</button>
+            <button class="btn btn-outline btn-sm hidden" id="notif-disable-btn" onclick="disableNotif()">停用通知</button>
+            <button class="btn btn-ghost btn-sm" onclick="sendTestNotification()">🧪 試發一則</button>
+          </div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <p style="font-size: 13px; color: var(--muted); margin: 12px 0;">每種提醒可獨立啟用/關閉、調整天數。業主層級可在業主編輯頁覆寫。</p>
+
+        <div style="display: grid; gap: 10px;">
+
+          <div style="background: var(--bg); padding: 10px; border-radius: 8px;">
+            <label class="checkbox-row" style="margin: 0 0 4px;">
+              <input type="checkbox" id="cfg-alert-overdue">
+              <span>🔴 逾期未完成（過了案件日期還沒勾完成）</span>
+            </label>
+          </div>
+
+          <div style="background: var(--bg); padding: 10px; border-radius: 8px;">
+            <label class="checkbox-row" style="margin: 0 0 4px;">
+              <input type="checkbox" id="cfg-alert-due-soon">
+              <span>🟡 即將到期</span>
+            </label>
+            <div style="display: flex; gap: 8px; align-items: center; padding-left: 22px; font-size: 13px;">
+              <span>提前</span>
+              <input type="number" id="cfg-due-soon-days" min="1" max="30" value="3" style="max-width: 80px;">
+              <span>天提醒</span>
+            </div>
+          </div>
+
+          <div style="background: var(--bg); padding: 10px; border-radius: 8px;">
+            <label class="checkbox-row" style="margin: 0 0 4px;">
+              <input type="checkbox" id="cfg-alert-unpaid-long">
+              <span>🟠 完成已久未收款（全域預設）</span>
+            </label>
+            <div style="display: flex; gap: 8px; align-items: center; padding-left: 22px; font-size: 13px;">
+              <span>完成超過</span>
+              <input type="number" id="cfg-unpaid-days-input" min="1" max="120" value="7" style="max-width: 80px;">
+              <span>天就提醒（個別業主可在業主頁覆寫）</span>
+            </div>
+          </div>
+
+          <div style="background: var(--bg); padding: 10px; border-radius: 8px;">
+            <label class="checkbox-row" style="margin: 0 0 4px;">
+              <input type="checkbox" id="cfg-alert-month-end">
+              <span>📅 月底提醒</span>
+            </label>
+            <div style="display: flex; gap: 8px; align-items: center; padding-left: 22px; font-size: 13px;">
+              <span>每月</span>
+              <input type="number" id="cfg-month-end-day" min="20" max="31" value="25" style="max-width: 80px;">
+              <span>號之後開始提醒可請款</span>
+            </div>
+          </div>
+
+          <div style="background: var(--bg); padding: 10px; border-radius: 8px;">
+            <label class="checkbox-row" style="margin: 0;">
+              <input type="checkbox" id="cfg-alert-billing-day">
+              <span>💼 業主固定請款日（依業主設定的請款日提前 N 天提醒）</span>
+            </label>
+          </div>
+
+          <div style="background: var(--bg); padding: 10px; border-radius: 8px;">
+            <label class="checkbox-row" style="margin: 0;">
+              <input type="checkbox" id="cfg-alert-slow-pay">
+              <span>⏱️ 智慧拖款警告（依該業主歷史平均收款週期判斷異常）</span>
+            </label>
+          </div>
+
+          <div style="background: var(--bg); padding: 10px; border-radius: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center; font-size: 13px;">
+              <span>💾 備份提醒：超過</span>
+              <input type="number" id="cfg-backup-days-input" min="1" max="90" value="14" style="max-width: 80px;">
+              <span>天沒匯出備份就提醒</span>
+            </div>
+          </div>
+
+        </div>
+
+        <button class="btn btn-primary btn-sm" style="margin-top: 12px;" onclick="saveConfig()">💾 儲存</button>
+      </div>
+    </div>
+
+    <!-- 資料備份 -->
+    <div class="card collapsible collapsed" id="card-backup">
+      <div class="card-head" onclick="toggleCard('card-backup')">
+        <h3>💾 資料備份</h3>
+        <span class="card-status" id="backup-status">—</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+          建議每週匯出一次資料備份檔，存雲端硬碟。
+        </p>
+        <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-sm" onclick="exportData()">📤 匯出 JSON 備份</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('import-file').click()">📥 匯入備份</button>
+          <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+          <button class="btn btn-outline btn-sm" onclick="exportCSV()">📊 匯出 CSV（做帳用）</button>
+        </div>
+        <div class="section-divider"></div>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">⚠️ 危險操作：</p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-outline btn-sm" id="demo-btn" onclick="loadDemo()">載入範例資料</button>
+          <button class="btn btn-danger btn-sm" onclick="clearAll()">清空所有資料</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============== 進階設定 ============== -->
+    <div class="settings-section-title">🔧 進階設定</div>
+
+    <!-- 雲端同步 -->
+    <div class="card collapsible collapsed" id="card-cloud">
+      <div class="card-head" onclick="toggleCard('card-cloud')">
+        <h3>☁️ 雲端同步</h3>
+        <span class="card-status" id="sheet-sync-status">未連接</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+          連到雲端後，多台裝置自動同步資料。每次改動 2 秒內自動上傳。
+        </p>
+
+        <label>雲端 API 連結</label>
+        <input type="text" id="sheet-api" placeholder="https://script.google.com/macros/s/.../exec">
+        <label>Google Sheet 連結（選填，僅記錄用）</label>
+        <input type="text" id="sheet-url" placeholder="https://docs.google.com/spreadsheets/d/...">
+        <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+          <button class="btn btn-outline btn-sm" onclick="saveSheetConfig()">儲存</button>
+          <button class="btn btn-outline btn-sm" onclick="testSheetConnection()">測試連線</button>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-sm" onclick="enableSheetSync()">🚀 開啟自動同步</button>
+          <button class="btn btn-outline btn-sm" onclick="disableSheetSync()">關閉自動同步</button>
+        </div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+          <button class="btn btn-outline btn-sm" onclick="pullFromSheet(false)">⬇️ 從雲端下載</button>
+          <button class="btn btn-outline btn-sm" onclick="pushToSheet(false)">⬆️ 上傳到雲端</button>
+          <button class="btn btn-outline btn-sm" onclick="showSnapshotList()">🗂️ 備份歷史</button>
+          <button class="btn btn-outline btn-sm" onclick="showHealthCheckModal()">🩺 資料健檢</button>
+          <button class="btn btn-outline btn-sm" onclick="showCloudCapacity()">📊 容量監控</button>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <!-- 手動 Snapshot -->
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 13px;">手動建立備份（永久保留，不會被自動清理）</label>
+          <p style="font-size: 11px; color: var(--muted); margin: 2px 0 6px;">
+            重要時間點建議手動建一次（例：月底結算前、大量編輯前）
+          </p>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="manual-snapshot-note" placeholder="備註（例：4月結算前）" style="flex: 1;">
+            <button class="btn btn-primary btn-sm" onclick="manualSnapshot()">📸 建立備份</button>
+          </div>
+        </div>
+
+        <!-- 每日強制 Snapshot Trigger -->
+        <div style="margin-bottom: 4px;">
+          <button class="btn btn-outline btn-sm" onclick="setupDailyForceTrigger()">⏰ 啟用每日強制備份（凌晨 03:00）</button>
+          <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+            每天凌晨 3 點 Apps Script 自動跑一次強制 snapshot，永久保留。即使所有 PC 都關機也會跑（雲端排程）。首次設定時 Google 會要求授權。
+          </p>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <!-- 裝置名稱（只存本機） -->
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 13px;">裝置名稱（顯示在備份歷史，方便辨識是哪台 PC 上傳）</label>
+          <p style="font-size: 11px; color: var(--muted); margin: 2px 0 6px;">
+            ⚠️ 瀏覽器無法讀取 Windows 的電腦名稱（沙盒安全限制），所以系統會自動給你一個 <code>OS-隨機4碼</code> 的識別（例：<code>Windows-A7F3</code>）。建議改成自己看得懂的名字。<br>
+            這個欄位只存在這台電腦本機，不會同步到雲端。
+          </p>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="cfg-device-name" placeholder="例：工作室 Win" style="flex: 1;">
+            <button class="btn btn-primary btn-sm" onclick="setDeviceName(document.getElementById('cfg-device-name').value)">儲存</button>
+          </div>
+          <div id="cfg-device-name-current" style="font-size: 12px; color: var(--muted); margin-top: 6px; padding: 6px 8px; background: var(--bg); border-radius: 6px;"></div>
+          <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+            <button class="btn btn-outline btn-sm" onclick="requestPreciseLocation()">🎯 啟用精確位置（GPS，可看到「區」）</button>
+            <button class="btn btn-ghost btn-sm" onclick="clearPreciseLocation()">清除</button>
+          </div>
+          <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+            預設只用 IP 抓到城市（例：Taipei）。<br>
+            點上方按鈕會請求 GPS 權限，反向解析後可拿到「區」（例：台北市 信義區）。<br>
+            位置資訊只用於備份歷史的辨識，不會傳給其他第三方。
+          </p>
+        </div>
+
+        <div style="background: var(--success-light); padding: 10px; border-radius: 8px; font-size: 12px; color: var(--success); margin-top: 4px;">
+          ☁️ <b>雲端優先</b> 與 <b>每 30 秒自動偵測</b> 已永久啟用，確保多裝置同步、不會被舊資料覆蓋。
+        </div>
+
+        <div class="section-divider"></div>
+
+        <!-- Lab / 開發模式 -->
+        <div style="margin-top: 8px;">
+          <label class="checkbox-row" style="margin: 0;">
+            <input type="checkbox" id="cfg-lab-mode" onchange="toggleLabMode()">
+            <span>🧪 開發模式 — 暫停所有 push（pull 仍正常）</span>
+          </label>
+          <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+            當你要測試新功能、或不確定某次操作是否安全時開啟。所有編輯只存本地、不會推到雲端，異地裝置不受影響。<br>
+            測試完記得關閉，並用「⬆️ 上傳到雲端」按鈕手動推一次（如果想保留變更）。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Google Calendar -->
+    <div class="card collapsible collapsed" id="card-calendar">
+      <div class="card-head" onclick="toggleCard('card-calendar')">
+        <h3>📅 Google 行事曆</h3>
+        <span class="card-status" id="cal-status-badge">未設定</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+          案件同步到 Google 行事曆，用手機原生通知提醒。<br>
+          ✨ <b>v2.10.2</b>：會把「提醒設定」中所有勾選的提醒類型一起同步成事件
+          （逾期、即將到期、完成已久未收款、月底提醒、業主請款日、智慧拖款警告）。
+        </p>
+
+        <div class="form-row">
+          <label>啟用同步</label>
+          <label class="toggle line-toggle">
+            <input type="checkbox" id="cal-enabled"><span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <label>行事曆代碼</label>
+        <input type="text" id="cal-id" placeholder="example@group.calendar.google.com">
+
+        <label style="margin-top: 12px;">事件提醒時間</label>
+        <select id="cal-reminder-mode">
+          <option value="follow">跟隨「即將到期」設定</option>
+          <option value="0">不提醒</option>
+          <option value="60">事件前 1 小時</option>
+          <option value="180">事件前 3 小時</option>
+          <option value="480">事件前 8 小時</option>
+          <option value="960">事件前 16 小時</option>
+          <option value="1440">事件前 1 天</option>
+          <option value="2880">事件前 2 天</option>
+          <option value="4320">事件前 3 天</option>
+          <option value="10080">事件前 7 天</option>
+        </select>
+        <p style="font-size: 12px; color: var(--muted); margin-top: 4px;" id="cal-reminder-hint">
+          套用範圍：Google 行事曆同步事件、iCal 訂閱通知。
+        </p>
+
+        <div class="form-row" style="margin-top: 12px;">
+          <label>新增/修改後自動同步</label>
+          <label class="toggle">
+            <input type="checkbox" id="cal-autosync"><span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div id="cal-sync-status" style="font-size: 13px; color: var(--muted); margin-bottom: 12px;"></div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-sm" onclick="saveCalendarConfig()">儲存</button>
+          <button class="btn btn-outline btn-sm" onclick="testCalendarConnection()">測試連線</button>
+          <button class="btn btn-outline btn-sm" onclick="syncCalendarNow()">🔄 現在同步</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 跨裝置設定檔（v2.10.3 從常用搬到進階）-->
+    <div class="card collapsible collapsed" id="card-portable">
+      <div class="card-head" onclick="toggleCard('card-portable')">
+        <h3>📦 跨裝置設定檔</h3>
+        <span class="card-status">換裝置免重填</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+          把目前所有設定打包成檔案，新裝置匯入就不用再填一次。<br>
+          <span style="color: var(--warning);">⚠️ 此檔案含連線密碼，請放隨身碟或密碼管理器，勿傳到 Email、聊天群組。</span>
+        </p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-sm" onclick="exportSettings()">📤 匯出</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('settings-import-file').click()">📥 匯入</button>
+          <input type="file" id="settings-import-file" accept=".json" style="display:none" onchange="importSettings(event)">
+        </div>
+      </div>
+    </div>
+
+    <!-- 顯示主題（v2.10.3 從常用搬到進階；右上有快捷按鈕）-->
+    <div class="card collapsible collapsed" id="card-theme">
+      <div class="card-head" onclick="toggleCard('card-theme')">
+        <h3>🌗 顯示主題</h3>
+        <span class="card-status">深色 / 淺色 / 自動</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">選擇 APP 的顏色主題。「自動」會跟著系統設定切換。<br>右上角的「主題」按鈕可以快速切換。</p>
+        <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+          <label class="checkbox-row" style="margin: 0;">
+            <input type="radio" name="theme-mode" value="auto" onchange="setTheme('auto')">
+            <span>🪄 自動（跟隨系統）</span>
+          </label>
+          <label class="checkbox-row" style="margin: 0;">
+            <input type="radio" name="theme-mode" value="light" onchange="setTheme('light')">
+            <span>☀️ 淺色</span>
+          </label>
+          <label class="checkbox-row" style="margin: 0;">
+            <input type="radio" name="theme-mode" value="dark" onchange="setTheme('dark')">
+            <span>🌙 深色</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 關於 -->
+    <div style="text-align: center; font-size: 12px; color: var(--muted); padding: 24px 0 0;">
+      <a onclick="showOnboardingAgain()" style="color: var(--primary); cursor: pointer; font-size: 12px;">↻ 再次顯示歡迎引導</a>
+      <div style="margin-top: 6px; font-size: 11px;">外包收益管理工具 · v1.3</div>
+    </div>
+  </section>
+
+</main>
+
+<button class="fab" id="fab-add" onclick="openJobModal()">＋ 新增案件</button>
+
+<!-- Modal: Add/Edit Job -->
+<div class="modal-bg" id="job-modal">
+  <div class="modal">
+    <h2 id="job-modal-title">新增案件</h2>
+    <label>業主</label>
+    <select id="job-client" onchange="onJobClientChange()"></select>
+    <div id="job-prepaid-hint" class="hidden" style="background: var(--success-light); color: var(--success); padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-top: 4px;"></div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+      <div>
+        <label>開始日期</label>
+        <input type="date" id="job-date">
+      </div>
+      <div>
+        <label>截止日（選填）</label>
+        <input type="date" id="job-end-date" placeholder="跨天案件才填">
+      </div>
+    </div>
+
+    <label>案件名稱</label>
+    <input type="text" id="job-title" placeholder="例：首頁 banner 設計">
+
+    <label>類型 / 標籤（選填）<span style="color: var(--muted); font-size: 12px; font-weight: 400;">　例：廣告、設計、動畫</span></label>
+    <input type="text" id="job-tag" placeholder="自由輸入" list="tag-suggestions">
+    <datalist id="tag-suggestions"></datalist>
+
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <label style="margin: 0;">細項說明（業主看得到）</label>
+      <div style="display: flex; gap: 4px;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="openTemplatePicker()" style="font-size: 12px;">📋 範本</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="saveCurrentAsTemplate()" style="font-size: 12px;">💾 存範本</button>
+      </div>
+    </div>
+    <textarea id="job-details" placeholder="例：1280x400 banner x 2 張，含兩次修改"></textarea>
+    <div id="template-picker" class="hidden" style="background: var(--bg); border-radius: 8px; padding: 8px; margin-top: -4px; margin-bottom: 8px; max-height: 200px; overflow-y: auto;"></div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+      <div>
+        <label>金額（原價）</label>
+        <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary()">
+      </div>
+      <div>
+        <label>工時（小時，選填）</label>
+        <input type="number" id="job-hours" placeholder="0" step="0.5" oninput="updateJobHourlyHint()">
+      </div>
+    </div>
+
+    <!-- v2.8.0: 折扣 -->
+    <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 8px;">
+      <label style="margin: 0 0 4px;">折扣（選填）</label>
+      <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 6px;">
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="radio" name="job-discount-type" value="none" onchange="onDiscountTypeChange()">
+          <span>無</span>
+        </label>
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="radio" name="job-discount-type" value="fixed" onchange="onDiscountTypeChange()">
+          <span>折扣金額（NT$）</span>
+        </label>
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="radio" name="job-discount-type" value="percent" onchange="onDiscountTypeChange()">
+          <span>折扣百分比（%）</span>
+        </label>
+      </div>
+      <input type="number" id="job-discount-value" placeholder="0" min="0" oninput="updateJobAmountSummary()" disabled>
+    </div>
+
+    <div id="job-amount-summary" style="background: var(--primary-light); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-bottom: 8px; min-height: 16px;"></div>
+
+    <div id="job-hourly-hint" style="font-size: 12px; color: var(--muted); margin-top: -4px; margin-bottom: 6px; min-height: 16px;"></div>
+
+    <!-- v2.6: 計時器 -->
+    <div id="job-timer-box" style="background: var(--bg); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px;">
+      <div style="font-size: 12px; color: var(--muted);">⏱️ 計時器</div>
+      <div id="job-timer-display" style="font-family: monospace; font-size: 18px; font-weight: 600; flex: 1;">00:00:00</div>
+      <button type="button" class="btn btn-primary btn-sm" id="job-timer-toggle" onclick="toggleJobTimer()">▶ 開始</button>
+      <button type="button" class="btn btn-outline btn-sm" id="job-timer-finish" onclick="finishJobTimer()">✓ 結束計時</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="resetJobTimer()">重設</button>
+    </div>
+
+    <!-- v2.6: 子任務 / Checklist -->
+    <div style="margin-bottom: 8px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <label style="margin: 0;">子任務 <span id="job-subtasks-counter" style="color: var(--muted); font-size: 12px; font-weight: 400;"></span></label>
+      </div>
+      <div id="job-subtasks-list" style="margin: 4px 0;"></div>
+      <div style="display: flex; gap: 6px;">
+        <input type="text" id="job-subtask-input" placeholder="輸入子任務按 Enter 新增" onkeydown="if(event.key==='Enter'){event.preventDefault();addJobSubtask();}">
+        <button type="button" class="btn btn-outline btn-sm" onclick="addJobSubtask()">＋</button>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; margin-top: 12px;">
+      <label for="job-done" class="checkbox-row" style="margin: 0;">
+        <input type="checkbox" id="job-done" onchange="onJobDoneChange()">
+        <span>✓ 案件完成</span>
+      </label>
+      <input type="date" id="job-done-at" placeholder="完成日（自動填今日）" style="font-size: 13px;">
+    </div>
+
+    <!-- v2.8.0: 收款狀況（取代單一 paid checkbox） -->
+    <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-top: 8px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <label style="margin: 0; font-size: 13px; font-weight: 600;">💰 收款狀況</label>
+        <span id="job-payment-status-badge" style="font-size: 12px;"></span>
+      </div>
+      <div id="job-payment-summary" style="font-size: 12px; color: var(--muted); margin-bottom: 8px;"></div>
+
+      <!-- 收款紀錄列表 -->
+      <div id="job-payments-list" style="margin-bottom: 8px;"></div>
+
+      <!-- 新增收款 inline 表單 -->
+      <div id="job-payment-add-form" class="hidden" style="background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+          <div>
+            <label style="font-size: 11px; color: var(--muted);">收款日期</label>
+            <input type="date" id="job-payment-add-date">
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--muted);">金額</label>
+            <input type="number" id="job-payment-add-amount" min="0">
+          </div>
+        </div>
+        <input type="text" id="job-payment-add-note" placeholder="備註（選填，例：訂金、尾款）" style="margin-bottom: 6px;">
+        <div style="display: flex; gap: 6px; justify-content: flex-end;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="cancelAddJobPayment()">取消</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="confirmAddJobPayment()">確認新增</button>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-outline btn-sm" id="job-payment-add-btn" onclick="openAddJobPayment()">+ 新增收款</button>
+      <button type="button" class="btn btn-success btn-sm" onclick="markJobFullyPaid()">✓ 一次收齊餘額</button>
+
+      <!-- 呆帳 -->
+      <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);">
+        <label style="font-size: 12px; color: var(--muted);">呆帳金額（永遠收不到的部分，不計入收益）</label>
+        <input type="number" id="job-write-off" min="0" placeholder="0" oninput="updateJobAmountSummary()">
+      </div>
+    </div>
+
+    <label for="job-cancelled" class="checkbox-row danger-checkbox">
+      <input type="checkbox" id="job-cancelled">
+      <span>🚫 已取消（不計入收益統計但保留紀錄）</span>
+    </label>
+
+    <!-- v2.6: 估價單模式 -->
+    <label for="job-estimate" class="checkbox-row" style="background: var(--warning-light); padding: 8px 10px; border-radius: 6px;">
+      <input type="checkbox" id="job-estimate">
+      <span>📄 估價單模式（草稿；不計入統計，業主確認後可轉正）</span>
+    </label>
+
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeJobModal()">取消</button>
+      <button class="btn btn-outline hidden" id="job-duplicate-btn" onclick="duplicateJob()">📋 複製為新</button>
+      <button class="btn btn-outline hidden" id="job-export-estimate-btn" onclick="exportSingleJobPDF()">📄 估價單 PDF</button>
+      <button class="btn btn-success hidden" id="job-confirm-estimate-btn" onclick="confirmEstimateAsJob()">✓ 接案：轉為正式</button>
+      <button class="btn btn-danger hidden" id="job-delete-btn" onclick="deleteJob()">刪除</button>
+      <button class="btn btn-primary" onclick="saveJob()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Add/Edit Client -->
+<div class="modal-bg" id="client-modal">
+  <div class="modal">
+    <h2 id="client-modal-title">新增業主</h2>
+    <label>業主名稱</label>
+    <input type="text" id="client-name" placeholder="例：A 公司">
+    <label>顏色標記</label>
+    <div id="color-picker" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+    <label>備註（例：聯絡人、匯款帳號等）</label>
+    <textarea id="client-note"></textarea>
+
+    <div class="section-divider"></div>
+
+    <h3 style="font-size: 14px; margin-bottom: 8px;">💳 付款方式</h3>
+    <div style="display: flex; gap: 16px; margin-bottom: 8px;">
+      <label style="display: flex; gap: 6px; align-items: center; cursor: pointer; font-size: 14px;">
+        <input type="radio" name="client-payment-mode" value="normal" style="width: auto; margin: 0;" onchange="onPaymentModeChange()">
+        <span>一般（按案件請款）</span>
+      </label>
+      <label style="display: flex; gap: 6px; align-items: center; cursor: pointer; font-size: 14px;">
+        <input type="radio" name="client-payment-mode" value="prepaid" style="width: auto; margin: 0;" onchange="onPaymentModeChange()">
+        <span>💰 儲值制（業主先預付）</span>
+      </label>
+    </div>
+
+    <div id="prepayment-section" class="hidden" style="background: var(--bg); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+      <h4 style="font-size: 13px; margin-bottom: 8px;">儲值紀錄</h4>
+      <div id="prepayment-list" style="margin-bottom: 8px;"></div>
+
+      <!-- Inline 新增表單 (預設隱藏) -->
+      <div id="prepayment-add-form" class="hidden" style="background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+          <div>
+            <label style="font-size: 11px; color: var(--muted);">儲值日期</label>
+            <input type="date" id="prepayment-add-date">
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--muted);">金額</label>
+            <input type="number" id="prepayment-add-amount" min="0" step="100" placeholder="0">
+          </div>
+        </div>
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 11px; color: var(--muted);">備註（選填）</label>
+          <input type="text" id="prepayment-add-note" placeholder="例：LINEPAY、轉帳">
+        </div>
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button class="btn btn-ghost btn-sm" type="button" onclick="cancelAddPrepayment()">取消</button>
+          <button class="btn btn-primary btn-sm" type="button" onclick="confirmAddPrepayment()">確認新增</button>
+        </div>
+      </div>
+
+      <button id="prepayment-add-btn" class="btn btn-outline btn-sm" type="button" onclick="openAddPrepayment()">+ 新增儲值</button>
+      <div id="prepayment-balance" style="margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 13px;"></div>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <h3 style="font-size: 14px; margin-bottom: 8px;">💰 介紹人 / 分潤設定（選填）</h3>
+    <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+      若這個業主是透過介紹人接洽、需給介紹人抽成，填這裡。統計時會自動計算「實收金額」。
+    </p>
+    <div style="display: grid; grid-template-columns: 1fr 100px; gap: 8px;">
+      <div>
+        <label>介紹人</label>
+        <select id="client-commission-to">
+          <option value="">— 無 —</option>
+        </select>
+      </div>
+      <div>
+        <label>抽成 %</label>
+        <input type="number" id="client-commission-rate" min="0" max="100" step="0.5" placeholder="0">
+      </div>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- v2.7.9: 請款設定 -->
+    <h3 style="font-size: 14px; margin-bottom: 8px;">💼 請款設定（選填）</h3>
+    <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+      若此業主有固定請款日（例：每月 15 號），系統會在請款日前 N 天提醒。
+    </p>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+      <div>
+        <label>固定請款日</label>
+        <select id="client-billing-day">
+          <option value="0">— 無固定 —</option>
+        </select>
+      </div>
+      <div>
+        <label>提前幾天提醒</label>
+        <input type="number" id="client-billing-remind-days" min="1" max="30" value="3" placeholder="3">
+      </div>
+    </div>
+
+    <label style="margin-top: 8px;">該業主的「未收款提醒天數」（可覆寫全域）</label>
+    <input type="number" id="client-unpaid-override" min="1" max="120" placeholder="留空 = 用全域設定">
+    <p style="font-size: 11px; color: var(--muted); margin-top: 2px;">
+      留空就走設定頁的全域天數。某些業主收款慢，可單獨調高（例如 30 天才提醒）。
+    </p>
+
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeClientModal()">取消</button>
+      <button class="btn btn-danger hidden" id="client-delete-btn" onclick="deleteClient()">刪除</button>
+      <button class="btn btn-primary" onclick="saveClient()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- v2.9.5: 操作日誌 Modal -->
+<div class="modal-bg" id="action-log-modal">
+  <div class="modal" style="max-width: 640px;">
+    <h2>📜 操作日誌</h2>
+    <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">最近 <span id="action-log-count">0</span> 筆操作（只存本機，最多 500 筆）</p>
+    <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; align-items: center;">
+      <select id="log-filter-type" onchange="renderActionLog()" style="font-size: 12px; padding: 4px 6px;"></select>
+      <select id="log-filter-client" onchange="renderActionLog()" style="font-size: 12px; padding: 4px 6px;"></select>
+      <select id="log-filter-date" onchange="renderActionLog()" style="font-size: 12px; padding: 4px 6px;">
+        <option value="all">全部時間</option>
+        <option value="today">今天</option>
+        <option value="yesterday">昨天</option>
+        <option value="week">最近 7 天</option>
+        <option value="month">最近 30 天</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="clearActionLog()" style="margin-left: auto;">🗑️ 清空</button>
+    </div>
+    <div id="action-log-list" style="max-height: 60vh; overflow-y: auto; font-size: 13px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('action-log-modal').classList.remove('open')">關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- v2.9.5: Snapshot Diff Modal（z-index 高一級，疊在備份歷史 modal 之上）-->
+<div class="modal-bg" id="snapshot-diff-modal" style="z-index: 30;">
+  <div class="modal" style="max-width: 640px;">
+    <h2>📂 還原預覽</h2>
+    <div id="snapshot-diff-content" style="max-height: 60vh; overflow-y: auto;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('snapshot-diff-modal').classList.remove('open')">取消</button>
+      <button class="btn btn-primary" id="snapshot-diff-confirm-btn">⏮️ 確認還原</button>
+    </div>
+  </div>
+</div>
+
+<!-- v2.9.4: 批次設定折扣 Modal -->
+<div class="modal-bg" id="bulk-discount-modal">
+  <div class="modal" style="max-width: 460px;">
+    <h2>🏷️ 批次設定折扣</h2>
+    <div id="bulk-discount-info" style="font-size: 13px; color: var(--muted); margin-bottom: 12px;"></div>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px;">
+      <label class="checkbox-row" style="margin: 0;">
+        <input type="radio" name="bulk-discount-type" value="none" checked>
+        <span>無（清除折扣）</span>
+      </label>
+      <label class="checkbox-row" style="margin: 0;">
+        <input type="radio" name="bulk-discount-type" value="fixed">
+        <span>金額（NT$）</span>
+      </label>
+      <label class="checkbox-row" style="margin: 0;">
+        <input type="radio" name="bulk-discount-type" value="percent">
+        <span>百分比（%）</span>
+      </label>
+    </div>
+    <input type="number" id="bulk-discount-value" placeholder="折扣值（正數）" min="0">
+    <p style="font-size: 11px; color: var(--muted); margin-top: 6px;">
+      • 金額：每筆案件原價扣減此金額（不會變負）<br>
+      • 百分比：每筆扣減 N%（例：5 = 95 折）<br>
+      • 無：清除已選案件的折扣
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('bulk-discount-modal').classList.remove('open')">取消</button>
+      <button class="btn btn-primary" onclick="confirmBulkDiscount()">套用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 收款日期 Modal -->
+<div class="modal-bg" id="paid-date-modal">
+  <div class="modal" style="max-width: 420px;">
+    <h2>💰 標記為已收款</h2>
+    <div id="paid-date-info" style="font-size: 14px; color: var(--muted); margin-bottom: 12px;"></div>
+    <label>收款日期</label>
+    <input type="date" id="paid-date-input">
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closePaidDateModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmPaidDate()">確認標記</button>
+    </div>
+  </div>
+</div>
+
+<!-- 裝置名稱提醒 Modal -->
+<div class="modal-bg" id="device-name-prompt-modal">
+  <div class="modal" style="max-width: 460px;">
+    <h2>📛 為這台裝置取個名字</h2>
+    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+      你還沒幫這台裝置設定名稱。設定後，雲端備份歷史會記錄是哪一台 PC 上傳的，方便在多台電腦之間追蹤資料變化。
+    </p>
+    <p style="font-size: 12px; color: var(--muted); margin-bottom: 12px; padding: 8px; background: var(--bg); border-radius: 6px;">
+      ⚠️ 瀏覽器無法讀取作業系統的真實電腦名稱（這是安全限制），所以系統會自動給你一個 <code>OS-隨機4碼</code>（例：<code>Windows-A7F3</code>）。建議改成自己看得懂的名字。
+    </p>
+    <label style="font-size: 13px;">這台裝置叫什麼？</label>
+    <input type="text" id="device-name-prompt-input" placeholder="例：工作室 Win、家裡 MacBook" style="margin: 6px 0 4px;">
+    <div id="device-name-prompt-current" style="font-size: 12px; color: var(--muted); margin-bottom: 12px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="skipDeviceNamePrompt()">先跳過</button>
+      <button class="btn btn-primary" onclick="saveDeviceNameFromPrompt()">儲存名稱</button>
+    </div>
+  </div>
+</div>
+
+<!-- 資料健檢 Modal -->
+<div class="modal-bg" id="health-modal">
+  <div class="modal" style="max-width: 600px;">
+    <h2>🩺 資料健檢</h2>
+    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+      掃描所有資料找出潛在問題（孤兒、重複、異常金額、缺欄位等）。點按鈕可直接查看那些案件。
+    </p>
+    <div id="health-check-result"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('health-modal').classList.remove('open')">關閉</button>
+      <button class="btn btn-outline" onclick="showHealthCheckModal()">🔄 重新掃描</button>
+    </div>
+  </div>
+</div>
+
+<!-- 備份歷史 Modal -->
+<div class="modal-bg" id="snapshot-modal">
+  <div class="modal" style="max-width: 700px;">
+    <h2>🗂️ 雲端備份歷史</h2>
+    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+      每次推送到雲端前自動備份，保留最近 20 筆。可以查看內容、還原。
+    </p>
+    <div id="snapshot-list-modal"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('snapshot-modal').classList.remove('open')">關閉</button>
+      <button class="btn btn-outline" onclick="showSnapshotList()">🔄 重新整理</button>
+    </div>
+  </div>
+</div>
+
+<!-- 初次使用引導 -->
+<div class="modal-bg" id="onboarding-modal">
+  <div class="modal" style="max-width: 480px;">
+    <h2>👋 歡迎使用外包收益管理工具</h2>
+    <p style="font-size: 14px; color: var(--muted); margin-bottom: 16px;">這是給接案工作者用的記帳 + 排程 + 請款工具。第一次打開，你想怎麼開始？</p>
+
+    <div class="checkbox-stack">
+      <div class="check-item" onclick="onboardingChoose('import-settings')" style="cursor: pointer; background: var(--primary-light); border: 1px solid var(--primary);">
+        <div style="font-size: 24px;">📥</div>
+        <div class="check-item-label">
+          <b>匯入設定檔</b>
+          <div class="check-item-desc">已經在別台裝置用過？匯入設定檔自動還原所有設定</div>
+        </div>
+      </div>
+
+      <div class="check-item" onclick="onboardingChoose('demo')" style="cursor: pointer;">
+        <div style="font-size: 24px;">🎨</div>
+        <div class="check-item-label">
+          <b>看範例感受一下</b>
+          <div class="check-item-desc">載入假資料，先逛逛、試試看每個功能</div>
+        </div>
+      </div>
+
+      <div class="check-item" onclick="onboardingChoose('blank')" style="cursor: pointer;">
+        <div style="font-size: 24px;">🚀</div>
+        <div class="check-item-label">
+          <b>從零開始</b>
+          <div class="check-item-desc">跳過引導，自己慢慢設定</div>
+        </div>
+      </div>
+    </div>
+
+    <p style="font-size: 12px; color: var(--muted); text-align: center; margin-top: 16px;">
+      之後想再看引導？到設定頁找「再次顯示歡迎引導」
+    </p>
+  </div>
+</div>
+
+<script>
+  // v2.9.6: 用 meta 版號當 cache buster — 每次升版自動繞過 HTTP cache
+  (function(){
+    var v = document.querySelector('meta[name="app-version"]')?.content || Date.now();
+    var s = document.createElement('script');
+    s.src = 'js/app.js?v=' + encodeURIComponent(v);
+    document.body.appendChild(s);
+  })();
+</script>
+</body>
+</html>
