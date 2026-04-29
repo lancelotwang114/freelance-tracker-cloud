@@ -8,6 +8,27 @@ const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
 const APP_VERSION = '2026-04-29-v3.0.0-alpha.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
+// ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
+// 後續 commit 會在這個區塊加：initGoogleAuth / signIn / signOut / getValidAccessToken / 持久化
+// 目前只有設定常數，還沒任何邏輯。
+//
+// GOOGLE_CLIENT_ID
+//   GCP Console「OAuth 2.0 用戶端 ID」(Web application) 產出的值。
+//   屬於 lancelotwang114 個人專案 freelance-tracker-cloud。
+//   ※ Client ID 是 public 安全的：Google OAuth 設計上要在前端揭露，靠 GCP「已授權的 JavaScript 來源」白名單擋偽造。
+//   ※ Client SECRET 才是 secret，但 GIS Token Client（前端隱式流）根本不用 Client Secret。
+//   已授權的 JavaScript 來源（在 GCP Console 設定）：
+//     - https://lancelotwang114.github.io（GitHub Pages 正式部署）
+//     - http://localhost:8080（本機 python -m http.server 預設）
+//     - http://127.0.0.1:5500（VS Code Live Server）
+const GOOGLE_CLIENT_ID = '571304600737-nfvsh00822f4b5p00msetkld6qq11vf2.apps.googleusercontent.com';
+
+// DRIVE_SCOPE
+//   drive.appfolder：只能存取本 app 自己建的「應用程式資料夾」，看不到使用者其他 Drive 檔案。
+//   權限粒度最小、Google 也不需審核（非機敏 scope）。
+//   參考：https://developers.google.com/workspace/drive/api/guides/appdata
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appfolder';
+
 // 版本比較（v2.10.1）
 // 修正 v2.9.7 vs v2.10.0 的字串比較 bug（'1' < '9' 字元碼，導致大版號被判舊）
 // 格式：YYYY-MM-DD-vX.Y.Z → 拆成數字陣列逐位比

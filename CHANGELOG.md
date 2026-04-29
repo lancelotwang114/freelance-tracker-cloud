@@ -28,7 +28,18 @@
 - `index.html` 的 `<meta name="app-version">` → 同上
 - `service-worker.js` 的 `CACHE_VERSION` → `ftracker-cloud-v3.0.0-alpha.1`
 
+### Google Identity Services SDK 載入（基礎建設）
+- `index.html` `<head>` 加入 `<script src="https://accounts.google.com/gsi/client" async></script>`
+- `js/app.js` 新增「☁️ Cloud Auth Layer」區塊
+  - `GOOGLE_CLIENT_ID`：GCP OAuth Web 用戶端 ID（lancelotwang114 個人專案）
+  - `DRIVE_SCOPE`：`drive.appfolder`（只能存取本 app 建的應用程式資料夾，最小權限）
+- 純載入依賴 + 設定常數，還沒任何 UI、沒任何登入邏輯（會在後續 commit 接上）
+
 ### 待開發
-- Google Identity Services 接通
-- Drive App Folder 讀寫
-- 移除 localStorage 為主的同步邏輯，改 Drive 為 source of truth
+- 設定頁登入 / 登出 UI 區塊
+- Token Client 接通、登入流程、撤銷登出
+- top-bar sync indicator 接通
+- 登入狀態持久化（access token + 過期時間存 localStorage cloud key）
+- 操作日誌埋點
+- Drive App Folder 讀寫（alpha.2）
+- 移除 localStorage 為主的同步邏輯，改 Drive 為 source of truth（beta.1）
