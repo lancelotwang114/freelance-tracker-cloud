@@ -63,6 +63,20 @@
 - 登出時清掉 `CLOUD_LAST_SYNCED_KEY` 跟 `CLOUD_META_KEY`，避免下次別人登入用到舊 base
 - **本 commit 寫好引擎、接好 base 維護；α2-4b 才會把 init Case C 的 prompt 改成用 mergeStates 自動合併 + 衝突 modal**
 
+### snapshot UX 強化（α2-7c）
+- 建立備份按下去 → 立刻 toast「💾 建立備份中…」→ 完成 toast「✓ 備份已建立」
+- 刪除按下去 → 立刻 toast「🗑️ 刪除中…」→ 完成 toast「✓ 已刪除」
+- **還原流程整個重寫，加入「目前 vs 還原後」對比 modal**：
+  - 點還原 → toast「📥 載入 snapshot 預覽…」
+  - 自動下載 + 解析 snapshot → 跳預覽 modal，內含：
+    - 備份時間、類型、標籤、建立裝置
+    - 對比表格（業主數 / 案件數 / 完成 / 已收款 / 應收金額 / 已收金額 / 未收金額），紅綠標示增減
+    - 提示「還原前會自動建『還原前-』備份保險」
+  - 確認 → toast「⏳ 還原中…請勿關閉視窗」→ 完成 toast「✓ 還原完成」
+- 拆分 `cloudRestoreSnapshot()` 成兩個內部函式：`_cloudDownloadParsedSnapshot()`（下載+解析）+ `_cloudApplyRestore()`（套用）
+- 新增 stats 計算 helpers：`_cloudCalcStats()`（業主/案件/應收/已收 6 項統計）、`_cloudFormatNT()`、`_cloudStatsRow()`
+- 新增 modal 控制：`cloudShowRestorePreviewModal()` / `cloudClosePreviewModal()` / `cloudConfirmRestore()` + `cloudPendingRestore` state
+
 ### snapshot 自動每日 + 分層保留 prune（α2-7b）
 - 新增 `cloudEnsureDailyAutoSnapshot()`：檢查今天是否已有 auto snapshot，沒有就建一筆
   - 1 小時節流（避免每次 push 都 list snapshots）

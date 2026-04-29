@@ -1249,34 +1249,31 @@ async function cloudDownloadSnapshot(fileId) {
   return driveDownloadFile(fileId);
 }
 
-async function cloudRestoreSnapshot(fileId) {
-  if (!isCloudSignedIn()) { alert('請先登入'); return false; }
+// 拆成兩段：「下載 + 解析」 vs「實際套用」，方便預覽 modal 中間插隊
+async function _cloudDownloadParsedSnapshot(fileId) {
+  const text = await cloudDownloadSnapshot(fileId);
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch (_) { throw new Error('snapshot 不是合法 JSON'); }
+  if (!parsed.data || typeof parsed.data !== 'object') {
+    throw new Error('snapshot 結構不正確（缺 data 區塊）');
+  }
+  return parsed;  // { schemaVersion, snapshotMeta, data }
+}
 
-  // 先建一筆「還原前-」manual snapshot 保險（即使還原錯了也回得來）
+// 實際執行還原（在 modal 確認後呼叫）
+async function _cloudApplyRestore(parsed, fileId) {
+  // 還原前自動建一筆「還原前-」manual snapshot 保險
   try {
     const safetyLabel = '還原前-' + new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
     await cloudCreateSnapshot('manual', safetyLabel);
   } catch (e) {
-    console.warn('[snapshot-restore] pre-restore safety snapshot failed:', e);
-    // 不阻擋還原；使用者已選擇要還原
-  }
-
-  let text;
-  try { text = await cloudDownloadSnapshot(fileId); }
-  catch (e) { alert('下載 snapshot 失敗：' + e.message); return false; }
-
-  let parsed;
-  try { parsed = JSON.parse(text); }
-  catch (_) { alert('snapshot 不是合法 JSON'); return false; }
-
-  if (!parsed.data || typeof parsed.data !== 'object') {
-    alert('snapshot 結構不正確，缺 data 區塊');
-    return false;
+    console.warn('[snapshot-restore] safety backup failed:', e);
   }
 
   applyTrackerData(parsed.data);
 
-  // 把還原後的內容立刻 push 到 Drive 當新的 tracker.json
+  // 推回 Drive tracker.json
   const meta = cloudGetMeta();
   if (meta.trackerFileId) {
     try {
@@ -1289,26 +1286,42 @@ async function cloudRestoreSnapshot(fileId) {
       cloudSaveLastSyncedSnapshot(wrapper.data);
     } catch (e) {
       console.error('[snapshot-restore] push to tracker.json failed:', e);
-      alert('資料已在本機還原成功，但推回 Drive tracker.json 失敗：' + e.message + '\n下次手動「立即同步」再試');
+      throw new Error('資料已在本機還原，但推回 Drive tracker.json 失敗：' + e.message + '\n下次手動「立即同步」再試');
     }
   }
 
   if (typeof logAction === 'function') {
     logAction('cloud-snapshot-restore', { fileId });
   }
-  return true;
+}
+
+// 給外部呼叫的舊 API（先保留以免有別處 reference；實際走還原流程的入口是 cloudRestoreSnapshotConfirm）
+async function cloudRestoreSnapshot(fileId) {
+  if (!isCloudSignedIn()) { alert('請先登入'); return false; }
+  try {
+    const parsed = await _cloudDownloadParsedSnapshot(fileId);
+    await _cloudApplyRestore(parsed, fileId);
+    return true;
+  } catch (e) {
+    alert('還原失敗：' + e.message);
+    return false;
+  }
 }
 
 async function cloudDeleteSnapshot(fileId) {
   if (!isCloudSignedIn()) { alert('請先登入'); return; }
   if (!confirm('確定要刪除這筆 snapshot？此動作無法還原。')) return;
+  toastProgress('🗑️ 刪除中…');
   try {
     await driveDeleteFile(fileId);
+    toastDismiss();
+    toast('✓ 已刪除', 2000);
     if (typeof logAction === 'function') {
       logAction('cloud-snapshot-delete', { fileId });
     }
     await cloudRefreshSnapshotList();
   } catch (e) {
+    toastDismiss();
     alert('刪除 snapshot 失敗：' + e.message);
   }
 }
@@ -1318,11 +1331,16 @@ async function cloudDeleteSnapshot(fileId) {
 async function cloudCreateManualSnapshot() {
   const labelInput = document.getElementById('cloud-snapshot-manual-label');
   const label = labelInput ? labelInput.value.trim() : '';
+  // 立刻 toast 給使用者反饋（建立過程約 1~3 秒，不能讓他看著按鈕發呆）
+  toastProgress('💾 建立備份中…');
   try {
     await cloudCreateSnapshot('manual', label);
     if (labelInput) labelInput.value = '';
+    toastDismiss();
+    toast('✓ 備份已建立', 2500);
     await cloudRefreshSnapshotList();
   } catch (e) {
+    toastDismiss();
     alert('建立 snapshot 失敗：' + e.message);
   }
 }
@@ -1526,16 +1544,166 @@ function _cloudIsoWeekKey(d) {
   return `${x.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
+// ---------- 還原預覽 modal（含「目前 vs snapshot」對比）----------
+let cloudPendingRestore = null;  // { parsed, fileId, timeStr }
+
+// 計算資料統計（業主數 / 案件數 / 完成 / 已收 / 應收金額 / 已收金額）
+function _cloudCalcStats(data) {
+  const clients = (data && data.clients) || [];
+  const jobs = (data && data.jobs) || [];
+  let totalAmount = 0, paidAmount = 0;
+  let doneCount = 0, paidCount = 0, cancelledCount = 0;
+  for (const j of jobs) {
+    if (j.cancelled) { cancelledCount++; continue; }
+    const amt = Number(j.amount) || 0;
+    totalAmount += amt;
+    if (j.done) doneCount++;
+    if (Array.isArray(j.payments) && j.payments.length > 0) {
+      paidAmount += j.payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    } else if (j.paid) {
+      paidAmount += amt;
+    }
+    if (j.paid) paidCount++;
+  }
+  return {
+    clients: clients.length,
+    jobs: jobs.length,
+    doneJobs: doneCount,
+    paidJobs: paidCount,
+    cancelledJobs: cancelledCount,
+    totalAmount,
+    paidAmount,
+    unpaidAmount: totalAmount - paidAmount
+  };
+}
+
+function _cloudFormatNT(n) {
+  return 'NT$ ' + Math.round(n).toLocaleString('en-US');
+}
+
+// 渲染對比表格的單一 row（數字欄位）
+function _cloudStatsRow(label, current, snap, formatter) {
+  const fmt = formatter || ((x) => String(x));
+  let diffHtml = '';
+  if (current !== snap) {
+    const delta = snap - current;
+    if (delta > 0) diffHtml = ` <span style="color:#10b981;font-size:11px;">(+${fmt(delta).replace('NT$ ', '')})</span>`;
+    else diffHtml = ` <span style="color:#ef4444;font-size:11px;">(${fmt(delta).replace('NT$ ', '-NT$ ').replace('--', '-')})</span>`;
+  }
+  return `
+    <tr>
+      <td style="padding:6px 10px;color:var(--muted);font-size:13px;">${label}</td>
+      <td style="padding:6px 10px;text-align:right;font-size:13px;">${fmt(current)}</td>
+      <td style="padding:6px 10px;text-align:right;font-size:13px;font-weight:600;">${fmt(snap)}${diffHtml}</td>
+    </tr>
+  `;
+}
+
+// 主入口：點還原按鈕 → 載入預覽 → 開 modal
 async function cloudRestoreSnapshotConfirm(fileId, timeStr) {
-  if (!confirm(
-    `確定要把目前資料還原到「${timeStr}」這筆 snapshot 嗎？\n\n` +
-    `為保險起見，會自動先建一筆「還原前」的 manual snapshot；\n` +
-    `還原後若不滿意，可以再從備份歷史還原回來。`
-  )) return;
-  const ok = await cloudRestoreSnapshot(fileId);
-  if (ok) {
-    alert('已還原到所選 snapshot');
+  if (!isCloudSignedIn()) { alert('請先登入'); return; }
+
+  // 立刻 toast 反饋（下載 + 解析約 1~2 秒）
+  toastProgress('📥 載入 snapshot 預覽…');
+  let parsed;
+  try {
+    parsed = await _cloudDownloadParsedSnapshot(fileId);
+  } catch (e) {
+    toastDismiss();
+    alert('載入 snapshot 失敗：' + e.message);
+    return;
+  }
+  toastDismiss();
+
+  cloudShowRestorePreviewModal({ parsed, fileId, timeStr });
+}
+
+function cloudShowRestorePreviewModal({ parsed, fileId, timeStr }) {
+  cloudPendingRestore = { parsed, fileId, timeStr };
+
+  const localStats = _cloudCalcStats({ clients: state.clients, jobs: state.jobs });
+  const snapStats = _cloudCalcStats(parsed.data);
+  const meta = parsed.snapshotMeta || {};
+
+  const old = document.getElementById('cloud-restore-preview-overlay');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cloud-restore-preview-overlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);' +
+    'display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const dialog = document.createElement('div');
+  dialog.style.cssText =
+    'background:var(--card);color:var(--text);border-radius:12px;' +
+    'padding:20px;max-width:600px;width:100%;max-height:85vh;overflow:auto;' +
+    'box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+
+  const labelHtml = meta.label ? `<div><b>標籤：</b>${cloudEscapeHtml(meta.label)}</div>` : '';
+  const deviceHtml = meta.deviceName ? `<div><b>建立裝置：</b>${cloudEscapeHtml(meta.deviceName)}</div>` : '';
+  const typeHtml = meta.type === 'manual' ? '🏷️ 手動備份' : '⏰ 自動每日';
+
+  dialog.innerHTML =
+    '<h2 style="margin:0 0 12px 0;font-size:18px;">↩ 還原 snapshot 預覽</h2>' +
+    `<div style="background:var(--bg);padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.7;margin-bottom:14px;">` +
+    `  <div><b>備份時間：</b>${cloudEscapeHtml(timeStr)}</div>` +
+    `  <div><b>類型：</b>${typeHtml}</div>` +
+    labelHtml + deviceHtml +
+    `</div>` +
+    '<div style="font-size:13px;color:var(--muted);margin-bottom:6px;">資料變動預覽（紅色為減少、綠色為增加）：</div>' +
+    `<table style="width:100%;border-collapse:collapse;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;">` +
+    `  <thead style="background:var(--bg);">` +
+    `    <tr>` +
+    `      <th style="padding:6px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:500;">項目</th>` +
+    `      <th style="padding:6px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:500;">目前</th>` +
+    `      <th style="padding:6px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:500;">還原後</th>` +
+    `    </tr>` +
+    `  </thead>` +
+    `  <tbody>` +
+    _cloudStatsRow('業主數', localStats.clients, snapStats.clients) +
+    _cloudStatsRow('案件總數', localStats.jobs, snapStats.jobs) +
+    _cloudStatsRow('已完成案件', localStats.doneJobs, snapStats.doneJobs) +
+    _cloudStatsRow('已收款案件', localStats.paidJobs, snapStats.paidJobs) +
+    _cloudStatsRow('已取消案件', localStats.cancelledJobs, snapStats.cancelledJobs) +
+    _cloudStatsRow('應收總額', localStats.totalAmount, snapStats.totalAmount, _cloudFormatNT) +
+    _cloudStatsRow('已收金額', localStats.paidAmount, snapStats.paidAmount, _cloudFormatNT) +
+    _cloudStatsRow('未收金額', localStats.unpaidAmount, snapStats.unpaidAmount, _cloudFormatNT) +
+    `  </tbody>` +
+    `</table>` +
+    `<div style="background:var(--bg);padding:10px 12px;border-radius:8px;font-size:12px;color:var(--muted);margin-bottom:14px;">` +
+    `  💡 <b>還原前會自動建一筆「還原前-」備份保險</b>。<br>` +
+    `  即使還原後不滿意，也可以從備份歷史再還原回剛才的版本。` +
+    `</div>` +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+    '  <button class="btn btn-outline" onclick="cloudClosePreviewModal()">取消</button>' +
+    '  <button class="btn btn-primary" onclick="cloudConfirmRestore()">確認還原</button>' +
+    '</div>';
+
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+}
+
+function cloudClosePreviewModal() {
+  const overlay = document.getElementById('cloud-restore-preview-overlay');
+  if (overlay) overlay.remove();
+  cloudPendingRestore = null;
+}
+
+async function cloudConfirmRestore() {
+  if (!cloudPendingRestore) return;
+  const { parsed, fileId } = cloudPendingRestore;
+  cloudClosePreviewModal();
+
+  toastProgress('⏳ 還原中…請勿關閉視窗');
+  try {
+    await _cloudApplyRestore(parsed, fileId);
+    toastDismiss();
+    toast('✓ 還原完成', 3000);
     await cloudRefreshSnapshotList();
+  } catch (e) {
+    toastDismiss();
+    alert('還原失敗：' + e.message);
   }
 }
 
