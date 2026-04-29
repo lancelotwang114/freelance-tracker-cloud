@@ -63,6 +63,17 @@
 - 登出時清掉 `CLOUD_LAST_SYNCED_KEY` 跟 `CLOUD_META_KEY`，避免下次別人登入用到舊 base
 - **本 commit 寫好引擎、接好 base 維護；α2-4b 才會把 init Case C 的 prompt 改成用 mergeStates 自動合併 + 衝突 modal**
 
+### init Case C 砍掉英文 prompt 改走 mergeStates（α2-4-revisit）
+- 原本「沒 last-synced base + 兩邊都有資料」會跳 `window.prompt` 三選一（pull/push/取消）
+- 問題：英文輸入命令對中文使用者不友善、強制「整邊覆蓋」太粗暴、訊息提及的「α2-4 三方合併」其實已經做完
+- 改為：**統一走 `cloudResolveAndMerge()`，不再分有無 base**
+  - mergeStates 對 `base=null` 行為合理：
+    - entity 只在單邊存在 → 視為新增、保留
+    - 兩邊都有且資料完全相同 → keep（產生 0 衝突，靜默合併）
+    - 兩邊都有但欄位不同 → 跳 cloudShowConflictModal 逐筆處理
+- 移除原 prompt fallback 約 50 行 code（pull/push/取消三條分支）
+- 在 `cloudResolveAndMerge` 無衝突路徑加 toast「✓ 已跟雲端同步」，避免靜默合併沒反饋
+
 ### snapshot UX 強化（α2-7c）
 - 建立備份按下去 → 立刻 toast「💾 建立備份中…」→ 完成 toast「✓ 備份已建立」
 - 刪除按下去 → 立刻 toast「🗑️ 刪除中…」→ 完成 toast「✓ 已刪除」

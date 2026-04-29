@@ -581,7 +581,10 @@ function isLocalDataEmpty() {
 // 登入後初始化 tracker.json
 // - 雲端沒檔 → 用本機建一個（先 push）
 // - 雲端有檔 + 本機空白 → 自動 pull
-// - 雲端有檔 + 本機有資料 → 跳 prompt 問使用者（α2-4 三方合併上線後改成 modal）
+// - 雲端有檔 + 本機有資料 → 走三方合併引擎（mergeStates）：
+//     資料完全一致 → 靜默合併 + toast「✓ 已跟雲端同步」
+//     有差異但無真衝突 → 自動合併
+//     真衝突 → 跳衝突 modal 給使用者逐筆挑
 async function cloudInitTrackerFile() {
   if (!isCloudSignedIn()) return;
 
@@ -660,64 +663,22 @@ async function cloudInitTrackerFile() {
     return;
   }
 
-  // Case C：兩邊都有資料
-  // α2-4b：有 last-synced 快照（共同祖先）→ 走三方合併（自動套用無衝突部分、衝突跳 modal）
-  // 沒有快照（這台機從未跟這個 Drive 同步過）→ 沒有 base 不能合併，fallback 用簡易 prompt
-  if (cloudGetLastSyncedSnapshot()) {
-    await cloudResolveAndMerge({
-      remoteData: result.data,
-      remoteMeta: result.meta,
-      fileId: trackerFile.id,
-      trackerCreatedAt: result.meta.createdAt
-    });
-    cloudSaveMeta({ trackerFileId: trackerFile.id, trackerCreatedAt: result.meta.createdAt });
-    return;
-  }
-
-  // Fallback：首次裝置 link、沒有 base → 簡易 prompt 三選一
-  const localCounts = `本機：${state.clients.length} 業主 / ${state.jobs.length} 案件`;
-  const remoteCounts = `雲端：${(result.data.clients || []).length} 業主 / ${(result.data.jobs || []).length} 案件 (v${result.meta.version})`;
-  const choice = window.prompt(
-    `偵測到 Drive 跟本機都有資料：\n\n  ${localCounts}\n  ${remoteCounts}\n\n` +
-    `請輸入：\n  pull  = 用 Drive 的覆蓋本機\n  push  = 用本機的覆蓋 Drive\n  (留空) = 取消（本次不同步，待 α2-4 三方合併上線後再處理）`,
-    ''
-  );
-  const action = (choice || '').trim().toLowerCase();
-
-  if (action === 'pull') {
-    applyTrackerData(result.data);
-    cloudSaveMeta({
-      trackerFileId: trackerFile.id,
-      trackerCreatedAt: result.meta.createdAt,
-      lastSyncedAt: result.meta.lastModifiedAt,
-      lastSyncedVersion: result.meta.version,
-    });
-    cloudSaveLastSyncedSnapshot(result.data);  // α2-4a
-    if (typeof logAction === 'function') {
-      logAction('cloud-init-pull', { fileId: trackerFile.id, version: result.meta.version });
-    }
-  } else if (action === 'push') {
-    try {
-      const wrapper = buildTrackerWrapper(result.meta.version);
-      const updated = await driveUpdateFile(trackerFile.id, wrapper);
-      cloudSaveMeta({
-        trackerFileId: trackerFile.id,
-        lastSyncedAt: wrapper.lastModifiedAt,
-        lastSyncedVersion: wrapper.version,
-      });
-      cloudSaveLastSyncedSnapshot(wrapper.data);  // α2-4a
-      if (typeof logAction === 'function') {
-        logAction('cloud-init-push', { fileId: trackerFile.id, version: wrapper.version });
-      }
-    } catch (e) {
-      console.error('[cloud-init] push failed:', e);
-      alert('推送本機資料到 Drive 失敗：' + e.message);
-    }
-  } else {
-    // 取消：只記下 fileId，不動資料
-    cloudSaveMeta({ trackerFileId: trackerFile.id });
-    console.log('[cloud-init] 使用者取消，只記下 trackerFileId');
-  }
+  // Case C：兩邊都有資料 → 統一走三方合併引擎，不再依 base 有無分流
+  //
+  // α2-4-revisit（2026-04-29 追加）：
+  //   原本 `if 有 base 走 mergeStates / else 走 prompt 三選一` 的二分被砍掉。
+  //   理由：mergeStates 對 base=null 有合理行為——
+  //     * entity 只在單邊存在 → 視為新增、保留
+  //     * 兩邊都有且資料相同 → keep（產生 0 衝突，靜默合併）
+  //     * 兩邊都有但欄位不同 → 走 cloudShowConflictModal 逐筆處理
+  //   比 prompt 強制「整邊覆蓋」安全，且對「重新登入但資料其實一樣」零打擾。
+  await cloudResolveAndMerge({
+    remoteData: result.data,
+    remoteMeta: result.meta,
+    fileId: trackerFile.id,
+    trackerCreatedAt: result.meta.createdAt
+  });
+  cloudSaveMeta({ trackerFileId: trackerFile.id, trackerCreatedAt: result.meta.createdAt });
 
   // α2-7b：init 結束（不論哪條路徑）→ 確保今天有 auto snapshot（fire-and-forget）
   cloudEnsureDailyAutoSnapshot().catch(e => console.error('[snapshot-auto] async:', e));
@@ -756,6 +717,8 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
         logAction('cloud-merge-clean', { fileId, version: wrapper.version });
       }
       console.log(`[cloud-merge] 自動合併完成（無衝突）→ Drive 已更新到 v${wrapper.version}`);
+      // 給使用者一點視覺反饋（這條路徑包含「重新登入靜默對齊」的常見情境）
+      if (typeof toast === 'function') toast('✓ 已跟雲端同步', 2500);
     } catch (e) {
       console.error('[cloud-merge] push after clean merge failed:', e);
       alert('自動合併成功但推送 Drive 失敗：' + e.message);
