@@ -38,6 +38,19 @@
 ### 設定頁加雲端登入區塊 UI 骨架
 - 在「設定」分頁最上方新增「🔐 Google Drive 同步」卡片，置頂醒目（藍色邊框點綴）
 - 名稱刻意跟 v2 沿用的「☁️ 雲端同步」（Apps Script + Sheet）區隔，避免兩張卡同名造成混淆（v2 那張在 beta.1 才會移除）
+
+### 接通 GIS Token Client（登入 / 登出 / token 撤銷）
+- `js/app.js` Cloud Auth Layer 加入 7 個函式 + 1 個記憶體 state：
+  - `cloudAuthState`：`{ initialized, tokenClient, accessToken, tokenExpiresAt, user }`
+  - `cloudShowAuthState(state)`：切換 pending / signed-out / signed-in 三個 div
+  - `cloudWaitForGoogleSDK()`：polling 等 GIS SDK ready（async 載入無保證）
+  - `cloudInitGoogleAuth()`：app 啟動自動跑、init token client、啟用登入按鈕
+  - `cloudSignIn()`：點按鈕 → 呼叫 `tokenClient.requestAccessToken({ prompt: '' })` 跳 Google 登入彈窗
+  - `cloudOnTokenResponse(resp)`：拿到 token → fetch userinfo → 渲染已登入 UI
+  - `cloudRenderSignedIn()`：把 `cloudAuthState.user` 渲染到 UI（名稱、email、大頭貼）
+  - `cloudSignOut()`：清本機 state + UI 切回未登入 + 非同步 `google.accounts.oauth2.revoke(token)` 通知 Google 撤銷
+- 自啟動：`app.js` 載入完直接呼叫 `cloudInitGoogleAuth()`（不等 DOMContentLoaded，因為 `app.js` 是 body 尾端動態 append、DOM 已就緒）
+- 還沒做：access token 持久化（commit 6）、top-bar sync indicator 接通（commit 5）、操作日誌埋點（commit 7）
 - 三個互斥狀態 div：
   - `#cloud-auth-pending`：GIS SDK 載入中（預設顯示）
   - `#cloud-auth-signed-out`：未登入（含 Google 4 色 G logo SVG 按鈕）

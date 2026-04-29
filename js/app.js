@@ -9,8 +9,8 @@ const CONFIG_KEY = 'cloud-freelance-tracker-config';
 const APP_VERSION = '2026-04-29-v3.0.0-alpha.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
-// 後續 commit 會在這個區塊加：initGoogleAuth / signIn / signOut / getValidAccessToken / 持久化
-// 目前只有設定常數，還沒任何邏輯。
+// 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
+// 目前已就位：常數、auth state、init / sign-in / sign-out / token revoke / userinfo 抓取與 UI 渲染。
 //
 // GOOGLE_CLIENT_ID
 //   GCP Console「OAuth 2.0 用戶端 ID」(Web application) 產出的值。
@@ -28,6 +28,164 @@ const GOOGLE_CLIENT_ID = '571304600737-nfvsh00822f4b5p00msetkld6qq11vf2.apps.goo
 //   權限粒度最小、Google 也不需審核（非機敏 scope）。
 //   參考：https://developers.google.com/workspace/drive/api/guides/appdata
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appfolder';
+
+// ---------- 認證狀態（記憶體；持久化是 commit 6 的事）----------
+let cloudAuthState = {
+  initialized: false,    // GIS SDK 是否 init 完成
+  tokenClient: null,     // google.accounts.oauth2.TokenClient instance
+  accessToken: null,     // 目前的 access token（過期就要重新登入）
+  tokenExpiresAt: 0,     // token 過期的 ms epoch
+  user: null             // {name, email, picture} 或 null
+};
+
+// 切換三個狀態 div 的顯示（pending / signed-out / signed-in）
+function cloudShowAuthState(state) {
+  ['pending', 'signed-out', 'signed-in'].forEach(s => {
+    const el = document.getElementById('cloud-auth-' + s);
+    if (!el) return;
+    el.classList.toggle('hidden', s !== state);
+  });
+}
+
+// GIS SDK 是 async 載入，可能比 app.js 晚 ready，用 polling 等
+function cloudWaitForGoogleSDK(maxAttempts = 50) {
+  return new Promise((resolve, reject) => {
+    let n = 0;
+    const tick = () => {
+      if (window.google && window.google.accounts && window.google.accounts.oauth2 && window.google.accounts.oauth2.initTokenClient) {
+        resolve();
+      } else if (++n >= maxAttempts) {
+        reject(new Error('GIS SDK 載入逾時（10 秒）'));
+      } else {
+        setTimeout(tick, 200);
+      }
+    };
+    tick();
+  });
+}
+
+// app 啟動時自動呼叫一次（檔尾有自啟動 IIFE）
+async function cloudInitGoogleAuth() {
+  cloudShowAuthState('pending');
+  try {
+    await cloudWaitForGoogleSDK();
+  } catch (e) {
+    console.error('[cloud-auth] init failed:', e);
+    cloudShowAuthState('signed-out');
+    const hint = document.getElementById('cloud-signin-disabled-hint');
+    if (hint) hint.textContent = '⚠️ Google 登入元件載入失敗，請檢查網路或刷新頁面';
+    return;
+  }
+
+  cloudAuthState.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: cloudOnTokenResponse,
+  });
+  cloudAuthState.initialized = true;
+
+  // 啟用按鈕、清掉「初始化中」hint
+  const btn = document.getElementById('cloud-signin-btn');
+  if (btn) btn.disabled = false;
+  const hint = document.getElementById('cloud-signin-disabled-hint');
+  if (hint) hint.style.display = 'none';
+
+  cloudShowAuthState('signed-out');
+}
+
+// 點「使用 Google 登入」按鈕（index.html 的 onclick 直接呼叫）
+function cloudSignIn() {
+  if (!cloudAuthState.initialized || !cloudAuthState.tokenClient) {
+    alert('Google 登入元件還沒準備好，請稍候再試');
+    return;
+  }
+  // prompt: '' = 已授權直接放行、未授權跳同意畫面（一般情境用這個）
+  cloudAuthState.tokenClient.requestAccessToken({ prompt: '' });
+}
+
+// GIS callback：拿到 access token（成功 or 失敗都會進這裡）
+async function cloudOnTokenResponse(resp) {
+  if (resp.error) {
+    console.error('[cloud-auth] token error:', resp);
+    alert('Google 登入失敗：' + (resp.error_description || resp.error));
+    return;
+  }
+
+  const expiresIn = parseInt(resp.expires_in, 10) || 3600;
+  cloudAuthState.accessToken = resp.access_token;
+  cloudAuthState.tokenExpiresAt = Date.now() + expiresIn * 1000;
+
+  // 拿 userinfo（name / email / 大頭貼）
+  try {
+    const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { 'Authorization': 'Bearer ' + resp.access_token },
+    });
+    if (!r.ok) throw new Error('userinfo HTTP ' + r.status);
+    const u = await r.json();
+    cloudAuthState.user = {
+      name: u.name || '',
+      email: u.email || '',
+      picture: u.picture || '',
+    };
+  } catch (e) {
+    console.error('[cloud-auth] userinfo failed:', e);
+    // userinfo 拿不到不代表登入失敗，token 還是可用，只是 UI 顯示降級
+    cloudAuthState.user = { name: '已登入', email: '（無法取得帳號資訊）', picture: '' };
+  }
+
+  cloudRenderSignedIn();
+}
+
+// 把 cloudAuthState.user 渲染到「已登入」區塊
+function cloudRenderSignedIn() {
+  if (!cloudAuthState.user) return;
+  const u = cloudAuthState.user;
+  const setText = (id, txt) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  };
+  setText('cloud-account-name', u.name || u.email || '（已登入）');
+  setText('cloud-account-email', u.email || '');
+  setText('cloud-auth-status', '已登入');
+
+  const avatar = document.getElementById('cloud-account-avatar');
+  if (avatar) {
+    if (u.picture) {
+      avatar.src = u.picture;
+      avatar.style.display = '';
+    } else {
+      avatar.removeAttribute('src');
+      avatar.style.display = 'none';
+    }
+  }
+  cloudShowAuthState('signed-in');
+}
+
+// 點「登出」按鈕（index.html 的 onclick 直接呼叫）
+// 策略：先清本機 state + UI 切回未登入（即使 revoke 失敗也讓使用者有登出體驗），
+// 再非同步呼叫 google.accounts.oauth2.revoke 通知 Google 撤銷 token。
+function cloudSignOut() {
+  const token = cloudAuthState.accessToken;
+  cloudAuthState.accessToken = null;
+  cloudAuthState.tokenExpiresAt = 0;
+  cloudAuthState.user = null;
+
+  const setText = (id, txt) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  };
+  setText('cloud-auth-status', '未登入');
+  cloudShowAuthState('signed-out');
+
+  if (token && window.google && window.google.accounts && window.google.accounts.oauth2 && window.google.accounts.oauth2.revoke) {
+    google.accounts.oauth2.revoke(token, () => {
+      // revoke 完成（不一定要做事；revoke 失敗也沒差，token 反正會自然過期）
+    });
+  }
+}
+
+// 自啟動：app.js 在 body 尾端載入時 DOM 已就緒，直接 init
+cloudInitGoogleAuth();
 
 // 版本比較（v2.10.1）
 // 修正 v2.9.7 vs v2.10.0 的字串比較 bug（'1' < '9' 字元碼，導致大版號被判舊）
