@@ -224,6 +224,10 @@ async function cloudOnTokenResponse(resp) {
   if (typeof logAction === 'function') {
     logAction('cloud-signin', { email: cloudAuthState.user && cloudAuthState.user.email });
   }
+
+  // v3.0.0-alpha.2：登入成功後立刻初始化 tracker.json（fire-and-forget）
+  // 失敗不影響登入狀態，使用者可看 console / 日誌
+  cloudInitTrackerFile().catch(e => console.error('[cloud-init] async failed:', e));
 }
 
 // 把 cloudAuthState.user 渲染到「已登入」區塊
@@ -266,6 +270,9 @@ function cloudSignOut() {
 
   // v3.0.0-alpha.1 commit 6：清 localStorage 防止下次重整又恢復為已登入
   cloudClearAuthState();
+  // α2-4a：登出時也清 last-synced 快照（避免別人登入時拿到舊 base 用錯）
+  try { localStorage.removeItem(CLOUD_LAST_SYNCED_KEY); } catch (_) {}
+  try { localStorage.removeItem(CLOUD_META_KEY); } catch (_) {}
 
   const setText = (id, txt) => {
     const el = document.getElementById(id);
@@ -289,23 +296,60 @@ function cloudSignOut() {
 
 // ---------- top-bar sync indicator 接通（v3.0.0-alpha.1 commit 5）----------
 
-// 把 top-bar 右上角 #sync-indicator 改成反映 v3 雲端登入狀態
-// 已登入：綠燈「✓ 已連 Drive」；未登入：灰燈「○ 未連雲端」
-// 注意：v2 既有 setSyncStatus() 會被 v2 timer 反覆呼叫，所以 setSyncStatus() 開頭也要 short-circuit 讓位給這個 helper
+// 把 top-bar 右上角 #sync-indicator 改成反映 v3 雲端同步狀態
+// 多態（α2-5 升級）：
+//   未登入            → 灰    ○ 未連雲端
+//   已登入 + idle     → 綠    ✓ 已同步
+//   已登入 + pending  → 藍    ⌛ 待同步…（debounce 計時中，等使用者連續編輯結束）
+//   已登入 + syncing  → 藍    ⏳ 同步中…（push API 進行中）
+//   已登入 + error    → 紅    ✗ 同步失敗（會跟著「最近錯誤訊息」hover 看得到）
+// 注意：v2 既有 setSyncStatus() 已加 short-circuit 讓位，這個 helper 是唯一寫 indicator 的入口
+let cloudSyncStatus = 'idle';      // idle | pending | syncing | error
+let cloudLastSyncError = null;     // 最近一次失敗訊息，用於 indicator hover
+
+function cloudSetSyncStatus(status, errMsg) {
+  cloudSyncStatus = status;
+  cloudLastSyncError = errMsg || null;
+  cloudUpdateSyncIndicator();
+}
+
 function cloudUpdateSyncIndicator() {
   const el = document.getElementById('sync-indicator');
   if (!el) return;
-  if (isCloudSignedIn()) {
-    el.className = 'sync-indicator sync-synced';
-    el.innerHTML = '✓ 已連 Drive';
-    const email = (cloudAuthState.user && cloudAuthState.user.email) || '';
-    el.title = email
-      ? `Google Drive 已連線：${email}（點擊開啟設定頁）`
-      : 'Google Drive 已連線（點擊開啟設定頁）';
-  } else {
+
+  if (!isCloudSignedIn()) {
     el.className = 'sync-indicator sync-idle';
     el.innerHTML = '○ 未連雲端';
     el.title = '尚未登入 Google Drive（點擊開啟設定頁登入）';
+    return;
+  }
+
+  const email = (cloudAuthState.user && cloudAuthState.user.email) || '';
+  const accountLine = email ? `\n帳號：${email}` : '';
+
+  switch (cloudSyncStatus) {
+    case 'pending':
+      el.className = 'sync-indicator sync-syncing';
+      el.innerHTML = '⌛ 待同步…';
+      el.title = `本機有未上傳的改動，2 秒後自動推送${accountLine}`;
+      break;
+    case 'syncing':
+      el.className = 'sync-indicator sync-syncing';
+      el.innerHTML = '⏳ 同步中…';
+      el.title = `正在推送到 Drive${accountLine}`;
+      break;
+    case 'error': {
+      el.className = 'sync-indicator sync-error';
+      el.innerHTML = '✗ 同步失敗';
+      const errLine = cloudLastSyncError ? `\n錯誤：${cloudLastSyncError}` : '';
+      el.title = `Drive 同步失敗，本機資料安全，下次改動會自動重試${accountLine}${errLine}`;
+      break;
+    }
+    case 'idle':
+    default:
+      el.className = 'sync-indicator sync-synced';
+      el.innerHTML = '✓ 已同步';
+      el.title = `Google Drive 已連線、資料已同步${accountLine}（點擊開啟設定頁）`;
   }
 }
 
@@ -326,6 +370,1237 @@ function isCloudSignedIn() {
 
 // 自啟動：app.js 在 body 尾端載入時 DOM 已就緒，直接 init
 cloudInitGoogleAuth();
+
+// ============== ☁️ Drive API Client（v3.0.0-alpha.2 起新增）==============
+// 純 fetch 包裝 Google Drive API v3，scope 限定 drive.appfolder（只動 App Folder）
+// 後續 commit 用法：先 getValidAccessToken() 拿 token，再呼叫這層的函式
+// 文件：https://developers.google.com/drive/api/reference/rest/v3/files
+//
+// 注意 ETag / 樂觀鎖：Drive API v3 有提供 file resource 的 etag、但實作有些 quirk；
+// 我們改用「在 tracker.json metadata wrapper 內自行記 lastModifiedAt + version」
+// 來做應用層樂觀鎖（更可靠、跨 Drive client 都行得通），所以這層 wrapper 不處理 If-Match。
+
+// 自訂 error 類別，方便 caller 區分「需要重新登入」vs「其他錯誤」
+class DriveAuthError extends Error {
+  constructor(msg) { super(msg); this.name = 'DriveAuthError'; }
+}
+
+// 內部 helper：包裝 fetch，自動附 Authorization header、統一錯誤訊息
+async function driveFetch(url, options = {}) {
+  const token = getValidAccessToken();
+  if (!token) throw new DriveAuthError('未登入 Google 或 access token 已過期，請先登入');
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', 'Bearer ' + token);
+  const r = await fetch(url, { ...options, headers });
+  if (r.status === 401) throw new DriveAuthError('access token 已失效，請重新登入');
+  if (!r.ok) {
+    let msg = `Drive API ${r.status}`;
+    try {
+      const errBody = await r.json();
+      if (errBody && errBody.error && errBody.error.message) msg += `: ${errBody.error.message}`;
+    } catch (_) { /* 回應不是 JSON 就算了 */ }
+    throw new Error(msg);
+  }
+  return r;
+}
+
+// 列出 App Folder 內的檔案
+// query 範例：'name = "tracker.json"'、'name contains "snapshot-"'、'mimeType = "application/json"'
+// 回傳：[{ id, name, modifiedTime, version, size, mimeType }, ...]
+async function driveListAppFolder(query) {
+  const params = new URLSearchParams({
+    spaces: 'appDataFolder',
+    fields: 'files(id, name, modifiedTime, version, size, mimeType)',
+    pageSize: '1000',
+    orderBy: 'modifiedTime desc',
+  });
+  if (query) params.set('q', query);
+  const r = await driveFetch('https://www.googleapis.com/drive/v3/files?' + params.toString());
+  const data = await r.json();
+  return data.files || [];
+}
+
+// 取得單一檔案的 metadata（不含內容）
+async function driveGetFileMeta(fileId) {
+  const params = new URLSearchParams({
+    fields: 'id, name, modifiedTime, version, size, mimeType',
+  });
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?${params.toString()}`;
+  const r = await driveFetch(url);
+  return r.json();
+}
+
+// 下載檔案內容（純文字，呼叫端自己解 JSON）
+async function driveDownloadFile(fileId) {
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const r = await driveFetch(url);
+  return r.text();
+}
+
+// 在 App Folder 建立新檔
+// content 可以是字串（直接寫入）或物件（自動 JSON.stringify）
+// 回傳：{ id, name, modifiedTime, version }
+async function driveCreateFile(name, content, mimeType = 'application/json') {
+  const metadata = {
+    name,
+    parents: ['appDataFolder'],
+    mimeType,
+  };
+  const boundary = '----driveBoundary' + Math.random().toString(36).slice(2);
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    `Content-Type: ${mimeType}`,
+    '',
+    typeof content === 'string' ? content : JSON.stringify(content),
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+  const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime,version';
+  const r = await driveFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  return r.json();
+}
+
+// 更新既有檔內容（不改 metadata；要改名請另外用 PATCH metadata-only）
+async function driveUpdateFile(fileId, content, mimeType = 'application/json') {
+  const url = `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media&fields=id,name,modifiedTime,version`;
+  const r = await driveFetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': mimeType },
+    body: typeof content === 'string' ? content : JSON.stringify(content),
+  });
+  return r.json();
+}
+
+// 刪除檔（snapshot prune 用）
+async function driveDeleteFile(fileId) {
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
+  await driveFetch(url, { method: 'DELETE' });
+  return true;
+}
+
+// ============== ☁️ Drive Sync Layer（v3.0.0-alpha.2 起新增）==============
+// 把 v3 的 state + config + paymentAccounts 雙寫到 Drive App Folder 的 tracker.json
+// metadata wrapper 結構（schemaVersion / version / lastModifiedAt / lastModifiedBy / data）
+// 後續 commit 會在這個 layer 加：debounce 雙寫、三方合併、衝突 modal、snapshot
+
+// localStorage cloud meta：{ trackerFileId, trackerCreatedAt, lastSyncedAt, lastSyncedVersion }
+// 跟 CLOUD_AUTH_KEY 分開：auth 跟 sync 兩件事獨立持久化（auth 過期不該清掉 fileId）
+const CLOUD_META_KEY = 'cloud-freelance-tracker-meta';
+const TRACKER_FILENAME = 'tracker.json';
+
+function cloudGetMeta() {
+  try {
+    const raw = localStorage.getItem(CLOUD_META_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) { return {}; }
+}
+
+function cloudSaveMeta(patch) {
+  try {
+    const cur = cloudGetMeta();
+    localStorage.setItem(CLOUD_META_KEY, JSON.stringify({ ...cur, ...patch }));
+  } catch (e) { console.warn('[cloud-sync] meta save failed:', e); }
+}
+
+// 把當前 state + config 包成 tracker.json metadata wrapper
+// prevVersion：本機已知的雲端版本號（首次建檔填 0；推送時填上次拉到的 version）
+function buildTrackerWrapper(prevVersion = 0) {
+  const meta = cloudGetMeta();
+  const deviceLabel = (typeof getDeviceLabel === 'function') ? getDeviceLabel() : '未命名裝置';
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    version: (prevVersion || 0) + 1,
+    lastModifiedAt: new Date().toISOString(),
+    lastModifiedBy: deviceLabel,
+    createdAt: meta.trackerCreatedAt || new Date().toISOString(),
+    data: {
+      clients: state.clients || [],
+      jobs: state.jobs || [],
+      config: config || {}
+    }
+  };
+}
+
+// 解 Drive 上的 tracker.json 內容並驗證
+// 回傳：{ ok: true, data, meta } 或 { ok: false, error: '錯誤訊息' }
+function unwrapTracker(jsonText) {
+  let parsed;
+  try { parsed = JSON.parse(jsonText); }
+  catch (_) { return { ok: false, error: 'tracker.json 不是合法 JSON' }; }
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, error: 'tracker.json 結構不正確（不是物件）' };
+  }
+  if (!parsed.data || typeof parsed.data !== 'object') {
+    return { ok: false, error: 'tracker.json 缺少 data 區塊（schema 不對）' };
+  }
+  if (parsed.schemaVersion && parsed.schemaVersion > CURRENT_SCHEMA_VERSION) {
+    return { ok: false, error: `tracker.json 的 schema v${parsed.schemaVersion} 比本機支援的 v${CURRENT_SCHEMA_VERSION} 新；請更新本機到最新版後再試` };
+  }
+  return {
+    ok: true,
+    data: parsed.data,
+    meta: {
+      schemaVersion: parsed.schemaVersion || 1,
+      version: parsed.version || 1,
+      lastModifiedAt: parsed.lastModifiedAt || null,
+      lastModifiedBy: parsed.lastModifiedBy || null,
+      createdAt: parsed.createdAt || null
+    }
+  };
+}
+
+// 把雲端 data 套用到本機 state + config + localStorage + 重繪
+function applyTrackerData(data) {
+  if (Array.isArray(data.clients)) state.clients = data.clients;
+  if (Array.isArray(data.jobs)) state.jobs = data.jobs;
+  if (data.config && typeof data.config === 'object') config = data.config;
+  // 跑一次 migrations 以防雲端資料 schema 較舊
+  if (typeof runMigrations === 'function') runMigrations(state);
+  if (typeof ensurePaymentAccounts === 'function') ensurePaymentAccounts();
+  // 寫回 localStorage（v2 既有 save() 會處理 STORAGE_KEY + CONFIG_KEY）
+  if (typeof save === 'function') save();
+  // 重繪 UI
+  if (typeof renderAll === 'function') renderAll();
+}
+
+// 本機是否完全空白（沒業主、沒案件 → 視為「全新裝置」可直接拉雲端）
+function isLocalDataEmpty() {
+  const noClients = !state.clients || state.clients.length === 0;
+  const noJobs = !state.jobs || state.jobs.length === 0;
+  return noClients && noJobs;
+}
+
+// 登入後初始化 tracker.json
+// - 雲端沒檔 → 用本機建一個（先 push）
+// - 雲端有檔 + 本機空白 → 自動 pull
+// - 雲端有檔 + 本機有資料 → 跳 prompt 問使用者（α2-4 三方合併上線後改成 modal）
+async function cloudInitTrackerFile() {
+  if (!isCloudSignedIn()) return;
+
+  let trackerFile = null;
+  try {
+    const files = await driveListAppFolder(`name = "${TRACKER_FILENAME}" and trashed = false`);
+    trackerFile = files[0] || null;
+  } catch (e) {
+    console.error('[cloud-init] list failed:', e);
+    if (e instanceof DriveAuthError) {
+      alert('Drive 連線失敗：' + e.message);
+    } else {
+      alert('讀取 Drive 應用程式資料夾失敗：' + e.message);
+    }
+    return;
+  }
+
+  // Case A：雲端沒檔 → 建一個
+  if (!trackerFile) {
+    try {
+      const wrapper = buildTrackerWrapper(0);
+      const created = await driveCreateFile(TRACKER_FILENAME, wrapper);
+      cloudSaveMeta({
+        trackerFileId: created.id,
+        trackerCreatedAt: wrapper.createdAt,
+        lastSyncedAt: wrapper.lastModifiedAt,
+        lastSyncedVersion: wrapper.version,
+      });
+      // α2-4a：剛 push 上去的內容就是「上次成功同步的快照」
+      cloudSaveLastSyncedSnapshot(wrapper.data);
+      console.log('[cloud-init] 已在 Drive 建立 tracker.json:', created.id);
+      if (typeof logAction === 'function') {
+        logAction('cloud-init-create', { fileId: created.id, version: wrapper.version });
+      }
+    } catch (e) {
+      console.error('[cloud-init] create failed:', e);
+      alert('在 Drive 建立 tracker.json 失敗：' + e.message);
+    }
+    return;
+  }
+
+  // Case B/C：雲端有檔 → 先下載
+  let remoteText;
+  try {
+    remoteText = await driveDownloadFile(trackerFile.id);
+  } catch (e) {
+    console.error('[cloud-init] download failed:', e);
+    alert('下載 Drive 上的 tracker.json 失敗：' + e.message);
+    return;
+  }
+
+  const result = unwrapTracker(remoteText);
+  if (!result.ok) {
+    console.error('[cloud-init] unwrap failed:', result.error);
+    alert('Drive 上的 tracker.json 解析失敗：' + result.error +
+          '\n\n為避免覆寫雲端資料，本次不執行同步。請手動檢查 Drive App Folder 內的檔案。');
+    cloudSaveMeta({ trackerFileId: trackerFile.id });  // 至少先記下 fileId
+    return;
+  }
+
+  // Case B：本機空白 → 自動 pull
+  if (isLocalDataEmpty()) {
+    applyTrackerData(result.data);
+    cloudSaveMeta({
+      trackerFileId: trackerFile.id,
+      trackerCreatedAt: result.meta.createdAt,
+      lastSyncedAt: result.meta.lastModifiedAt,
+      lastSyncedVersion: result.meta.version,
+    });
+    // α2-4a：剛 pull 下來的內容就是「上次成功同步的快照」
+    cloudSaveLastSyncedSnapshot(result.data);
+    console.log('[cloud-init] 本機空白，已從 Drive 拉取 tracker.json');
+    if (typeof logAction === 'function') {
+      logAction('cloud-init-pull', { fileId: trackerFile.id, version: result.meta.version });
+    }
+    return;
+  }
+
+  // Case C：兩邊都有資料
+  // α2-4b：有 last-synced 快照（共同祖先）→ 走三方合併（自動套用無衝突部分、衝突跳 modal）
+  // 沒有快照（這台機從未跟這個 Drive 同步過）→ 沒有 base 不能合併，fallback 用簡易 prompt
+  if (cloudGetLastSyncedSnapshot()) {
+    await cloudResolveAndMerge({
+      remoteData: result.data,
+      remoteMeta: result.meta,
+      fileId: trackerFile.id,
+      trackerCreatedAt: result.meta.createdAt
+    });
+    cloudSaveMeta({ trackerFileId: trackerFile.id, trackerCreatedAt: result.meta.createdAt });
+    return;
+  }
+
+  // Fallback：首次裝置 link、沒有 base → 簡易 prompt 三選一
+  const localCounts = `本機：${state.clients.length} 業主 / ${state.jobs.length} 案件`;
+  const remoteCounts = `雲端：${(result.data.clients || []).length} 業主 / ${(result.data.jobs || []).length} 案件 (v${result.meta.version})`;
+  const choice = window.prompt(
+    `偵測到 Drive 跟本機都有資料：\n\n  ${localCounts}\n  ${remoteCounts}\n\n` +
+    `請輸入：\n  pull  = 用 Drive 的覆蓋本機\n  push  = 用本機的覆蓋 Drive\n  (留空) = 取消（本次不同步，待 α2-4 三方合併上線後再處理）`,
+    ''
+  );
+  const action = (choice || '').trim().toLowerCase();
+
+  if (action === 'pull') {
+    applyTrackerData(result.data);
+    cloudSaveMeta({
+      trackerFileId: trackerFile.id,
+      trackerCreatedAt: result.meta.createdAt,
+      lastSyncedAt: result.meta.lastModifiedAt,
+      lastSyncedVersion: result.meta.version,
+    });
+    cloudSaveLastSyncedSnapshot(result.data);  // α2-4a
+    if (typeof logAction === 'function') {
+      logAction('cloud-init-pull', { fileId: trackerFile.id, version: result.meta.version });
+    }
+  } else if (action === 'push') {
+    try {
+      const wrapper = buildTrackerWrapper(result.meta.version);
+      const updated = await driveUpdateFile(trackerFile.id, wrapper);
+      cloudSaveMeta({
+        trackerFileId: trackerFile.id,
+        lastSyncedAt: wrapper.lastModifiedAt,
+        lastSyncedVersion: wrapper.version,
+      });
+      cloudSaveLastSyncedSnapshot(wrapper.data);  // α2-4a
+      if (typeof logAction === 'function') {
+        logAction('cloud-init-push', { fileId: trackerFile.id, version: wrapper.version });
+      }
+    } catch (e) {
+      console.error('[cloud-init] push failed:', e);
+      alert('推送本機資料到 Drive 失敗：' + e.message);
+    }
+  } else {
+    // 取消：只記下 fileId，不動資料
+    cloudSaveMeta({ trackerFileId: trackerFile.id });
+    console.log('[cloud-init] 使用者取消，只記下 trackerFileId');
+  }
+
+  // α2-7b：init 結束（不論哪條路徑）→ 確保今天有 auto snapshot（fire-and-forget）
+  cloudEnsureDailyAutoSnapshot().catch(e => console.error('[snapshot-auto] async:', e));
+}
+
+// ---------- 衝突解決 modal（α2-4b）----------
+// 流程：cloudResolveAndMerge() → mergeStates() → 無衝突自動 push、有衝突開 modal
+// modal 內容用 JS 動態建 DOM，避免動到 index.html
+
+let cloudConflictState = null;  // { mergedTentative, conflicts, choices, fileId, remoteMeta, trackerCreatedAt }
+
+// 主入口：拿到遠端資料後做三方合併、決定自動套用還是開 modal
+async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCreatedAt }) {
+  const base = cloudGetLastSyncedSnapshot();
+  const local = {
+    clients: state.clients,
+    jobs: state.jobs,
+    config: config
+  };
+  const result = mergeStates(base, local, remoteData);
+
+  if (result.clean) {
+    // 無衝突 → 直接套用合併結果 + push 上 Drive
+    applyTrackerData(result.merged);
+    try {
+      const wrapper = buildTrackerWrapper(remoteMeta.version);
+      const updated = await driveUpdateFile(fileId, wrapper);
+      cloudSaveMeta({
+        trackerFileId: fileId,
+        trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
+        lastSyncedAt: wrapper.lastModifiedAt,
+        lastSyncedVersion: wrapper.version,
+      });
+      cloudSaveLastSyncedSnapshot(wrapper.data);
+      if (typeof logAction === 'function') {
+        logAction('cloud-merge-clean', { fileId, version: wrapper.version });
+      }
+      console.log(`[cloud-merge] 自動合併完成（無衝突）→ Drive 已更新到 v${wrapper.version}`);
+    } catch (e) {
+      console.error('[cloud-merge] push after clean merge failed:', e);
+      alert('自動合併成功但推送 Drive 失敗：' + e.message);
+    }
+    return;
+  }
+
+  // 有衝突 → 開 modal
+  cloudShowConflictModal({
+    mergedTentative: result.merged,
+    conflicts: result.conflicts,
+    fileId,
+    remoteMeta,
+    trackerCreatedAt
+  });
+}
+
+function cloudShowConflictModal({ mergedTentative, conflicts, fileId, remoteMeta, trackerCreatedAt }) {
+  cloudConflictState = {
+    mergedTentative,
+    conflicts,
+    choices: conflicts.map(() => 'local'),  // 預設全選本機
+    fileId,
+    remoteMeta,
+    trackerCreatedAt
+  };
+
+  // 移除既有 overlay（若有）
+  const old = document.getElementById('cloud-conflict-overlay');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cloud-conflict-overlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);' +
+    'display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const dialog = document.createElement('div');
+  dialog.style.cssText =
+    'background:var(--card);color:var(--text);border-radius:12px;' +
+    'padding:20px;max-width:720px;width:100%;max-height:85vh;overflow:auto;' +
+    'box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+
+  dialog.innerHTML =
+    '<h2 style="margin:0 0 12px 0;font-size:18px;">⚠️ 偵測到資料衝突</h2>' +
+    `<p style="color:var(--muted);font-size:13px;margin-bottom:12px;">` +
+    `本機跟雲端都改了相同欄位（共 ${conflicts.length} 筆衝突）。<br>` +
+    `請逐筆選擇要保留哪邊的版本（無衝突的改動已自動合併，不需處理）。` +
+    `</p>` +
+    '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
+    `  <button class="btn btn-outline btn-sm" onclick="cloudConflictBatchPick(\'local\')">全部用本機</button>` +
+    `  <button class="btn btn-outline btn-sm" onclick="cloudConflictBatchPick(\'remote\')">全部用雲端</button>` +
+    '</div>' +
+    '<div id="cloud-conflict-list"></div>' +
+    '<div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">' +
+    '  <button class="btn btn-outline" onclick="cloudConflictCancel()">取消（不上傳）</button>' +
+    '  <button class="btn btn-primary" onclick="cloudConflictApply()">套用解決</button>' +
+    '</div>';
+
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  cloudRenderConflictList();
+}
+
+function cloudRenderConflictList() {
+  const listEl = document.getElementById('cloud-conflict-list');
+  if (!listEl || !cloudConflictState) return;
+  const html = cloudConflictState.conflicts.map((c, i) => {
+    const desc = cloudDescribeConflict(c);
+    const choice = cloudConflictState.choices[i];
+    return (
+      '<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;">' +
+      `  <div style="font-weight:600;margin-bottom:6px;font-size:13px;">${cloudEscapeHtml(desc.title)}</div>` +
+      `  <label style="display:block;margin:4px 0;cursor:pointer;font-size:13px;">` +
+      `    <input type="radio" name="cf${i}" value="local" ${choice === 'local' ? 'checked' : ''}` +
+      `           onchange="cloudConflictSetChoice(${i}, 'local')">` +
+      `    <strong>本機：</strong> ${cloudEscapeHtml(desc.localShort)}` +
+      `  </label>` +
+      `  <label style="display:block;margin:4px 0;cursor:pointer;font-size:13px;">` +
+      `    <input type="radio" name="cf${i}" value="remote" ${choice === 'remote' ? 'checked' : ''}` +
+      `           onchange="cloudConflictSetChoice(${i}, 'remote')">` +
+      `    <strong>雲端：</strong> ${cloudEscapeHtml(desc.remoteShort)}` +
+      `  </label>` +
+      '</div>'
+    );
+  }).join('');
+  listEl.innerHTML = html;
+}
+
+function cloudDescribeConflict(c) {
+  const typeName = { client: '業主', job: '案件', config: '設定' }[c.type] || c.type;
+  if (c.kind === 'delete-vs-edit') {
+    const sideText = c.side === 'local-deleted' ? '本機已刪 vs 雲端有改動' : '雲端已刪 vs 本機有改動';
+    return {
+      title: `${typeName} ${c.id} — ${sideText}`,
+      localShort: c.localValue ? '保留（含本機改動）' : '刪除',
+      remoteShort: c.remoteValue ? '保留（含雲端改動）' : '刪除'
+    };
+  }
+  return {
+    title: `${typeName} ${c.id} → 欄位「${c.field}」`,
+    localShort: cloudFormatValue(c.localValue),
+    remoteShort: cloudFormatValue(c.remoteValue)
+  };
+}
+
+function cloudFormatValue(v) {
+  if (v == null) return '(空)';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') return v.length > 80 ? v.slice(0, 80) + '…' : v;
+  try {
+    const s = JSON.stringify(v);
+    return s.length > 80 ? s.slice(0, 80) + '…' : s;
+  } catch (_) { return String(v); }
+}
+
+function cloudEscapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// 內聯 onclick 呼叫的函式必須掛在 window；用全域宣告即可
+function cloudConflictSetChoice(idx, side) {
+  if (!cloudConflictState) return;
+  cloudConflictState.choices[idx] = side;
+}
+
+function cloudConflictBatchPick(side) {
+  if (!cloudConflictState) return;
+  cloudConflictState.choices = cloudConflictState.choices.map(() => side);
+  cloudRenderConflictList();
+}
+
+function cloudConflictCancel() {
+  const overlay = document.getElementById('cloud-conflict-overlay');
+  if (overlay) overlay.remove();
+  cloudConflictState = null;
+  console.log('[cloud-merge] 使用者取消衝突解決，本次不同步');
+}
+
+async function cloudConflictApply() {
+  if (!cloudConflictState) return;
+  const { mergedTentative, conflicts, choices, fileId, remoteMeta, trackerCreatedAt } = cloudConflictState;
+
+  // 依使用者選擇覆寫 mergedTentative 中對應欄位
+  conflicts.forEach((c, i) => {
+    const chosen = choices[i];
+    const valueToUse = chosen === 'local' ? c.localValue : c.remoteValue;
+
+    if (c.kind === 'field-conflict') {
+      if (c.type === 'config') {
+        if (mergedTentative.config) mergedTentative.config[c.field] = valueToUse;
+      } else {
+        const list = c.type === 'client' ? mergedTentative.clients : mergedTentative.jobs;
+        const item = list && list.find(x => x.id === c.id);
+        if (item) item[c.field] = valueToUse;
+      }
+    } else if (c.kind === 'delete-vs-edit') {
+      const list = c.type === 'client' ? mergedTentative.clients : mergedTentative.jobs;
+      if (!list) return;
+      const idx = list.findIndex(x => x.id === c.id);
+      // 預設 mergedTentative 在 _cloudMergeEntity 中：
+      //   side === 'local-deleted'  → mergedTentative 保留了 remote
+      //   side === 'remote-deleted' → mergedTentative 保留了 local
+      // 使用者若選相反那邊，要把該 entity 從 list 移除
+      if (chosen === 'local' && c.side === 'local-deleted' && idx >= 0) list.splice(idx, 1);
+      if (chosen === 'remote' && c.side === 'remote-deleted' && idx >= 0) list.splice(idx, 1);
+    }
+  });
+
+  // 套用合併結果到本機 + 推 Drive
+  applyTrackerData(mergedTentative);
+
+  try {
+    const wrapper = buildTrackerWrapper(remoteMeta.version);
+    const updated = await driveUpdateFile(fileId, wrapper);
+    cloudSaveMeta({
+      trackerFileId: fileId,
+      trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
+      lastSyncedAt: wrapper.lastModifiedAt,
+      lastSyncedVersion: wrapper.version,
+    });
+    cloudSaveLastSyncedSnapshot(wrapper.data);
+    if (typeof logAction === 'function') {
+      logAction('cloud-merge-resolved', {
+        fileId, version: wrapper.version,
+        conflictsResolved: conflicts.length,
+        localCount: choices.filter(c => c === 'local').length,
+        remoteCount: choices.filter(c => c === 'remote').length
+      });
+    }
+    console.log(`[cloud-merge] 衝突已解決，Drive 已更新到 v${wrapper.version}`);
+  } catch (e) {
+    console.error('[cloud-merge] push after resolve failed:', e);
+    alert('套用合併成功但推送 Drive 失敗：' + e.message);
+  }
+
+  const overlay = document.getElementById('cloud-conflict-overlay');
+  if (overlay) overlay.remove();
+  cloudConflictState = null;
+}
+
+// ---------- 三方合併引擎（α2-4a）----------
+// 跟「上次成功同步的快照」（base）比對 local 跟 remote 三方
+// - 只有單邊改動的欄位 → 自動套用該邊
+// - 兩邊都改了同一欄位且值不同 → 收集成 conflict 給 α2-4b modal 處理
+//
+// 共同祖先快照存在獨立的 localStorage key，避免跟 cloud-freelance-tracker-meta 混淆
+// 每次 push / pull 成功後都要更新這份快照（push 用 merged 內容、pull 用 remote 內容）
+
+const CLOUD_LAST_SYNCED_KEY = 'cloud-freelance-tracker-last-synced-snapshot';
+
+function cloudSaveLastSyncedSnapshot(data) {
+  try {
+    localStorage.setItem(CLOUD_LAST_SYNCED_KEY, JSON.stringify({
+      capturedAt: new Date().toISOString(),
+      data
+    }));
+  } catch (e) { console.warn('[cloud-merge] snapshot save failed:', e); }
+}
+
+function cloudGetLastSyncedSnapshot() {
+  try {
+    const raw = localStorage.getItem(CLOUD_LAST_SYNCED_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.data ? parsed.data : null;
+  } catch (_) { return null; }
+}
+
+// 簡單 deep equal（針對本 schema 的純物件 / 陣列 / 原始型別，沒有 Date / Map / Set）
+function _cloudDeepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!_cloudDeepEqual(a[i], b[i])) return false;
+    return true;
+  }
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (!_cloudDeepEqual(a[k], b[k])) return false;
+  return true;
+}
+
+// 合併單一 entity（client / job）。回傳 { merged?, deleted?, conflicts? }
+function _cloudMergeEntity(type, id, base, local, remote) {
+  // 雙邊都沒了
+  if (!local && !remote) return { deleted: true };
+
+  // 單邊缺：判斷是新增、是刪除、還是 delete-vs-edit
+  if (!local) {
+    if (!base) return { merged: remote };                          // remote 新增
+    if (_cloudDeepEqual(base, remote)) return { deleted: true };   // local 刪、remote 沒動 → 同意刪
+    return {                                                       // local 刪 vs remote 改
+      mergedTentative: remote,
+      conflicts: [{ type, id, kind: 'delete-vs-edit', side: 'local-deleted',
+                    baseValue: base, localValue: null, remoteValue: remote }]
+    };
+  }
+  if (!remote) {
+    if (!base) return { merged: local };                           // local 新增
+    if (_cloudDeepEqual(base, local)) return { deleted: true };    // remote 刪、local 沒動 → 同意刪
+    return {
+      mergedTentative: local,
+      conflicts: [{ type, id, kind: 'delete-vs-edit', side: 'remote-deleted',
+                    baseValue: base, localValue: local, remoteValue: null }]
+    };
+  }
+
+  // 三邊都有 → field-level merge
+  const merged = {};
+  const conflicts = [];
+  const baseObj = base || {};
+  const allKeys = new Set([...Object.keys(baseObj), ...Object.keys(local), ...Object.keys(remote)]);
+  for (const k of allKeys) {
+    const bV = baseObj[k], lV = local[k], rV = remote[k];
+    const lChanged = !_cloudDeepEqual(bV, lV);
+    const rChanged = !_cloudDeepEqual(bV, rV);
+    if (!lChanged && !rChanged) {
+      if (lV !== undefined) merged[k] = lV;
+    } else if (lChanged && !rChanged) {
+      merged[k] = lV;
+    } else if (!lChanged && rChanged) {
+      merged[k] = rV;
+    } else if (_cloudDeepEqual(lV, rV)) {
+      merged[k] = lV;
+    } else {
+      // 真衝突：兩邊都改、且值不同
+      conflicts.push({ type, id, kind: 'field-conflict', field: k,
+                       baseValue: bV, localValue: lV, remoteValue: rV });
+      merged[k] = lV;  // 暫保留 local，等使用者決定
+    }
+  }
+  return conflicts.length > 0
+    ? { mergedTentative: merged, conflicts }
+    : { merged };
+}
+
+// 合併 entity 陣列（clients / jobs）
+function _cloudMergeEntityList(type, baseList, localList, remoteList) {
+  const idOf = (x) => x && x.id;
+  const baseMap = new Map((baseList || []).map(x => [idOf(x), x]));
+  const localMap = new Map((localList || []).map(x => [idOf(x), x]));
+  const remoteMap = new Map((remoteList || []).map(x => [idOf(x), x]));
+  const allIds = new Set([...baseMap.keys(), ...localMap.keys(), ...remoteMap.keys()]);
+
+  const merged = [];
+  const conflicts = [];
+  for (const id of allIds) {
+    if (!id) continue;  // 異常資料：跳過沒 id 的
+    const r = _cloudMergeEntity(type, id, baseMap.get(id), localMap.get(id), remoteMap.get(id));
+    if (r.deleted) continue;
+    if (r.merged) merged.push(r.merged);
+    else if (r.mergedTentative) {
+      merged.push(r.mergedTentative);
+      if (r.conflicts) conflicts.push(...r.conflicts);
+    }
+  }
+  return { merged, conflicts };
+}
+
+// 合併 config（單一物件，做 field-level diff；含巢狀 userInfo / paymentAccounts）
+function _cloudMergeConfig(base, local, remote) {
+  const merged = {};
+  const conflicts = [];
+  const baseObj = base || {};
+  const localObj = local || {};
+  const remoteObj = remote || {};
+  const allKeys = new Set([...Object.keys(baseObj), ...Object.keys(localObj), ...Object.keys(remoteObj)]);
+  for (const k of allKeys) {
+    const bV = baseObj[k], lV = localObj[k], rV = remoteObj[k];
+    const lChanged = !_cloudDeepEqual(bV, lV);
+    const rChanged = !_cloudDeepEqual(bV, rV);
+    if (!lChanged && !rChanged) {
+      if (lV !== undefined) merged[k] = lV;
+    } else if (lChanged && !rChanged) {
+      merged[k] = lV;
+    } else if (!lChanged && rChanged) {
+      merged[k] = rV;
+    } else if (_cloudDeepEqual(lV, rV)) {
+      merged[k] = lV;
+    } else {
+      conflicts.push({ type: 'config', id: k, kind: 'field-conflict', field: k,
+                       baseValue: bV, localValue: lV, remoteValue: rV });
+      merged[k] = lV;
+    }
+  }
+  return { merged, conflicts };
+}
+
+// 主入口：對 { clients, jobs, config } 三方合併
+// 回傳：{ merged, conflicts, clean }
+function mergeStates(base, local, remote) {
+  const baseData = base || {};
+  const c = _cloudMergeEntityList('client', baseData.clients, local.clients, remote.clients);
+  const j = _cloudMergeEntityList('job', baseData.jobs, local.jobs, remote.jobs);
+  const cfg = _cloudMergeConfig(baseData.config, local.config, remote.config);
+  const conflicts = [...c.conflicts, ...j.conflicts, ...cfg.conflicts];
+  return {
+    merged: { clients: c.merged, jobs: j.merged, config: cfg.merged },
+    conflicts,
+    clean: conflicts.length === 0
+  };
+}
+
+// ---------- 雙寫機制（α2-3）----------
+// v2 既有的 save() 會在最後呼叫 cloudSchedulePush()
+// 策略：每次 save() 觸發後 2 秒內若無新 save() → 才實際推送到 Drive
+// 防止使用者連續打字 / 連點按鈕導致每秒打 N 次 API
+
+let cloudPushTimer = null;        // setTimeout 控制
+let cloudPushInProgress = false;  // 推送中旗標（防併發）
+const CLOUD_PUSH_DEBOUNCE_MS = 2000;
+
+// 由 save() 呼叫；登入後且 init 完成才實際排程
+function cloudSchedulePush() {
+  if (!isCloudSignedIn()) return;
+  const meta = cloudGetMeta();
+  if (!meta.trackerFileId) return;  // tracker.json 還沒 init 完成
+
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => {
+    cloudPushTimer = null;
+    cloudPushNow().catch(e => console.error('[cloud-push] async failed:', e));
+  }, CLOUD_PUSH_DEBOUNCE_MS);
+
+  // α2-5：indicator 立刻顯示「⌛ 待同步…」
+  cloudSetSyncStatus('pending');
+}
+
+// 立刻推送（debounce 結束時被呼叫，或將來 sync indicator「立刻同步」按鈕呼叫）
+async function cloudPushNow() {
+  if (cloudPushInProgress) return;  // 防併發：上一次還沒回來就先放棄這次
+  if (!isCloudSignedIn()) return;
+  const meta = cloudGetMeta();
+  if (!meta.trackerFileId) {
+    console.warn('[cloud-push] 沒有 trackerFileId，跳過（init 還沒跑完？）');
+    return;
+  }
+
+  cloudPushInProgress = true;
+  cloudSetSyncStatus('syncing');  // α2-5
+  try {
+    const wrapper = buildTrackerWrapper(meta.lastSyncedVersion || 0);
+    const updated = await driveUpdateFile(meta.trackerFileId, wrapper);
+    cloudSaveMeta({
+      lastSyncedAt: wrapper.lastModifiedAt,
+      lastSyncedVersion: wrapper.version,
+    });
+    cloudSaveLastSyncedSnapshot(wrapper.data);  // α2-4a：本機剛 push 的就是新的「上次成功同步」
+    if (typeof logAction === 'function') {
+      logAction('cloud-push', { fileId: meta.trackerFileId, version: wrapper.version });
+    }
+    console.log(`[cloud-push] ✓ Drive 已更新到 v${wrapper.version}`);
+    cloudSetSyncStatus('idle');  // α2-5
+    // α2-7b：push 成功後檢查今天是否要建 auto snapshot（內含 1 小時節流）
+    cloudEnsureDailyAutoSnapshot().catch(e => console.error('[snapshot-auto] async:', e));
+  } catch (e) {
+    console.error('[cloud-push] failed:', e);
+    if (typeof logAction === 'function') {
+      logAction('cloud-push-error', { error: e.message || String(e) });
+    }
+    cloudSetSyncStatus('error', e.message || String(e));  // α2-5
+    // 不彈 alert：本機資料還在 localStorage 安全，下次 save() 還會再試
+  } finally {
+    cloudPushInProgress = false;
+  }
+}
+
+// ---------- Drive snapshot（α2-7a）----------
+// 在 App Folder 內每筆 snapshot 是獨立 .json 檔
+// 命名：snapshot-{ISO ts}-{auto|manual}[-{safe label}].json
+// 每筆內容：{ schemaVersion, snapshotMeta: {id, type, label, createdAt, deviceName}, data }
+// auto = 自動每日（α2-7b 才接觸發）；manual = 使用者按按鈕建立的（永久保留）
+
+const SNAPSHOT_FILENAME_PREFIX = 'snapshot-';
+
+// 把使用者輸入的 label 轉成檔名安全字串（保留中英數字、底線、連字號）
+function _snapshotSafeLabel(label) {
+  if (!label) return '';
+  return String(label).replace(/[^A-Za-z0-9_一-鿿-]/g, '').slice(0, 30);
+}
+
+async function cloudCreateSnapshot(type, label) {
+  if (!isCloudSignedIn()) throw new Error('未登入 Google');
+  if (type !== 'auto' && type !== 'manual') throw new Error('snapshot type 必須是 auto 或 manual');
+
+  const createdAt = new Date().toISOString();
+  const snapshot = {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    snapshotMeta: {
+      id: 'snap_' + Math.random().toString(36).slice(2, 10),
+      type,
+      label: label || '',
+      createdAt,
+      deviceName: (typeof getDeviceLabel === 'function') ? getDeviceLabel() : '未命名裝置'
+    },
+    data: {
+      clients: state.clients || [],
+      jobs: state.jobs || [],
+      config: config || {}
+    }
+  };
+
+  const ts = createdAt.replace(/[:.]/g, '-');  // ISO 字串裡的 : 跟 . Drive 都允許但讀不順
+  let filename = `${SNAPSHOT_FILENAME_PREFIX}${ts}-${type}`;
+  const safe = _snapshotSafeLabel(label);
+  if (safe) filename += '-' + safe;
+  filename += '.json';
+
+  const created = await driveCreateFile(filename, snapshot);
+  if (typeof logAction === 'function') {
+    logAction('cloud-snapshot-create', { fileId: created.id, type, label: label || '' });
+  }
+  return created;
+}
+
+async function cloudListSnapshots() {
+  if (!isCloudSignedIn()) return [];
+  const query = `name contains "${SNAPSHOT_FILENAME_PREFIX}" and trashed = false`;
+  const files = await driveListAppFolder(query);
+  return files.filter(f => f.name && f.name.startsWith(SNAPSHOT_FILENAME_PREFIX) && f.name.endsWith('.json'));
+}
+
+async function cloudDownloadSnapshot(fileId) {
+  return driveDownloadFile(fileId);
+}
+
+async function cloudRestoreSnapshot(fileId) {
+  if (!isCloudSignedIn()) { alert('請先登入'); return false; }
+
+  // 先建一筆「還原前-」manual snapshot 保險（即使還原錯了也回得來）
+  try {
+    const safetyLabel = '還原前-' + new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+    await cloudCreateSnapshot('manual', safetyLabel);
+  } catch (e) {
+    console.warn('[snapshot-restore] pre-restore safety snapshot failed:', e);
+    // 不阻擋還原；使用者已選擇要還原
+  }
+
+  let text;
+  try { text = await cloudDownloadSnapshot(fileId); }
+  catch (e) { alert('下載 snapshot 失敗：' + e.message); return false; }
+
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch (_) { alert('snapshot 不是合法 JSON'); return false; }
+
+  if (!parsed.data || typeof parsed.data !== 'object') {
+    alert('snapshot 結構不正確，缺 data 區塊');
+    return false;
+  }
+
+  applyTrackerData(parsed.data);
+
+  // 把還原後的內容立刻 push 到 Drive 當新的 tracker.json
+  const meta = cloudGetMeta();
+  if (meta.trackerFileId) {
+    try {
+      const wrapper = buildTrackerWrapper(meta.lastSyncedVersion || 0);
+      await driveUpdateFile(meta.trackerFileId, wrapper);
+      cloudSaveMeta({
+        lastSyncedAt: wrapper.lastModifiedAt,
+        lastSyncedVersion: wrapper.version
+      });
+      cloudSaveLastSyncedSnapshot(wrapper.data);
+    } catch (e) {
+      console.error('[snapshot-restore] push to tracker.json failed:', e);
+      alert('資料已在本機還原成功，但推回 Drive tracker.json 失敗：' + e.message + '\n下次手動「立即同步」再試');
+    }
+  }
+
+  if (typeof logAction === 'function') {
+    logAction('cloud-snapshot-restore', { fileId });
+  }
+  return true;
+}
+
+async function cloudDeleteSnapshot(fileId) {
+  if (!isCloudSignedIn()) { alert('請先登入'); return; }
+  if (!confirm('確定要刪除這筆 snapshot？此動作無法還原。')) return;
+  try {
+    await driveDeleteFile(fileId);
+    if (typeof logAction === 'function') {
+      logAction('cloud-snapshot-delete', { fileId });
+    }
+    await cloudRefreshSnapshotList();
+  } catch (e) {
+    alert('刪除 snapshot 失敗：' + e.message);
+  }
+}
+
+// ---------- snapshot UI helpers（α2-7a）----------
+
+async function cloudCreateManualSnapshot() {
+  const labelInput = document.getElementById('cloud-snapshot-manual-label');
+  const label = labelInput ? labelInput.value.trim() : '';
+  try {
+    await cloudCreateSnapshot('manual', label);
+    if (labelInput) labelInput.value = '';
+    await cloudRefreshSnapshotList();
+  } catch (e) {
+    alert('建立 snapshot 失敗：' + e.message);
+  }
+}
+
+async function cloudRefreshSnapshotList() {
+  const listEl = document.getElementById('cloud-snapshot-list');
+  if (!listEl) return;
+  if (!isCloudSignedIn()) {
+    listEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">請先登入 Google 才能查看備份歷史</p>';
+    return;
+  }
+  listEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">載入中…</p>';
+  try {
+    const files = await cloudListSnapshots();
+    if (files.length === 0) {
+      listEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">還沒有任何備份。在上方輸入標籤後按「📦 建立備份」開始第一筆。</p>';
+      return;
+    }
+    // 依 modifiedTime 倒序（最新在上）— driveListAppFolder 已經 orderBy modifiedTime desc，但保險再排
+    files.sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || ''));
+    listEl.innerHTML = files.map(f => _renderSnapshotItem(f)).join('');
+  } catch (e) {
+    listEl.innerHTML = `<p style="color:var(--danger);font-size:13px;">載入失敗：${cloudEscapeHtml(e.message)}</p>`;
+  }
+}
+
+function _renderSnapshotItem(f) {
+  // 解析檔名：snapshot-2026-04-29T15-30-22-123Z-auto[-label].json
+  const m = f.name.match(/^snapshot-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)-(auto|manual)(?:-(.+))?\.json$/);
+  let timeStr = f.name;
+  let type = '?', label = '';
+  if (m) {
+    // 把 ISO 還原回標準格式：2026-04-29T15-30-22-123Z → 2026-04-29T15:30:22.123Z
+    const isoCandidate = m[1].replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/, '$1T$2:$3:$4.$5Z');
+    try {
+      const d = new Date(isoCandidate);
+      if (!isNaN(d.getTime())) {
+        timeStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ` +
+                  `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      }
+    } catch(_) {}
+    type = m[2];
+    label = m[3] || '';
+  }
+  const typeIcon = type === 'manual' ? '🏷️' : '⏰';
+  const typeName = type === 'manual' ? '手動' : '自動';
+  const sizeText = _snapshotFormatBytes(f.size);
+  const labelHtml = label ? `<span style="color:var(--primary);font-weight:600;">${cloudEscapeHtml(label)}</span> ` : '';
+
+  return `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;">${typeIcon} ${labelHtml}${cloudEscapeHtml(timeStr)}</div>
+        <div style="font-size:11px;color:var(--muted);">${typeName} · ${sizeText}</div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="cloudRestoreSnapshotConfirm('${f.id}', '${cloudEscapeHtml(timeStr)}')">還原</button>
+      <button class="btn btn-outline btn-sm" onclick="cloudDeleteSnapshot('${f.id}')" title="刪除這筆 snapshot">🗑️</button>
+    </div>
+  `;
+}
+
+function _snapshotFormatBytes(bytes) {
+  if (!bytes) return '—';
+  const n = parseInt(bytes, 10);
+  if (isNaN(n)) return '—';
+  if (n < 1024) return n + ' B';
+  if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(2) + ' MB';
+}
+
+// ---------- snapshot 自動每日 + 分層保留 prune（α2-7b）----------
+// 觸發點：cloudInitTrackerFile 成功 / cloudPushNow 成功 → 都會呼叫 cloudEnsureDailyAutoSnapshot
+// 一個 session 內 1 小時節流，避免每次 push 都 list snapshots 浪費 API 配額
+
+let cloudAutoSnapshotCheckedAt = 0;
+const CLOUD_AUTO_SNAPSHOT_THROTTLE_MS = 60 * 60 * 1000;  // 1 小時
+
+async function cloudEnsureDailyAutoSnapshot() {
+  if (!isCloudSignedIn()) return;
+  if (Date.now() - cloudAutoSnapshotCheckedAt < CLOUD_AUTO_SNAPSHOT_THROTTLE_MS) return;
+  cloudAutoSnapshotCheckedAt = Date.now();
+
+  try {
+    const all = await cloudListSnapshots();
+    const today = new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
+    // 判斷今天是否已有 auto snapshot：解析檔名第一個 YYYY-MM-DD 並比對
+    const hasTodayAuto = all.some(f => {
+      const m = f.name.match(/^snapshot-(\d{4}-\d{2}-\d{2})T.*-auto\b/);
+      return m && m[1] === today;
+    });
+    if (hasTodayAuto) {
+      console.log('[snapshot-auto] 今天已有 auto snapshot，跳過');
+      return;
+    }
+    console.log('[snapshot-auto] 建立今天的 auto snapshot');
+    await cloudCreateSnapshot('auto', '');
+    // 順便跑一次 prune（分層保留）
+    await cloudPruneSnapshots();
+  } catch (e) {
+    console.error('[snapshot-auto] failed:', e);
+  }
+}
+
+// 分層保留：手動 snapshot 不動，auto snapshot 依時段密度減量
+//   最近 7 天：全留（每天 1 筆）
+//   7-30 天：每週留 1 筆（取該週最新）
+//   1-12 個月：每月留 1 筆
+//   12+ 個月：每年留 1 筆
+async function cloudPruneSnapshots() {
+  if (!isCloudSignedIn()) return;
+  try {
+    const all = await cloudListSnapshots();
+    const autos = [];
+    for (const f of all) {
+      const m = f.name.match(/^snapshot-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-auto\b/);
+      if (!m) continue;
+      const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`;
+      const dt = new Date(iso);
+      if (isNaN(dt.getTime())) continue;
+      autos.push({ id: f.id, name: f.name, dt });
+    }
+
+    if (autos.length === 0) return;
+
+    autos.sort((a, b) => b.dt - a.dt);  // 新 → 舊
+
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const toKeep = new Set();
+
+    // 最近 7 天：全留
+    autos.forEach(s => {
+      if (now - s.dt < 7 * DAY) toKeep.add(s.id);
+    });
+
+    // 7-30 天：每週留 1 筆（取該週最新者）
+    const weekBuckets = new Map();
+    autos.forEach(s => {
+      const age = now - s.dt;
+      if (age < 7 * DAY || age >= 30 * DAY) return;
+      const wk = _cloudIsoWeekKey(s.dt);
+      const cur = weekBuckets.get(wk);
+      if (!cur || s.dt > cur.dt) weekBuckets.set(wk, s);
+    });
+    weekBuckets.forEach(s => toKeep.add(s.id));
+
+    // 1-12 月：每月留 1 筆
+    const monthBuckets = new Map();
+    autos.forEach(s => {
+      const age = now - s.dt;
+      if (age < 30 * DAY || age >= 365 * DAY) return;
+      const mk = `${s.dt.getUTCFullYear()}-${String(s.dt.getUTCMonth() + 1).padStart(2, '0')}`;
+      const cur = monthBuckets.get(mk);
+      if (!cur || s.dt > cur.dt) monthBuckets.set(mk, s);
+    });
+    monthBuckets.forEach(s => toKeep.add(s.id));
+
+    // 12+ 月：每年留 1 筆
+    const yearBuckets = new Map();
+    autos.forEach(s => {
+      const age = now - s.dt;
+      if (age < 365 * DAY) return;
+      const yk = String(s.dt.getUTCFullYear());
+      const cur = yearBuckets.get(yk);
+      if (!cur || s.dt > cur.dt) yearBuckets.set(yk, s);
+    });
+    yearBuckets.forEach(s => toKeep.add(s.id));
+
+    const toDelete = autos.filter(s => !toKeep.has(s.id));
+    if (toDelete.length === 0) {
+      console.log('[snapshot-prune] 沒有要刪的');
+      return;
+    }
+
+    console.log(`[snapshot-prune] 要刪 ${toDelete.length} 筆過期 auto snapshot`);
+    let deletedCount = 0;
+    for (const s of toDelete) {
+      try {
+        await driveDeleteFile(s.id);
+        deletedCount++;
+      } catch (e) {
+        console.warn('[snapshot-prune] delete failed:', s.name, e);
+      }
+    }
+    if (deletedCount > 0 && typeof logAction === 'function') {
+      logAction('cloud-snapshot-prune', { deletedCount, keptCount: toKeep.size });
+    }
+  } catch (e) {
+    console.error('[snapshot-prune] failed:', e);
+  }
+}
+
+// ISO 週數 key（YYYY-Www），給分層保留分桶用
+function _cloudIsoWeekKey(d) {
+  const x = new Date(d);
+  x.setUTCHours(0, 0, 0, 0);
+  const day = x.getUTCDay() || 7;  // 週日當作 7（變成 ISO Mon-Sun）
+  x.setUTCDate(x.getUTCDate() + 4 - day);  // 移到當週週四
+  const yearStart = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil((((x - yearStart) / 86400000) + 1) / 7);
+  return `${x.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
+
+async function cloudRestoreSnapshotConfirm(fileId, timeStr) {
+  if (!confirm(
+    `確定要把目前資料還原到「${timeStr}」這筆 snapshot 嗎？\n\n` +
+    `為保險起見，會自動先建一筆「還原前」的 manual snapshot；\n` +
+    `還原後若不滿意，可以再從備份歷史還原回來。`
+  )) return;
+  const ok = await cloudRestoreSnapshot(fileId);
+  if (ok) {
+    alert('已還原到所選 snapshot');
+    await cloudRefreshSnapshotList();
+  }
+}
+
+// ---------- 立即同步（α2-6）----------
+// 使用者主動觸發：拉雲端最新版 → 走三方合併 → 推回 Drive（如果有改動）
+// UI：🔐 Google Drive 同步 卡片內「🔄 立即同步」按鈕
+
+async function cloudPullNow() {
+  if (!isCloudSignedIn()) {
+    alert('請先登入 Google 帳號');
+    return;
+  }
+  const meta = cloudGetMeta();
+  if (!meta.trackerFileId) {
+    // 還沒 init 完成 → 改跑 init 流程（idempotent）
+    await cloudInitTrackerFile();
+    return;
+  }
+
+  cloudSetSyncStatus('syncing');
+  try {
+    const remoteText = await driveDownloadFile(meta.trackerFileId);
+    const result = unwrapTracker(remoteText);
+    if (!result.ok) {
+      alert('Drive 上的 tracker.json 解析失敗：' + result.error);
+      cloudSetSyncStatus('error', result.error);
+      return;
+    }
+
+    if (typeof logAction === 'function') {
+      logAction('cloud-pull', { fileId: meta.trackerFileId, version: result.meta.version });
+    }
+
+    // 走三方合併
+    if (cloudGetLastSyncedSnapshot()) {
+      await cloudResolveAndMerge({
+        remoteData: result.data,
+        remoteMeta: result.meta,
+        fileId: meta.trackerFileId,
+        trackerCreatedAt: result.meta.createdAt
+      });
+      cloudSetSyncStatus('idle');
+    } else {
+      // 沒 base 但有 fileId（不太可能發生的狀態）→ 直接 apply 視為「重新初始化 base」
+      applyTrackerData(result.data);
+      cloudSaveLastSyncedSnapshot(result.data);
+      cloudSaveMeta({
+        lastSyncedAt: result.meta.lastModifiedAt,
+        lastSyncedVersion: result.meta.version
+      });
+      cloudSetSyncStatus('idle');
+    }
+  } catch (e) {
+    console.error('[cloud-pull] failed:', e);
+    if (typeof logAction === 'function') {
+      logAction('cloud-pull-error', { error: e.message || String(e) });
+    }
+    cloudSetSyncStatus('error', e.message || String(e));
+    if (e instanceof DriveAuthError) {
+      alert('Drive 連線失敗，請重新登入：' + e.message);
+    } else {
+      alert('從 Drive 拉取失敗：' + e.message);
+    }
+  }
+}
 
 // 版本比較（v2.10.1）
 // 修正 v2.9.7 vs v2.10.0 的字串比較 bug（'1' < '9' 字元碼，導致大版號被判舊）
@@ -397,7 +1672,21 @@ const ACTION_LABELS = {
   'invoice-copy':     { icon: '📋',   label: '複製請款單' },
   // v3.0.0-alpha.1 commit 7：Google Drive 登入埋點
   'cloud-signin':     { icon: '🔐',   label: '登入 Google Drive' },
-  'cloud-signout':    { icon: '🔓',   label: '登出 Google Drive' }
+  'cloud-signout':    { icon: '🔓',   label: '登出 Google Drive' },
+  // v3.0.0-alpha.2：Drive 同步埋點
+  'cloud-init-create': { icon: '🆕',  label: '在 Drive 建立 tracker.json' },
+  'cloud-init-pull':   { icon: '⬇️',  label: '從 Drive 拉取 tracker.json' },
+  'cloud-init-push':   { icon: '⬆️',  label: '推送本機資料到 Drive' },
+  'cloud-push':         { icon: '☁️',  label: '同步到 Drive' },
+  'cloud-push-error':   { icon: '⚠️',  label: 'Drive 同步失敗' },
+  'cloud-merge-clean':  { icon: '🔀',  label: '自動合併（無衝突）' },
+  'cloud-merge-resolved': { icon: '🔧', label: '衝突已解決' },
+  'cloud-pull':         { icon: '🔄',  label: '從 Drive 立即同步' },
+  'cloud-pull-error':   { icon: '⚠️',  label: 'Drive 拉取失敗' },
+  'cloud-snapshot-create':  { icon: '📦', label: '建立雲端 snapshot' },
+  'cloud-snapshot-restore': { icon: '↩',  label: '還原雲端 snapshot' },
+  'cloud-snapshot-delete':  { icon: '🗑️', label: '刪除雲端 snapshot' },
+  'cloud-snapshot-prune':   { icon: '🧹', label: '清理過期 auto snapshot' }
 };
 const COLORS = ['#ef4444','#f59e0b','#10b981','#2563eb','#8b5cf6','#ec4899','#14b8a6','#64748b'];
 
@@ -637,9 +1926,13 @@ function save() {
   // 記錄最後變動時間（給匯入差異比對用）
   config.lastModifiedAt = new Date().toISOString();
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-  // 若啟用 Sheet 同步 → debounce 觸發推送
+  // 若啟用 Sheet 同步 → debounce 觸發推送（v2 Apps Script，alpha.2 仍保留）
   if (config.sheetSyncEnabled) {
     schedulePush();
+  }
+  // v3.0.0-alpha.2：若 v3 雲端同步已就緒 → debounce 推到 Drive（雙寫）
+  if (typeof cloudSchedulePush === 'function') {
+    cloudSchedulePush();
   }
 }
 

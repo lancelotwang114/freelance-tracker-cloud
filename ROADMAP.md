@@ -12,11 +12,20 @@
 - [x] 操作日誌埋點（cloud-signin / cloud-signout）
 - [x] 全域 localStorage / Service Worker cache 加 cloud- 前綴與 v2 完全隔離
 
-## v3.0.0-alpha.2 — Drive 雙寫期
-- [ ] Drive App Folder 自動建立 tracker.json
-- [ ] 同步邏輯：localStorage + Drive 雙寫
-- [ ] lastModifiedAt 比對 + 衝突處理
-- [ ] 從現有 Apps Script 同步邏輯搬：snapshot 分層保留、idle 保護、操作日誌
+## v3.0.0-alpha.2 ✅ 完成（2026-04-29）
+- [x] Drive API client wrapper（α2-1）
+- [x] 登入後自動初始化 tracker.json，含 metadata wrapper（α2-2）
+- [x] 雙寫機制（debounce 2 秒）（α2-3）
+- [x] 隱藏 v2 Apps Script 相關 UI（雲端同步卡 / 跨裝置設定檔 / Google 行事曆）（α2-Hide）
+- [x] 三方合併引擎（base = last-synced snapshot；無衝突自動套用）（α2-4a）
+- [x] 真衝突 modal（逐筆選擇本機 vs 雲端 + 全選按鈕）（α2-4b）
+- [x] top-bar sync indicator 多態化（已同步 / 待同步 / 同步中 / 失敗）（α2-5）
+- [x] 立即同步按鈕（多裝置主動拉取）+ 操作日誌埋點（α2-6）
+- [x] Drive snapshot 建立 / 列表 / 還原（含「還原前先備份」保險）（α2-7a）
+- [x] snapshot 自動每日 + 分層保留 prune（α2-7b）
+- [x] 樂觀鎖：用應用層 metadata wrapper 的 version + lastModifiedAt（不依賴 Drive etag）
+
+> **不在 alpha.2 範圍**：圖片遷移（base64 → Drive 個別檔）→ alpha.3；polling 多裝置 sync → 暫無計畫，靠手動「🔄 立即同步」
 
 ## v3.0.0-beta.1 — Drive 為主
 - [ ] localStorage 退化為純快取

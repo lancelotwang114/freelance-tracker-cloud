@@ -384,11 +384,49 @@
             </div>
             <button type="button" class="btn btn-outline btn-sm" onclick="cloudSignOut()">登出</button>
           </div>
+
+          <!-- v3.0.0-alpha.2 α2-6：立即同步按鈕 -->
+          <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="cloudPullNow()" title="從 Drive 拉取最新版本（含三方合併、衝突 modal）">
+              🔄 立即同步
+            </button>
+          </div>
+
           <p style="font-size: 12px; color: var(--muted); margin: 12px 0 0 0;">
-            登入後，access token 會儲存在本機 localStorage，預設 1 小時後過期，過期後請重新登入。
+            每次改動 2 秒後自動推送到 Drive。需要主動拉取多裝置改動時按上方「🔄 立即同步」。<br>
+            access token 預設 1 小時後過期，過期後請重新登入。
           </p>
         </div>
 
+      </div>
+    </div>
+
+    <!-- ============== 📦 備份歷史（v3.0.0-alpha.2 α2-7a 新增）============== -->
+    <!-- 雲端 snapshot 列表（建立 / 還原 / 刪除）；α2-7b 會接上自動每日觸發 + 分層保留 -->
+    <div class="card collapsible collapsed" id="card-cloud-snapshots">
+      <div class="card-head" onclick="toggleCard('card-cloud-snapshots'); cloudRefreshSnapshotList()">
+        <h3>📦 備份歷史</h3>
+        <span class="card-status" id="cloud-snapshot-status">登入後可用</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+          每筆備份是 Drive App Folder 內的獨立檔案，按需下載。<br>
+          手動備份永遠不會被自動清理；自動每日備份會做分層保留（α2-7b 上線後生效）。
+        </p>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <input type="text" id="cloud-snapshot-manual-label" placeholder="標籤（例：月底結算前）" style="flex: 1;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="cloudCreateManualSnapshot()">📦 建立備份</button>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshSnapshotList()">🔄 重新整理列表</button>
+        </div>
+
+        <div id="cloud-snapshot-list">
+          <p style="color: var(--muted); font-size: 13px;">展開卡片時自動載入</p>
+        </div>
       </div>
     </div>
 
@@ -568,8 +606,9 @@
     <!-- ============== 進階設定 ============== -->
     <div class="settings-section-title">🔧 進階設定</div>
 
-    <!-- 雲端同步 -->
-    <div class="card collapsible collapsed" id="card-cloud">
+    <!-- v3.0.0-alpha.2 起隱藏：v2 Apps Script 雲端同步整塊（含 sheet URL、API token、每日凌晨強制 snapshot 設定） -->
+    <!-- v3 用 Drive API 直接同步，不再透過 Apps Script，整個區塊在 beta.1 會徹底移除（含對應 JS 邏輯） -->
+    <div class="card collapsible collapsed hidden" id="card-cloud">
       <div class="card-head" onclick="toggleCard('card-cloud')">
         <h3>☁️ 雲端同步</h3>
         <span class="card-status" id="sheet-sync-status">未連接</span>
@@ -672,7 +711,9 @@
     </div>
 
     <!-- Google Calendar -->
-    <div class="card collapsible collapsed" id="card-calendar">
+    <!-- v3.0.0-alpha.2 起隱藏：Google 行事曆同步依賴 Apps Script 中介，按使用者指示「Apps Script 確定不用之後相關功能全部隱藏」 -->
+    <!-- ROADMAP 規畫之後「用 OAuth 換掉 Apps Script 中介」重寫，重寫前先收掉避免使用者用到壞掉的舊路徑 -->
+    <div class="card collapsible collapsed hidden" id="card-calendar">
       <div class="card-head" onclick="toggleCard('card-calendar')">
         <h3>📅 Google 行事曆</h3>
         <span class="card-status" id="cal-status-badge">未設定</span>
@@ -733,8 +774,9 @@
       </div>
     </div>
 
-    <!-- 跨裝置設定檔（v2.10.3 從常用搬到進階）-->
-    <div class="card collapsible collapsed" id="card-portable">
+    <!-- v3.0.0-alpha.2 起隱藏：跨裝置設定檔（含 Apps Script URL + token），v3 登入即同步不需要這個 -->
+    <!-- 整個區塊在 beta.1 會徹底移除（含 exportSettings / importSettings JS 邏輯） -->
+    <div class="card collapsible collapsed hidden" id="card-portable">
       <div class="card-head" onclick="toggleCard('card-portable')">
         <h3>📦 跨裝置設定檔</h3>
         <span class="card-status">換裝置免重填</span>
