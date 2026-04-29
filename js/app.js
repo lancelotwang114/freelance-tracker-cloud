@@ -486,6 +486,120 @@ async function driveDeleteFile(fileId) {
   return true;
 }
 
+// ---------- 圖片上傳 / 下載（v3.0.0-alpha.3 起新增）----------
+// 存摺照片從 tracker.json 的 base64 改寫成 Drive App Folder 個別檔
+// dataUrl 進、fileId 出；下載時 fileId 進、dataUrl 出（給 <img src> 直接用）
+
+// 上傳：把 dataUrl（含 mime + base64）切出來，組 multipart/related body 上傳
+// 用 Content-Transfer-Encoding: base64 直接傳 base64 字串（避免處理 binary fetch body）
+// 大小代價：base64 比原始大 33%，50KB JPEG → ~67KB；對單人多裝置情境可接受
+async function driveUploadImage(dataUrl, name) {
+  if (!isCloudSignedIn()) throw new DriveAuthError('未登入 Google');
+  const m = String(dataUrl || '').match(/^data:([^;]+);base64,(.+)$/);
+  if (!m) throw new Error('不是合法的 base64 dataURL（必須以 data:image/...;base64, 開頭）');
+  const mimeType = m[1];
+  const base64 = m[2];
+
+  const metadata = {
+    name: name || `image-${Date.now()}.${mimeType.split('/')[1] || 'bin'}`,
+    parents: ['appDataFolder'],
+    mimeType,
+  };
+  const boundary = '----driveImgBoundary' + Math.random().toString(36).slice(2);
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    `Content-Type: ${mimeType}`,
+    'Content-Transfer-Encoding: base64',
+    '',
+    base64,
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+
+  const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,mimeType';
+  const r = await driveFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  return r.json();  // { id, name, size, mimeType }
+}
+
+// 下載：blob → dataURL（FileReader.readAsDataURL 自動帶上正確的 data:mime;base64,xxx）
+async function driveDownloadImageAsDataUrl(fileId) {
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+  const r = await driveFetch(url);
+  const blob = await r.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ---------- 存摺照片：fileId 下載 + sessionStorage 快取 + DOM hydrate（α3-3）----------
+// 每個 paymentAccount 的存摺照片若用 fileId 儲存，render 時先放 placeholder（[data-bankbook-loading]），
+// 然後 cloudHydrateBankbookImages() 掃 DOM 把 placeholder 換成 <img>。
+// dataUrl 進 sessionStorage 快取避免反覆下載；同 tab 內第二次顯示就秒出。
+
+function cloudGetBankbookCachedDataUrl(fileId) {
+  if (!fileId) return null;
+  try { return sessionStorage.getItem(`cloud-bankbook-${fileId}`); }
+  catch (_) { return null; }
+}
+
+function cloudSetBankbookCachedDataUrl(fileId, dataUrl) {
+  if (!fileId || !dataUrl) return;
+  try { sessionStorage.setItem(`cloud-bankbook-${fileId}`, dataUrl); }
+  catch (e) { console.warn('[bankbook] sessionStorage 滿了:', e); }
+}
+
+// 拿 dataUrl：先 cache、再 fallback 下載
+async function cloudGetBankbookDataUrl(fileId) {
+  if (!fileId) return '';
+  const cached = cloudGetBankbookCachedDataUrl(fileId);
+  if (cached) return cached;
+  if (!isCloudSignedIn()) return '';  // 沒登入下不到
+  try {
+    const dataUrl = await driveDownloadImageAsDataUrl(fileId);
+    cloudSetBankbookCachedDataUrl(fileId, dataUrl);
+    return dataUrl;
+  } catch (e) {
+    console.warn('[bankbook] 下載失敗:', e);
+    return '';
+  }
+}
+
+// 掃 DOM，把所有 [data-bankbook-loading="<fileId>"] 的 placeholder 換成實際 <img>
+// idempotent：再次呼叫只會處理還沒被替換掉的
+async function cloudHydrateBankbookImages() {
+  const placeholders = document.querySelectorAll('[data-bankbook-loading]');
+  if (placeholders.length === 0) return;
+  for (const el of placeholders) {
+    const fileId = el.getAttribute('data-bankbook-loading');
+    if (!fileId) continue;
+    // 標記為「處理中」避免被同一輪掃到兩次（理論上 outerHTML 會移除 element，但保險起見）
+    el.removeAttribute('data-bankbook-loading');
+    el.setAttribute('data-bankbook-fetching', fileId);
+    try {
+      const dataUrl = await cloudGetBankbookDataUrl(fileId);
+      if (dataUrl) {
+        el.outerHTML = `<img src="${dataUrl}" alt="存摺" style="max-width: 200px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); margin-top: 6px;">`;
+      } else {
+        el.outerHTML = `<div style="color:var(--muted);font-size:13px;margin-top:6px;">⚠️ 存摺照片載入失敗（${isCloudSignedIn() ? 'Drive 下載失敗' : '請先登入 Google'}）</div>`;
+      }
+    } catch (e) {
+      console.warn('[bankbook] hydrate 失敗:', e);
+      el.outerHTML = `<div style="color:var(--danger);font-size:13px;margin-top:6px;">⚠️ ${cloudEscapeHtml(e.message || '未知錯誤')}</div>`;
+    }
+  }
+}
+
 // ============== ☁️ Drive Sync Layer（v3.0.0-alpha.2 起新增）==============
 // 把 v3 的 state + config + paymentAccounts 雙寫到 Drive App Folder 的 tracker.json
 // metadata wrapper 結構（schemaVersion / version / lastModifiedAt / lastModifiedBy / data）
@@ -682,6 +796,8 @@ async function cloudInitTrackerFile() {
 
   // α2-7b：init 結束（不論哪條路徑）→ 確保今天有 auto snapshot（fire-and-forget）
   cloudEnsureDailyAutoSnapshot().catch(e => console.error('[snapshot-auto] async:', e));
+  // α3-4：背景遷移既有 base64 存摺照片到 Drive（fire-and-forget）
+  cloudMigrateBankbookImages().catch(e => console.error('[bankbook-migrate] async:', e));
 }
 
 // ---------- 衝突解決 modal（α2-4b）----------
@@ -1670,6 +1786,54 @@ async function cloudConfirmRestore() {
   }
 }
 
+// ---------- 存摺照片自動遷移：base64 → Drive 個別檔（α3-4）----------
+// 觸發：cloudInitTrackerFile 完成後（fire-and-forget）
+// 邏輯：掃 paymentAccounts 找「有 base64 但沒 fileId」的 → 逐筆上傳 → 換成 fileId
+// 失敗保留原 base64，下次再試；session 內節流 1 小時防重複嘗試
+
+let cloudMigrateBankbookImagesCheckedAt = 0;
+const CLOUD_MIGRATE_THROTTLE_MS = 60 * 60 * 1000;  // 1 小時
+
+async function cloudMigrateBankbookImages() {
+  if (!isCloudSignedIn()) return;
+  if (!cloudGetMeta().trackerFileId) return;
+  if (Date.now() - cloudMigrateBankbookImagesCheckedAt < CLOUD_MIGRATE_THROTTLE_MS) return;
+  cloudMigrateBankbookImagesCheckedAt = Date.now();
+
+  const accounts = (config && config.userInfo && config.userInfo.paymentAccounts) || [];
+  const toMigrate = accounts.filter(a => a.bankbookImage && !a.bankbookImageFileId);
+  if (toMigrate.length === 0) return;
+
+  console.log(`[bankbook-migrate] 找到 ${toMigrate.length} 筆 base64 存摺要遷移`);
+  let migratedCount = 0;
+  for (const a of toMigrate) {
+    try {
+      const filename = `bankbook-${a.id}-migrated-${Date.now()}.jpg`;
+      const uploaded = await driveUploadImage(a.bankbookImage, filename);
+      a.bankbookImageFileId = uploaded.id;
+      a.bankbookImage = '';
+      migratedCount++;
+      console.log(`[bankbook-migrate] ✓ ${a.label || a.id} → ${uploaded.id}`);
+    } catch (e) {
+      console.warn(`[bankbook-migrate] ✗ ${a.label || a.id}:`, e.message || e);
+      // 保留原 base64，下次再試
+    }
+  }
+
+  if (migratedCount > 0) {
+    if (typeof logAction === 'function') {
+      logAction('cloud-image-migrate', { migratedCount, totalAttempted: toMigrate.length });
+    }
+    // 寫回 localStorage（save() 內含 cloudSchedulePush 推 Drive）
+    if (typeof save === 'function') save();
+    // 重繪讓 fileId 路徑生效
+    if (typeof renderAll === 'function') renderAll();
+    if (typeof toast === 'function') {
+      toast(`✓ 已自動把 ${migratedCount} 張存摺照片遷移到 Drive`, 4000);
+    }
+  }
+}
+
 // ---------- 立即同步（α2-6）----------
 // 使用者主動觸發：拉雲端最新版 → 走三方合併 → 推回 Drive（如果有改動）
 // UI：🔐 Google Drive 同步 卡片內「🔄 立即同步」按鈕
@@ -1817,7 +1981,11 @@ const ACTION_LABELS = {
   'cloud-snapshot-create':  { icon: '📦', label: '建立雲端 snapshot' },
   'cloud-snapshot-restore': { icon: '↩',  label: '還原雲端 snapshot' },
   'cloud-snapshot-delete':  { icon: '🗑️', label: '刪除雲端 snapshot' },
-  'cloud-snapshot-prune':   { icon: '🧹', label: '清理過期 auto snapshot' }
+  'cloud-snapshot-prune':   { icon: '🧹', label: '清理過期 auto snapshot' },
+  // v3.0.0-alpha.3：存摺照片獨立化埋點
+  'cloud-image-upload':     { icon: '🖼️', label: '上傳存摺照片到 Drive' },
+  'cloud-image-delete':     { icon: '🗑️', label: '刪除 Drive 存摺照片' },
+  'cloud-image-migrate':    { icon: '📦', label: '存摺照片遷移到 Drive' }
 };
 const COLORS = ['#ef4444','#f59e0b','#10b981','#2563eb','#8b5cf6','#ec4899','#14b8a6','#64748b'];
 
@@ -1909,7 +2077,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;  // v3.0.0-alpha.3：存摺照片改成 Drive 個別檔，paymentAccount 加 bankbookImageFileId 欄位
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -1984,6 +2152,13 @@ const SCHEMA_MIGRATIONS = {
       }
       return next;
     });
+  },
+  // v7 → v8：存摺照片從 base64 dataURL 改成 Drive App Folder 個別檔（v3.0.0-alpha.3 新增）
+  // 注意：paymentAccounts 在 config.userInfo 裡（不在 state），實際補欄位由 ensurePaymentAccounts 處理
+  // 既有 base64 dataURL 不在 migration 階段上傳（runMigrations 是同步的、不能 await）；
+  // 由 cloudMigrateBankbookImages() async helper 在登入後背景跑，每張圖逐一上傳到 Drive 換 fileId
+  7: function(state) {
+    // state-level 沒東西要動；這個 migration 純粹是版本標記
   }
 };
 
@@ -2313,6 +2488,10 @@ function renderAll() {
   renderInvoice();
   renderBadge();
   renderBackupStatus();
+  // v3.0.0-alpha.3：把存摺照片 placeholder 換成實際 <img>（fire-and-forget；cache 命中秒出）
+  if (typeof cloudHydrateBankbookImages === 'function') {
+    cloudHydrateBankbookImages().catch(e => console.warn('[bankbook] hydrate failed:', e));
+  }
 }
 
 // ============== 批次操作 ==============
@@ -4533,7 +4712,12 @@ async function exportSingleJobPDF() {
         if (a.account) parts.push(a.account);
         if (a.holderName) parts.push('戶名 ' + a.holderName);
         const text = parts.length ? `<br>${escapeHtml(parts.join(' / '))}` : '';
-        const img = a.bankbookImage ? `<div style="margin-top: 8px;"><img src="${a.bankbookImage}" alt="存摺" style="max-width: 240px; max-height: 140px; border-radius: 4px; border: 1px solid #ddd;"></div>` : '';
+        // v3.0.0-alpha.3：base64 直接用、fileId 放 placeholder 等 cloudHydrateBankbookImages() 套
+        const img = a.bankbookImage
+          ? `<div style="margin-top: 8px;"><img src="${a.bankbookImage}" alt="存摺" style="max-width: 240px; max-height: 140px; border-radius: 4px; border: 1px solid #ddd;"></div>`
+          : (a.bankbookImageFileId
+            ? `<div style="margin-top: 8px;color:#888;font-size:12px;" data-bankbook-loading="${escapeHtml(a.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
+            : '');
         return text + img;
       })()}
     </div>` : ''}
@@ -5709,7 +5893,11 @@ function drawInvoice() {
       ${activeAcct.account ? `<div class="invoice-payment-row"><span class="lbl">帳號</span><span class="val" style="font-family: monospace;">${escapeHtml(activeAcct.account)}</span></div>` : ''}
       ${(activeAcct.holderName || u.name) ? `<div class="invoice-payment-row"><span class="lbl">戶名</span><span class="val">${escapeHtml(activeAcct.holderName || u.name)}</span></div>` : ''}
       ${activeAcct.note ? `<div class="invoice-payment-row" style="font-size: 12px; color: var(--muted);"><span class="lbl">備註</span><span class="val">${escapeHtml(activeAcct.note)}</span></div>` : ''}
-      ${activeAcct.bankbookImage ? `<div style="margin-top: 12px;"><img src="${activeAcct.bankbookImage}" alt="存摺" style="max-width: 320px; max-height: 200px; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border);"></div>` : ''}
+      ${activeAcct.bankbookImage
+        ? `<div style="margin-top: 12px;"><img src="${activeAcct.bankbookImage}" alt="存摺" style="max-width: 320px; max-height: 200px; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border);"></div>`
+        : (activeAcct.bankbookImageFileId
+          ? `<div style="margin-top: 12px;color:var(--muted);font-size:13px;" data-bankbook-loading="${escapeHtml(activeAcct.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
+          : '')}
     </div>` : ''}
 
     ${u.note ? `<div style="margin-top: 14px; padding: 10px; font-size: 12px; color: var(--muted); border-top: 1px dashed var(--border);">
@@ -6580,6 +6768,11 @@ function ensurePaymentAccounts() {
   if (u.selectedPaymentAccountId && !u.paymentAccounts.find(a => a.id === u.selectedPaymentAccountId)) {
     u.selectedPaymentAccountId = u.paymentAccounts[0]?.id || '';
   }
+  // v3.0.0-alpha.3：每筆 paymentAccount 補 bankbookImageFileId 預設欄位（idempotent）
+  // 同時保留舊 bankbookImage（base64 dataURL）作為遷移期間的 fallback；遷移完成後該欄位會被清空
+  u.paymentAccounts.forEach(a => {
+    if (!('bankbookImageFileId' in a)) a.bankbookImageFileId = '';
+  });
 }
 
 // v2.10.15: 把上傳圖片縮到指定寬度 + JPEG 壓縮，回傳 data URL
@@ -6607,37 +6800,106 @@ function resizeImageToDataUrl(file, maxW = 800, quality = 0.7) {
 }
 
 // 上傳存摺照片：壓縮後寫入該帳號 row 的 hidden input，並更新預覽
+// v3.0.0-alpha.3：上傳路徑改寫——優先寫 Drive 個別檔，沒登入或失敗才 fallback 到 base64
 async function onBankbookFileChange(input, acctId) {
   const file = input.files && input.files[0];
   if (!file) return;
   if (!file.type.startsWith('image/')) { toast('請選擇圖片檔'); input.value = ''; return; }
+
   toastProgress('🖼️ 壓縮圖片中…');
+  let dataUrl;
   try {
-    const dataUrl = await resizeImageToDataUrl(file, 800, 0.7);
-    const row = input.closest('.payment-account-row');
-    if (!row) throw new Error('找不到帳號 row');
-    const hidden = row.querySelector('[data-acct-field="bankbookImage"]');
-    if (hidden) hidden.value = dataUrl;
-    const preview = document.getElementById(`bankbook-preview-${acctId}`);
-    if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="存摺" style="max-width: 200px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); margin-top: 6px;">`;
-    const removeBtn = document.getElementById(`bankbook-remove-${acctId}`);
-    if (removeBtn) removeBtn.style.display = '';
-    toast('✓ 圖片已上傳，記得按儲存');
+    dataUrl = await resizeImageToDataUrl(file, 800, 0.7);
   } catch (err) {
+    toastDismiss();
     toast('圖片處理失敗：' + (err.message || err));
+    input.value = '';
+    return;
   }
+
+  const row = input.closest('.payment-account-row');
+  if (!row) { toastDismiss(); toast('找不到帳號 row'); input.value = ''; return; }
+  const oldFileIdField = row.querySelector('[data-acct-field="bankbookImageFileId"]');
+  const oldBase64Field = row.querySelector('[data-acct-field="bankbookImage"]');
+  const oldFileId = (oldFileIdField && oldFileIdField.value) || '';
+
+  // 立即顯示 preview（不等 Drive 上傳完）
+  const preview = document.getElementById(`bankbook-preview-${acctId}`);
+  if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="存摺" style="max-width: 200px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); margin-top: 6px;">`;
+  const removeBtn = document.getElementById(`bankbook-remove-${acctId}`);
+  if (removeBtn) removeBtn.style.display = '';
+
+  // 走 Drive 上傳：登入 + tracker init 完成才嘗試
+  let newFileId = '';
+  if (isCloudSignedIn() && cloudGetMeta().trackerFileId) {
+    toastProgress('☁️ 上傳到 Drive…');
+    try {
+      const ext = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+      const filename = `bankbook-${acctId}-${Date.now()}.${ext}`;
+      const uploaded = await driveUploadImage(dataUrl, filename);
+      newFileId = uploaded.id;
+      if (typeof logAction === 'function') {
+        logAction('cloud-image-upload', { acctId, fileId: newFileId, size: uploaded.size });
+      }
+    } catch (e) {
+      console.warn('[bankbook] Drive 上傳失敗，fallback 寫 base64:', e);
+      // 不 throw，fallback 路徑繼續
+    }
+  }
+
+  if (newFileId) {
+    // Drive 上傳成功 → 寫 fileId、清掉 base64、回收舊孤兒
+    if (oldFileIdField) oldFileIdField.value = newFileId;
+    if (oldBase64Field) oldBase64Field.value = '';
+    if (oldFileId && oldFileId !== newFileId) {
+      // fire-and-forget：刪舊照片孤兒（失敗只是浪費 Drive 空間）
+      driveDeleteFile(oldFileId).catch(e => console.warn('[bankbook] cleanup 舊孤兒失敗:', e));
+    }
+    toastDismiss();
+    toast('✓ 已上傳到 Drive，記得按儲存', 3000);
+  } else {
+    // Fallback：寫 base64 到舊欄位、清掉 fileId
+    if (oldBase64Field) oldBase64Field.value = dataUrl;
+    if (oldFileIdField) oldFileIdField.value = '';
+    if (oldFileId) {
+      // 之前有 Drive 孤兒，但現在改用 base64 → 試刪舊的（fire-and-forget）
+      driveDeleteFile(oldFileId).catch(() => {});
+    }
+    toastDismiss();
+    if (!isCloudSignedIn()) {
+      toast('⚠️ 未登入 Drive，圖片暫存本機；登入後自動遷移', 4000);
+    } else {
+      toast('⚠️ Drive 上傳失敗，圖片暫存本機；下次自動重試', 4000);
+    }
+  }
+
   input.value = '';
 }
 
 function clearBankbookImage(acctId) {
   const row = document.querySelector(`.payment-account-row[data-acct-id="${acctId}"]`);
   if (!row) return;
-  const hidden = row.querySelector('[data-acct-field="bankbookImage"]');
-  if (hidden) hidden.value = '';
+  const base64Field = row.querySelector('[data-acct-field="bankbookImage"]');
+  const fileIdField = row.querySelector('[data-acct-field="bankbookImageFileId"]');
+  const oldFileId = (fileIdField && fileIdField.value) || '';
+
+  // 清 UI 跟 hidden fields
+  if (base64Field) base64Field.value = '';
+  if (fileIdField) fileIdField.value = '';
   const preview = document.getElementById(`bankbook-preview-${acctId}`);
   if (preview) preview.innerHTML = '';
   const removeBtn = document.getElementById(`bankbook-remove-${acctId}`);
   if (removeBtn) removeBtn.style.display = 'none';
+
+  // v3.0.0-alpha.3：若有 Drive fileId → fire-and-forget 刪 Drive 檔避免孤兒
+  if (oldFileId) {
+    driveDeleteFile(oldFileId).then(() => {
+      if (typeof logAction === 'function') {
+        logAction('cloud-image-delete', { acctId, fileId: oldFileId });
+      }
+    }).catch(e => console.warn('[bankbook] 清除 Drive 孤兒失敗:', e));
+  }
+
   toast('✓ 已清除存摺照片，記得按儲存');
 }
 
@@ -6703,14 +6965,22 @@ function renderPaymentAccountsUI() {
         </div>
         <div style="grid-column: 1 / -1;">
           <label>存摺照片（請款單會附上，自動壓縮到 800px）</label>
+          <!-- v3.0.0-alpha.3：兩個 hidden field 並存 -->
+          <!-- bankbookImage（base64 dataURL）：v2 沿用 + alpha.3 未登入 fallback -->
+          <!-- bankbookImageFileId：alpha.3 起的主要儲存方式（Drive App Folder 個別檔的 fileId） -->
           <input type="hidden" data-acct-field="bankbookImage" value="${escapeHtml(a.bankbookImage || '')}">
+          <input type="hidden" data-acct-field="bankbookImageFileId" value="${escapeHtml(a.bankbookImageFileId || '')}">
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
             <input type="file" accept="image/*" id="bankbook-upload-${escapeHtml(a.id)}" onchange="onBankbookFileChange(this, '${escapeHtml(a.id)}')" style="display: none;">
-            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('bankbook-upload-${escapeHtml(a.id)}').click()">📷 ${a.bankbookImage ? '更換照片' : '上傳照片'}</button>
-            <button type="button" class="btn btn-ghost btn-sm" id="bankbook-remove-${escapeHtml(a.id)}" onclick="clearBankbookImage('${escapeHtml(a.id)}')" style="color: var(--danger); ${a.bankbookImage ? '' : 'display: none;'}">移除</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('bankbook-upload-${escapeHtml(a.id)}').click()">📷 ${(a.bankbookImage || a.bankbookImageFileId) ? '更換照片' : '上傳照片'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="bankbook-remove-${escapeHtml(a.id)}" onclick="clearBankbookImage('${escapeHtml(a.id)}')" style="color: var(--danger); ${(a.bankbookImage || a.bankbookImageFileId) ? '' : 'display: none;'}">移除</button>
           </div>
           <div id="bankbook-preview-${escapeHtml(a.id)}">
-            ${a.bankbookImage ? `<img src="${a.bankbookImage}" alt="存摺" style="max-width: 200px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); margin-top: 6px;">` : ''}
+            ${a.bankbookImage
+              ? `<img src="${a.bankbookImage}" alt="存摺" style="max-width: 200px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); margin-top: 6px;">`
+              : (a.bankbookImageFileId
+                ? `<div style="color:var(--muted);font-size:13px;margin-top:6px;" data-bankbook-loading="${escapeHtml(a.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
+                : '')}
           </div>
         </div>
       </div>

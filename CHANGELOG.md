@@ -1,9 +1,52 @@
 ﻿# 版本更新歷史
 
-## v3.0.0-alpha.2 — 進行中（2026-04-29 起）
+## v3.0.0-alpha.3 — 進行中（2026-04-29 起）
+
+### Schema v7 → v8 + Drive 圖片 API（α3-1）
+- `CURRENT_SCHEMA_VERSION` 從 7 升到 8
+- `SCHEMA_MIGRATIONS[7]` 加 v7 → v8 migration（state-level 沒東西要動，純版本標記；paymentAccounts 在 config 裡，由 `ensurePaymentAccounts` 處理）
+- `ensurePaymentAccounts()` 加「補 `bankbookImageFileId: ''` 預設欄位」（idempotent）
+- Drive API Client 新增 2 個圖片函式：
+  - `driveUploadImage(dataUrl, name)`：multipart/related upload，Content-Transfer-Encoding: base64；回 `{ id, name, size, mimeType }`
+  - `driveDownloadImageAsDataUrl(fileId)`：blob → FileReader.readAsDataURL → 直接餵 `<img src>`
+- 圖片儲存代價：base64 比原始大 33%，800px 寬 JPEG ≈ 50~70KB；單人多裝置可接受
+
+### 上傳路徑改寫 Drive（α3-2）
+- `onBankbookFileChange()` 整個改寫：
+  - 壓縮 dataUrl 後立刻顯示 preview（不等 Drive 上傳完，UX 不卡）
+  - 已登入 + tracker init 完成 → `driveUploadImage()` 拿 fileId、清掉 base64
+  - 上傳成功 → 清掉舊 fileId 對應的 Drive 孤兒檔（fire-and-forget `driveDeleteFile`）
+  - 未登入 / 上傳失敗 → fallback 寫 base64，提示「未登入暫存本機，登入後自動遷移」
+- `clearBankbookImage()` 同步清 fileId 跟 base64，且 fire-and-forget 刪 Drive 檔
+- UI render 加 hidden input `data-acct-field="bankbookImageFileId"` 跟 `bankbookImage` 並存
+- 「📷 更換 / 上傳照片」與「移除」按鈕的「有圖片」判斷：兩個欄位有任一個就算有
+- `ACTION_LABELS` 加 3 個新類型：`cloud-image-upload`、`cloud-image-delete`、`cloud-image-migrate`
+
+### 顯示路徑改成 fileId 下載（α3-3）
+- 三個 render 點都改成「base64 → 直接用 / fileId → placeholder + data-bankbook-loading attribute / 都沒有 → 空白」：
+  - 設定頁 paymentAccount edit row（preview）
+  - 請款單預覽（請款單頁面）
+  - 案件 detail 內的請款資訊
+- 新增 4 個 helpers（在 Cloud Sync Layer 上方）：
+  - `cloudGetBankbookCachedDataUrl(fileId)` / `cloudSetBankbookCachedDataUrl(fileId, dataUrl)`：sessionStorage cache，key = `cloud-bankbook-${fileId}`
+  - `cloudGetBankbookDataUrl(fileId)`：cache 優先、未命中下載並 cache
+  - `cloudHydrateBankbookImages()`：掃整個 DOM `[data-bankbook-loading]` placeholder → 換成實際 `<img>`，idempotent
+- `renderAll()` 結尾呼叫 `cloudHydrateBankbookImages()`（fire-and-forget），cache 命中秒出
+- 沒登入時 placeholder 顯示「⚠️ 請先登入 Google」
+
+### 自動遷移既有 base64 → Drive（α3-4）
+- 新增 `cloudMigrateBankbookImages()`：掃 paymentAccounts 找「有 base64 但沒 fileId」的，逐筆 driveUploadImage、寫 fileId、清 base64
+- 1 小時節流防止 init 反覆觸發（`cloudMigrateBankbookImagesCheckedAt`）
+- 觸發點：`cloudInitTrackerFile()` 結尾 fire-and-forget，跟 `cloudEnsureDailyAutoSnapshot()` 並列
+- 遷移成功會：寫回 localStorage（`save()`，連帶 cloudSchedulePush）+ `renderAll()` 重繪 + toast「✓ 已自動把 N 張存摺照片遷移到 Drive」
+- 失敗保留原 base64，下次再試
+
+### v3.0.0-alpha.3 ✅ 結案（2026-04-29）
+
+## v3.0.0-alpha.2 ✅ 結案（2026-04-29）
 
 > alpha.2 範圍：Drive 雙寫期 + 三方合併 + snapshot 雲端化
-> 共 10 個邏輯單元（α2-1~α2-7b + α2-Hide），建議 push 時依序提 commit 或合併少數幾個（見 README）
+> 共 10 個邏輯單元（α2-1~α2-7b + α2-Hide）+ α2-7c snapshot UX 強化 + α2-4-revisit 砍 prompt
 
 ### Drive API client wrapper（α2-1）
 - 新增「☁️ Drive API Client」區塊在 Cloud Auth Layer 之後
