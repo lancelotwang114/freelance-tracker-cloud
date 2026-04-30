@@ -1,5 +1,45 @@
 ﻿# 版本更新歷史
 
+## v3.6.0 — UI 簡化第二輪（2026-04-30）
+
+> 4 個改動：砍設定頁主題卡、全域搜尋列收 collapsible、Dashboard stat 卡可點跳轉、第一次使用顯示引導 empty state。Task 6/7（緊湊模式 / 行事曆 legend）暫緩。
+
+### 砍設定頁「🌗 顯示主題」卡
+- 跟 top bar 主題按鈕功能 100% 重疊
+- `loadThemeUI()` 用 querySelectorAll 找不到不會錯，安全刪除
+- 設定頁進階設定區從 2 張 card（行事曆 + 主題）變 1 張
+
+### 全域搜尋列改 collapsible
+- Top bar 加 `🔍` 按鈕（icon-only 風格、與刷新/日誌一致）
+- 預設搜尋列 hidden，點 🔍 才展開、自動 focus
+- input 加 Esc 快捷鍵關閉
+- 釋出 sticky header 約 60px 垂直空間
+
+### Dashboard stat 卡可點擊跳轉
+- 4 張 stat 加 `.clickable` class（hover 浮起 + 邊框變主色）
+- 「本月已收款」→ 案件 tab + 本月 + 已完成已收款
+- 「本月待收款」→ 案件 tab + 本月 + 完成待收款
+- 「本月待完成」→ 案件 tab + 本月 + 未完成
+- 「年度已收款」→ 案件 tab + 自訂範圍 YYYY-01~YYYY-12 + 已完成已收款
+- 切過去會自動清掉 clientId / tag filter，避免之前 filter 殘留
+
+### Dashboard empty state 引導卡
+- `state.clients` 跟 `state.jobs` 都空時顯示 hero card：「歡迎，先來建第一筆吧」
+- 兩個 CTA：「＋ 新增第一筆案件」（呼叫 openJobModal）/「查看範例資料」（呼叫 loadDemo）
+- 主色背景 + 邊框，視覺更暖、不會讓新手看到 4 張 NT$0 stat 覺得冷
+- 一旦有任何業主或案件即自動隱藏
+
+### 暫緩
+- Task 6 緊湊模式（案件列表）— 需要的話之後再做
+- Task 7 行事曆 legend — 跟使用者討論中（保留文字 + 加色塊樣本）
+- Task 9 Dashboard「年度收入對比」併進 Revenue — 待決定
+
+### 版本 bump
+- APP_VERSION → `2026-04-30-v3.6.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.6.0`
+
+---
+
 ## v3.5.0 — Revenue 子分頁 + 月度趨勢調整（2026-04-30）
 
 > 把收益分頁的 9 張卡片拆成「總覽 / 趨勢 / 分析」三組子分頁；月度收益趨勢預設 6 個月、最近月在最左、X 軸顯示 YYYY-MM。

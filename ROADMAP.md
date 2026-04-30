@@ -2,6 +2,19 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.6.0 ✅ UI 簡化第二輪（2026-04-30）
+- [x] 砍設定頁「🌗 顯示主題」卡（跟 top bar 重複）
+- [x] 全域搜尋列改 collapsible（top bar 加 🔍 按鈕、Esc 關閉）
+- [x] Dashboard 4 張 stat 卡可點擊跳轉案件 tab + 套對應 filter
+- [x] Dashboard 完全空時顯示 hero empty state + 兩個 CTA
+- [x] bump 三處版本號 → `2026-04-30-v3.6.0` / `ftracker-cloud-v3.6.0`
+
+## 暫緩
+- Task 6 案件列表緊湊模式
+- Task 7 行事曆 legend 圖示化（討論中）
+- Task 9 Dashboard 年度收入對比併進 Revenue
+- Task 10 Top bar 「⋯」漢堡選單（先觀察 v3.6.0 已釋空間是否夠）
+
 ## v3.5.0 ✅ Revenue 子分頁 + 月度趨勢調整（2026-04-30）
 - [x] Revenue 拆「總覽 / 趨勢 / 分析」3 子分頁
 - [x] 月度業主彙整搬到總覽

@@ -244,6 +244,10 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .stat .delta { font-size: 12px; color: var(--success); margin-top: 2px; }
 .stat.warning { border-left: 3px solid var(--warning); }
 .stat.danger { border-left: 3px solid var(--danger); }
+/* v3.6.0：可點擊的 stat（hover 提示可互動）*/
+.stat.clickable { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+.stat.clickable:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.05); border-color: var(--primary); }
+.stat.clickable:active { transform: translateY(0); }
 
 /* ==================== Alerts / Reminders ==================== */
 .alerts { margin-bottom: 16px; }

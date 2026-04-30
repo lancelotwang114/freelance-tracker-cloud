@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-30-v3.5.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-30-v3.6.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3803,6 +3803,10 @@ function renderBadge() {
 
 // ============== Dashboard ==============
 function renderDashboard() {
+  // v3.6.0：完全無資料時顯示 empty state 引導卡，4 張 stat 數字仍是 $0 但有 CTA
+  const isEmpty = (state.clients.length === 0) && (state.jobs.length === 0);
+  document.getElementById('dash-empty-state')?.classList.toggle('hidden', !isEmpty);
+
   const m = thisMonth();
   const active = activeJobs();
   const monthJobs = active.filter(j => getMonth(j.date) === m);
@@ -8209,6 +8213,49 @@ if (window.matchMedia) {
 }
 
 // ============== 全域搜尋 ==============
+// v3.6.0：Dashboard stat 卡點擊 → 跳案件 tab + 套對應 filter
+function dashStatJump(kind) {
+  const y = String(new Date().getFullYear());
+  if (kind === 'paid') {
+    state.filters.month = 'current';
+    state.filters.status = 'paid';
+  } else if (kind === 'unpaid') {
+    state.filters.month = 'current';
+    state.filters.status = 'done-unpaid';  // 完成待收款（包含部分收款請另外切換）
+  } else if (kind === 'pending') {
+    state.filters.month = 'current';
+    state.filters.status = 'pending';
+  } else if (kind === 'year') {
+    // 年度已收款 → 自訂範圍：今年 1-12 月
+    state.filters.month = 'custom-range';
+    state.filters.monthFrom = `${y}-01`;
+    state.filters.monthTo = `${y}-12`;
+    state.filters.status = 'paid';
+  }
+  state.filters.clientId = 'all';
+  state.filters.tag = 'all';
+  state.filters.jobIdsOnly = null;
+  state.filters.jobIdsOnlyLabel = '';
+  switchTab('jobs');
+}
+
+// v3.6.0：全域搜尋列改 collapsible（top bar 🔍 按鈕 toggle、Esc 關閉）
+function toggleGlobalSearch(forceState) {
+  const bar = document.getElementById('global-search-bar');
+  const input = document.getElementById('global-search');
+  const results = document.getElementById('global-search-results');
+  if (!bar) return;
+  const willOpen = (typeof forceState === 'boolean') ? forceState : bar.classList.contains('hidden');
+  if (willOpen) {
+    bar.classList.remove('hidden');
+    setTimeout(() => input?.focus(), 30);  // wait for layout
+  } else {
+    bar.classList.add('hidden');
+    if (input) input.value = '';
+    if (results) results.classList.add('hidden');
+  }
+}
+
 function onGlobalSearch() {
   const q = (document.getElementById('global-search')?.value || '').trim().toLowerCase();
   const box = document.getElementById('global-search-results');

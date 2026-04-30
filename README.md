@@ -36,6 +36,7 @@
 | **v3.3.1** | **物理刪除 9 個 DEAD_BLOCK 區塊（淨刪 566 行 JS，純清理 commit）** | ✅ **完成（2026-04-30）** |
 | **v3.4.0** | **UI 簡化（Top bar 精簡、設定頁全 collapsed、卡片描述瘦身、Revenue emoji 去裝飾）** | ✅ **完成（2026-04-30）** |
 | **v3.5.0** | **Revenue 拆 3 子分頁（總覽/趨勢/分析）+ 月度趨勢預設 6 個月、最近月在左、X 軸 YYYY-MM** | ✅ **完成（2026-04-30）** |
+| **v3.6.0** | **UI 第二輪（砍主題卡、搜尋列收 collapsible、Dashboard stat 可點跳轉、empty state 引導）** | ✅ **完成（2026-04-30）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
