@@ -6652,6 +6652,11 @@ function drawInvoice() {
     </div>` : ''}
     ` : '<div class="empty">此月份此業主沒有案件</div>'}
   </div>`;
+  // v3.1.0-fix：drawInvoice 結尾呼叫 hydrate，因為切到請款單分頁不會走 renderAll，
+  // 只走 renderInvoice → drawInvoice，placeholder 沒被 hydrate 替換會卡載入中
+  if (typeof cloudHydrateBankbookImages === 'function') {
+    cloudHydrateBankbookImages().catch(e => console.warn('[bankbook] hydrate after drawInvoice failed:', e));
+  }
 }
 
 function emptyState(title, sub) {
