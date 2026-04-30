@@ -1,5 +1,47 @@
 ﻿# 版本更新歷史
 
+## v3.3.1 — 物理刪除 DEAD_BLOCK 純清理（2026-04-30）
+
+> v3.3.0 把 9 個 v2 dead code 區塊用 `/* DEAD_BLOCK_BEGIN ... DEAD_BLOCK_END */` 包起來不執行；本版直接從 app.js 物理刪除這些區塊，每個換成單行說明註解。
+
+### 刪除統計
+- v3.3.0 後：8673 行（非空行）
+- v3.3.1 後：8107 行（非空行）
+- **淨刪 566 行**
+
+### 物理移除的 9 個區塊
+- `v2_sheet_capacity`：v2 Sheet 容量計算
+- `v2_health_check`：資料健檢整套（runDataHealthCheck / showHealthCheckModal / runHealthAction，約 110 行）
+- `v2_settings_payment_ui`：settings 頁「我的收款資訊」整套 6 函式（約 130 行）
+- `v2_lab_mode`：開發模式 banner + toggle（含 LAB_MODE_KEY、isLabMode stub）
+- `v2_device_name_ui`：裝置名稱輸入 UI（含 loadDeviceNameUI noop stub）
+- `v2_precise_location`：HTML5 Geolocation + BigDataCloud 反向地理編碼
+- `v2_device_name_prompt`：裝置名稱提醒 modal 三函式
+- `v2_sheet_sync_toggle_stubs`：enableSheetSync / disableSheetSync stub
+- `v2_snapshot_diff_modal`：v2 sheet snapshot diff 預覽 modal（約 175 行，最大塊）
+
+### 每塊換成的單行說明範例
+```js
+// v3.3.1：v2 資料健檢整套（runDataHealthCheck / showHealthCheckModal / runHealthAction）已物理移除
+```
+
+### 沒動到的東西
+- `getDeviceLabel` / `getOrGenerateAutoId` / `getOsLabel` / `fetchDeviceLocation` / `cachedDeviceLocation` / 三個 `DEVICE_*_KEY`：仍給 snapshot metadata 用
+- `toggleCard`：#card-calendar / #card-theme 等仍在用
+- 所有 v3 cloud layer 程式碼（auth / Drive client / sync / snapshot / image）
+
+### 驗證
+- DEAD_BLOCK marker 0 殘留
+- `/*` 與 `*/` 各 2 個（檔案頭註解 + JSDoc），完全平衡
+- 沒有 deleted DOM ID 殘留 caller
+- HTML onclick 0 死函式
+
+### 版本 bump
+- APP_VERSION → `2026-04-30-v3.3.1`
+- SW CACHE_VERSION → `ftracker-cloud-v3.3.1`
+
+---
+
 ## v3.3.0 — Dead code cleanup + 單筆請款 PDF 修圖片（2026-04-30）
 
 > v3.0.0 stable 之後留下的 v2 Apps Script dead code 第二輪清理；同時修單筆請款 PDF 出存摺照片變 placeholder 文字的 bug。

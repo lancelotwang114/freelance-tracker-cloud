@@ -2,6 +2,13 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.3.1 ✅ 物理刪除 DEAD_BLOCK 純清理（2026-04-30）
+- [x] 9 個 DEAD_BLOCK 區塊整段從 app.js 物理移除（健檢、Sheet 容量、settings 收款帳號 v2 UI、Lab mode、裝置名稱輸入 UI、GPS、裝置名稱提醒、sheet sync toggle stubs、snapshot diff modal）
+- [x] 每塊換成單行 `// v3.3.1：xxx 已物理移除` 說明
+- [x] 淨刪 566 行（8673 → 8107 非空行）
+- [x] DEAD_BLOCK marker 全部清空、`/*` `*/` 平衡（各 2 個）
+- [x] bump 三處版本號 → `2026-04-30-v3.3.1` / `ftracker-cloud-v3.3.1`
+
 ## v3.3.0 ✅ Dead code 二輪清 + 單筆 PDF 修圖（2026-04-30）
 - [x] 修：`exportSingleJobPDF` 預先 await `cloudGetBankbookDataUrl` 拿 dataUrl，PDF 不再印 placeholder 文字
 - [x] 修：`captureInvoiceCanvas` 改為 html2canvas 前 await `cloudHydrateBankbookImages()`

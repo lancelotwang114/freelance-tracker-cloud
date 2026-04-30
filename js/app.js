@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-30-v3.3.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-30-v3.3.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5678,14 +5678,7 @@ function updateNotifUI() {
   }
 }
 
-// v3.3.0：showCloudCapacity dead（v2 Sheet 容量監控；v3 Drive 容量另用 cloudShowSnapshotModal 顯示）
-/* DEAD_BLOCK_BEGIN_v2_sheet_capacity
-async function showCloudCapacity() {
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken) { toast('請先設定雲端同步'); return; }
-  // ... v2 Apps Script 容量計算邏輯（細節已刪）
-}
-DEAD_BLOCK_END_v2_sheet_capacity */
+// v3.3.1：v2 showCloudCapacity（Sheet 容量監控）已物理移除；v3 用 cloudShowSnapshotModal 顯示
 
 // ============== 模糊比對（v2.7）==============
 // Levenshtein 距離（標準化到 0-1，1 = 完全一樣）
@@ -5755,149 +5748,7 @@ function findFuzzyDupJobs(threshold = 0.85) {
   return dupes.sort((x, y) => y.similarity - x.similarity);
 }
 
-// ============== 資料健檢（v3.3.0：HTML modal 已刪、整塊死碼） ==============
-/* DEAD_BLOCK_BEGIN_v2_health_check
-function runDataHealthCheck() {
-  const results = [];
-  const clientIds = new Set(state.clients.map(c => c.id));
-  const clientNameLower = {};
-
-  // 1. 孤兒案件（clientId 不存在）
-  const orphans = state.jobs.filter(j => !clientIds.has(j.clientId));
-  if (orphans.length) {
-    results.push({
-      severity: 'error',
-      title: `${orphans.length} 筆孤兒案件`,
-      desc: 'clientId 對應不到任何業主（可能是業主被刪除）',
-      jobIds: orphans.map(j => j.id),
-      action: { label: '查看這些案件', fn: () => { lockJobsToIds(orphans.map(j=>j.id), `🔧 孤兒案件（${orphans.length} 筆）`); switchTab('jobs'); } }
-    });
-  }
-
-  // 2. 重複業主名（同名）
-  const nameCount = {};
-  state.clients.forEach(c => {
-    const k = (c.name || '').trim().toLowerCase();
-    if (!k) return;
-    nameCount[k] = (nameCount[k] || 0) + 1;
-    clientNameLower[k] = clientNameLower[k] || [];
-    clientNameLower[k].push(c);
-  });
-  const dupes = Object.keys(nameCount).filter(k => nameCount[k] > 1);
-  if (dupes.length) {
-    const samples = dupes.slice(0, 3).map(k => clientNameLower[k][0].name).join('、');
-    results.push({
-      severity: 'warn',
-      title: `${dupes.length} 個業主名重複`,
-      desc: `例：${samples}${dupes.length > 3 ? '…' : ''}`
-    });
-  }
-
-  // 3. 異常金額（>= 10 倍中位數，或 = 0）
-  const amounts = state.jobs.filter(j => !j.cancelled).map(j => +j.amount || 0).filter(n => n > 0).sort((a,b) => a-b);
-  if (amounts.length > 5) {
-    const median = amounts[Math.floor(amounts.length / 2)];
-    const outliers = state.jobs.filter(j => !j.cancelled && (+j.amount || 0) >= median * 10);
-    if (outliers.length) {
-      results.push({
-        severity: 'info',
-        title: `${outliers.length} 筆金額異常高`,
-        desc: `中位數 ${fmt(median)}，這幾筆 >= 中位數 10 倍`,
-        jobIds: outliers.map(j => j.id),
-        action: { label: '查看', fn: () => { lockJobsToIds(outliers.map(j=>j.id), `🔧 金額異常（${outliers.length} 筆）`); switchTab('jobs'); } }
-      });
-    }
-  }
-
-  // 4. 缺日期 / 缺金額 / 缺標題
-  const missingDate = state.jobs.filter(j => !j.cancelled && !j.date);
-  const missingAmount = state.jobs.filter(j => !j.cancelled && !(+j.amount));
-  const missingTitle = state.jobs.filter(j => !(j.title || '').trim());
-  if (missingDate.length) {
-    results.push({ severity: 'warn', title: `${missingDate.length} 筆案件沒有日期`, desc: '可能影響月份統計', jobIds: missingDate.map(j=>j.id),
-      action: { label: '查看', fn: () => { lockJobsToIds(missingDate.map(j=>j.id), `🔧 缺日期（${missingDate.length} 筆）`); switchTab('jobs'); } } });
-  }
-  if (missingAmount.length) {
-    results.push({ severity: 'warn', title: `${missingAmount.length} 筆案件沒有金額`, desc: '會被視為 0', jobIds: missingAmount.map(j=>j.id),
-      action: { label: '查看', fn: () => { lockJobsToIds(missingAmount.map(j=>j.id), `🔧 缺金額（${missingAmount.length} 筆）`); switchTab('jobs'); } } });
-  }
-  if (missingTitle.length) {
-    results.push({ severity: 'info', title: `${missingTitle.length} 筆案件沒有標題`, desc: '建議補上方便辨識', jobIds: missingTitle.map(j=>j.id),
-      action: { label: '查看', fn: () => { lockJobsToIds(missingTitle.map(j=>j.id), `🔧 缺標題（${missingTitle.length} 筆）`); switchTab('jobs'); } } });
-  }
-
-  // 5. doneAt > paidAt（時序錯亂）
-  const reversed = state.jobs.filter(j => j.doneAt && j.paidAt && j.paidAt < j.doneAt);
-  if (reversed.length) {
-    results.push({ severity: 'warn', title: `${reversed.length} 筆收款日期早於完成日期`, desc: '時序可能填錯', jobIds: reversed.map(j=>j.id),
-      action: { label: '查看', fn: () => { lockJobsToIds(reversed.map(j=>j.id), `🔧 時序錯亂（${reversed.length} 筆）`); switchTab('jobs'); } } });
-  }
-
-  // 6. 過大資料（單筆 details > 5000 字）
-  const tooLarge = state.jobs.filter(j => (j.details || '').length > 5000);
-  if (tooLarge.length) {
-    results.push({ severity: 'info', title: `${tooLarge.length} 筆案件 details 過長 (>5000 字)`, desc: '建議精簡' });
-  }
-
-  // 7. v2.7: 模糊重複業主名（不完全相同但很相似）
-  const fuzzyClients = findFuzzyDupClients(0.75);
-  if (fuzzyClients.length) {
-    const samples = fuzzyClients.slice(0, 3).map(d => `${d.a.name} ↔ ${d.b.name} (${Math.round(d.similarity * 100)}%)`).join('\n');
-    results.push({
-      severity: 'info',
-      title: `${fuzzyClients.length} 組業主名相似可能重複`,
-      desc: samples + (fuzzyClients.length > 3 ? '\n…' : ''),
-    });
-  }
-
-  // 8. v2.7: 同月同業主相似標題的案件（可能重複）
-  const fuzzyJobs = findFuzzyDupJobs(0.85);
-  if (fuzzyJobs.length) {
-    const ids = new Set();
-    fuzzyJobs.forEach(d => { ids.add(d.a.id); ids.add(d.b.id); });
-    const samples = fuzzyJobs.slice(0, 3).map(d => `${d.a.title || '?'} ↔ ${d.b.title || '?'} (${Math.round(d.similarity * 100)}%)`).join('\n');
-    results.push({
-      severity: 'info',
-      title: `${fuzzyJobs.length} 組案件可能重複（同業主、同月、相似標題）`,
-      desc: samples + (fuzzyJobs.length > 3 ? '\n…' : ''),
-      jobIds: Array.from(ids),
-      action: { label: '查看', fn: () => { lockJobsToIds(Array.from(ids), `🔧 可能重複的案件（${fuzzyJobs.length} 組）`); switchTab('jobs'); } }
-    });
-  }
-
-  return results;
-}
-
-let _healthCheckResults = [];
-
-function showHealthCheckModal() {
-  _healthCheckResults = runDataHealthCheck();
-  const box = document.getElementById('health-check-result');
-  if (!box) return;
-  if (!_healthCheckResults.length) {
-    box.innerHTML = '<div style="text-align: center; padding: 30px; color: var(--success); font-size: 16px;">✅ 所有資料看起來都很正常！</div>';
-  } else {
-    const colorMap = { error: 'var(--danger)', warn: 'var(--warning)', info: 'var(--muted)' };
-    const iconMap = { error: '🔴', warn: '🟡', info: 'ℹ️' };
-    box.innerHTML = _healthCheckResults.map((r, i) => `
-      <div style="padding: 10px; border-radius: 8px; background: var(--bg); margin-bottom: 8px; border-left: 3px solid ${colorMap[r.severity]};">
-        <div style="font-weight: 600; font-size: 14px;">${iconMap[r.severity]} ${escapeHtml(r.title)}</div>
-        <div style="font-size: 12px; color: var(--muted); margin-top: 4px; white-space: pre-line;">${escapeHtml(r.desc)}</div>
-        ${r.action ? `<button class="btn btn-outline btn-sm" style="margin-top: 6px;" onclick="runHealthAction(${i})">${escapeHtml(r.action.label)}</button>` : ''}
-      </div>
-    `).join('');
-  }
-  document.getElementById('health-modal').classList.add('open');
-}
-
-function runHealthAction(i) {
-  const r = _healthCheckResults[i];
-  if (r?.action?.fn) {
-    r.action.fn();
-    document.getElementById('health-modal').classList.remove('open');
-  }
-}
-DEAD_BLOCK_END_v2_health_check */
+// v3.3.1：v2 資料健檢整套（runDataHealthCheck / showHealthCheckModal / runHealthAction）已物理移除
 
 // ============== 範本系統（案件描述常用片語）==============
 const TEMPLATES_KEY = 'cloud-ftJobTemplates_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
@@ -8035,137 +7886,8 @@ function getActivePaymentAccount() {
   return list.find(a => a.id === u.selectedPaymentAccountId) || list[0];
 }
 
-// v3.3.0：以下整段 settings 頁「我的收款資訊」相關邏輯已移除
-// 收款帳號 CRUD 全部走請款單分頁的 modal（openPaymentAccountEditor / savePaymentAccountEditor / deleteSelectedPaymentAccount）
-// 移除函式：loadUserInfoUI / renderPaymentAccountsUI / addPaymentAccount / removePaymentAccount / collectPaymentAccountsFromUI / saveUserInfo
-/* DEAD_BLOCK_BEGIN_v2_settings_payment_ui
-
-// 渲染收款帳號列表（設定頁）
-function renderPaymentAccountsUI() {
-  const wrap = document.getElementById('payment-accounts-list');
-  if (!wrap) return;
-  const u = config.userInfo || {};
-  const list = u.paymentAccounts || [];
-  if (!list.length) {
-    wrap.innerHTML = `<div style="font-size: 13px; color: var(--muted); padding: 8px 0;">尚未新增收款帳號，按下方「+ 新增帳號」開始建立。</div>`;
-    return;
-  }
-  wrap.innerHTML = list.map((a, i) => `
-    <div class="payment-account-row" data-acct-id="${escapeHtml(a.id)}" style="border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: var(--bg);">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <strong style="font-size: 13px;">收款帳號 ${i + 1}</strong>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="removePaymentAccount('${escapeHtml(a.id)}')" title="刪除這筆收款帳號" style="color: var(--danger);">🗑️ 刪除</button>
-      </div>
-      <div class="my-info-grid">
-        <div>
-          <label>標籤（自己看的）</label>
-          <input type="text" data-acct-field="label" value="${escapeHtml(a.label || '')}" placeholder="例：個人 / 工作室">
-        </div>
-        <div>
-          <label>戶名（請款單顯示）</label>
-          <input type="text" data-acct-field="holderName" value="${escapeHtml(a.holderName || '')}" placeholder="留空則用我的姓名">
-        </div>
-        <div>
-          <label>匯款銀行</label>
-          <input type="text" data-acct-field="bank" value="${escapeHtml(a.bank || '')}" placeholder="例：玉山銀行 (808)">
-        </div>
-        <div>
-          <label>匯款帳號</label>
-          <input type="text" data-acct-field="account" value="${escapeHtml(a.account || '')}" placeholder="0000-000-000000">
-        </div>
-        <div style="grid-column: 1 / -1;">
-          <label>帳號備註（會列在請款單對應位置）</label>
-          <input type="text" data-acct-field="note" value="${escapeHtml(a.note || '')}" placeholder="例：請註明案件編號">
-        </div>
-        <div style="grid-column: 1 / -1;">
-          <label>存摺照片（請款單會附上，自動壓縮到 800px）</label>
-          <!-- v3.0.0-alpha.3：兩個 hidden field 並存 -->
-          <!-- bankbookImage（base64 dataURL）：v2 沿用 + alpha.3 未登入 fallback -->
-          <!-- bankbookImageFileId：alpha.3 起的主要儲存方式（Drive App Folder 個別檔的 fileId） -->
-          <input type="hidden" data-acct-field="bankbookImage" value="${escapeHtml(a.bankbookImage || '')}">
-          <input type="hidden" data-acct-field="bankbookImageFileId" value="${escapeHtml(a.bankbookImageFileId || '')}">
-          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <input type="file" accept="image/*" id="bankbook-upload-${escapeHtml(a.id)}" onchange="onBankbookFileChange(this, '${escapeHtml(a.id)}')" style="display: none;">
-            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('bankbook-upload-${escapeHtml(a.id)}').click()">📷 ${(a.bankbookImage || a.bankbookImageFileId) ? '更換照片' : '上傳照片'}</button>
-            <button type="button" class="btn btn-ghost btn-sm" id="bankbook-remove-${escapeHtml(a.id)}" onclick="clearBankbookImage('${escapeHtml(a.id)}')" style="color: var(--danger); ${(a.bankbookImage || a.bankbookImageFileId) ? '' : 'display: none;'}">移除</button>
-          </div>
-          <div id="bankbook-preview-${escapeHtml(a.id)}">
-            ${a.bankbookImage
-              ? `<img src="${a.bankbookImage}" alt="存摺" style="max-width: 200px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); margin-top: 6px;">`
-              : (a.bankbookImageFileId
-                ? `<div style="color:var(--muted);font-size:13px;margin-top:6px;" data-bankbook-loading="${escapeHtml(a.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
-                : '')}
-          </div>
-        </div>
-      </div>
-    </div>
-  `).join('');
-  // v3.1.0-fix：renderPaymentAccountsUI 渲染完立刻 hydrate，不然 settings 頁的 placeholder 不會被換掉
-  // （renderAll 結尾雖然有叫 hydrate，但 saveUserInfo / addPaymentAccount / removePaymentAccount 不會跑 renderAll）
-  if (typeof cloudHydrateBankbookImages === 'function') {
-    cloudHydrateBankbookImages().catch(e => console.warn('[bankbook] hydrate after renderPaymentAccountsUI failed:', e));
-  }
-}
-
-function addPaymentAccount() {
-  // 先把目前 UI 上的內容收回 config，再新增空白一筆，重新 render
-  collectPaymentAccountsFromUI();
-  config.userInfo.paymentAccounts.push({
-    id: uid(),
-    label: '',
-    holderName: '',
-    bank: '',
-    account: '',
-    note: '',
-    bankbookImage: ''
-  });
-  renderPaymentAccountsUI();
-}
-
-function removePaymentAccount(id) {
-  collectPaymentAccountsFromUI();
-  const u = config.userInfo;
-  u.paymentAccounts = (u.paymentAccounts || []).filter(a => a.id !== id);
-  if (u.selectedPaymentAccountId === id) {
-    u.selectedPaymentAccountId = u.paymentAccounts[0]?.id || '';
-  }
-  renderPaymentAccountsUI();
-}
-
-// 把畫面上的 input 內容收回 config.userInfo.paymentAccounts（in-place 更新）
-function collectPaymentAccountsFromUI() {
-  const wrap = document.getElementById('payment-accounts-list');
-  if (!wrap) return;
-  const u = config.userInfo || {};
-  const list = u.paymentAccounts || [];
-  wrap.querySelectorAll('.payment-account-row').forEach(row => {
-    const id = row.dataset.acctId;
-    const a = list.find(x => x.id === id);
-    if (!a) return;
-    row.querySelectorAll('[data-acct-field]').forEach(inp => {
-      a[inp.dataset.acctField] = inp.value.trim();
-    });
-  });
-}
-
-function saveUserInfo() {
-  // 收回 UI 上的多筆收款帳號
-  collectPaymentAccountsFromUI();
-  config.userInfo = {
-    ...config.userInfo,
-    name: document.getElementById('me-name').value.trim(),
-    phone: document.getElementById('me-phone').value.trim(),
-    email: document.getElementById('me-email').value.trim(),
-    invoiceTitle: document.getElementById('me-title').value.trim(),
-    note: document.getElementById('me-note').value.trim()
-    // bank / account 舊欄位不再寫入；paymentAccounts 由上面 collectPaymentAccountsFromUI 維護
-  };
-  ensurePaymentAccounts();
-  saveConfigOnly();  // v3.1.0-fix：之前直接寫 localStorage 沒推 Drive，paymentAccounts 永遠不會同步
-  render();
-  toast('✓ 已儲存收款資訊，請款單會自動帶入');
-}
-DEAD_BLOCK_END_v2_settings_payment_ui */
+// v3.3.1：v2 settings 頁「我的收款資訊」整套（loadUserInfoUI / renderPaymentAccountsUI / addPaymentAccount / removePaymentAccount / collectPaymentAccountsFromUI / saveUserInfo）已物理移除
+// 收款帳號 CRUD 全部走請款單分頁 modal（openPaymentAccountEditor / savePaymentAccountEditor / deleteSelectedPaymentAccount）
 
 function renderBackupStatus() {
   // 順便調整範例按鈕的安全提示
@@ -8546,41 +8268,7 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ============== Lab / 開發模式（v3.3.0：UI 卡片已刪、整塊 dead code）==============
-/* DEAD_BLOCK_BEGIN_v2_lab_mode
-const LAB_MODE_KEY = 'cloud-ftLabMode_v1';
-function isLabMode() { return localStorage.getItem(LAB_MODE_KEY) === '1'; }
-function toggleLabMode() {
-  const next = !isLabMode();
-  localStorage.setItem(LAB_MODE_KEY, next ? '1' : '0');
-  document.getElementById('lab-mode-banner')?.remove();
-  if (next) {
-    showLabModeBanner();
-    toast('🧪 開發模式已啟用：暫停所有雲端 push（pull 仍會自動進行）', 5000);
-  } else {
-    toast('✓ 開發模式已關閉，恢復雲端同步', 4000);
-  }
-  if (typeof cloudUpdateSyncIndicator === 'function') cloudUpdateSyncIndicator();
-  updateLabModeUI();
-}
-function showLabModeBanner() {
-  if (document.getElementById('lab-mode-banner')) return;
-  const div = document.createElement('div');
-  div.id = 'lab-mode-banner';
-  div.style.cssText = 'position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#ea580c; color:#fff; padding:10px 16px; border-radius:24px; box-shadow:0 4px 16px rgba(0,0,0,0.2); font-size:13px; z-index:9999; cursor:pointer;';
-  div.innerHTML = '🧪 開發模式 — 不會推到雲端 · 點此關閉';
-  div.onclick = toggleLabMode;
-  document.body.appendChild(div);
-}
-function updateLabModeUI() {
-  const cb = document.getElementById('cfg-lab-mode');
-  if (cb) cb.checked = isLabMode();
-  if (isLabMode()) showLabModeBanner();
-  else document.getElementById('lab-mode-banner')?.remove();
-}
-DEAD_BLOCK_END_v2_lab_mode */
-// v3.3.0：保留 stub 給 init script 不會出錯
-function isLabMode() { return false; }
+// v3.3.1：v2 Lab / 開發模式（isLabMode / toggleLabMode / showLabModeBanner / updateLabModeUI + LAB_MODE_KEY）已物理移除
 
 // ============== 過時客戶端橫幅（schema/version 不匹配時）==============
 // v3.0.0：showStaleClientBanner（v2 sheet schema 衝突警告橫幅）已移除
@@ -8621,40 +8309,7 @@ function getDeviceLabel() {
   return getOrGenerateAutoId();
 }
 
-// v3.3.0：setDeviceName / loadDeviceNameUI dead（裝置名稱輸入 UI 已刪）
-/* DEAD_BLOCK_BEGIN_v2_device_name_ui
-function setDeviceName(name) {
-  if (!name || !name.trim()) {
-    localStorage.removeItem(DEVICE_NAME_KEY);
-    toast(`已清除自訂名稱（將顯示為 ${getOrGenerateAutoId()}）`);
-  } else {
-    localStorage.setItem(DEVICE_NAME_KEY, name.trim());
-    toast(`✓ 裝置名稱：${name.trim()}`);
-  }
-  loadDeviceNameUI();
-}
-
-function loadDeviceNameUI() {
-  const input = document.getElementById('cfg-device-name');
-  if (input) input.value = localStorage.getItem(DEVICE_NAME_KEY) || '';
-  const hint = document.getElementById('cfg-device-name-current');
-  if (hint) {
-    const loc = cachedDeviceLocation || {};
-    let locText = '';
-    if (loc.preciseCity || loc.preciseDistrict) {
-      locText = `🎯 精確：${loc.preciseCity || ''} ${loc.preciseDistrict || ''}`;
-    } else if (loc.city) {
-      locText = `📍 IP 城市：${loc.city}`;
-    } else {
-      locText = '📍 位置：尚未取得';
-    }
-    hint.innerHTML = `目前識別：<b>${escapeHtml(getDeviceLabel())}</b><br>${locText}` +
-      (loc.ip ? ` · IP ${loc.ip}` : '');
-  }
-}
-DEAD_BLOCK_END_v2_device_name_ui */
-// v3.3.0：保留 noop stub，避免 applyTrackerData 等舊呼叫路徑出錯
-function loadDeviceNameUI() {}
+// v3.3.1：v2 裝置名稱輸入 UI（setDeviceName / loadDeviceNameUI）已物理移除（含 noop stub）
 
 // ============== IP + 地理位置（24 小時快取）==============
 const DEVICE_LOCATION_KEY = 'cloud-ftDeviceLocation_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
@@ -8696,90 +8351,11 @@ async function fetchDeviceLocation() {
 
 // v3.0.0：getDeviceLabelForUpload（v2 上傳時帶地理位置）已移除；v3 用 getDeviceLabel 即可
 
-// v3.3.0：requestPreciseLocation / clearPreciseLocation dead（GPS 按鈕已隨 #card-cloud 一起刪）
-/* DEAD_BLOCK_BEGIN_v2_precise_location
-async function requestPreciseLocation() {
-  if (!navigator.geolocation) {
-    toast('這個瀏覽器不支援精確定位');
-    return;
-  }
-  toastProgress('🎯 請在瀏覽器跳出的視窗按「允許」...');
-  navigator.geolocation.getCurrentPosition(async (pos) => {
-    const lat = pos.coords.latitude;
-    const lng = pos.coords.longitude;
-    try {
-      const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=zh-TW`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      const district = data.locality || (data.localityInfo?.administrative || []).slice(-1)[0]?.name || '';
-      const city = data.city || data.principalSubdivision || '';
-      const loc = cachedDeviceLocation || {};
-      loc.preciseCity = city;
-      loc.preciseDistrict = district;
-      loc.preciseLat = +lat.toFixed(3);
-      loc.preciseLng = +lng.toFixed(3);
-      loc.preciseFetchedAt = Date.now();
-      cachedDeviceLocation = loc;
-      localStorage.setItem(DEVICE_LOCATION_KEY, JSON.stringify(loc));
-      toast(`✓ 精確位置：${city} ${district}`, 4000);
-      loadDeviceNameUI();
-    } catch (err) {
-      toast('反向地理編碼失敗：' + err.message);
-    }
-  }, (err) => {
-    let msg = '無法取得位置';
-    if (err.code === 1) msg = '使用者拒絕授權';
-    else if (err.code === 2) msg = '位置服務無法使用（可能未開 GPS）';
-    else if (err.code === 3) msg = '取得位置超時';
-    toast('❌ ' + msg, 4000);
-  }, { timeout: 15000, maximumAge: 60 * 60 * 1000, enableHighAccuracy: false });
-}
-function clearPreciseLocation() {
-  if (cachedDeviceLocation) {
-    delete cachedDeviceLocation.preciseCity;
-    delete cachedDeviceLocation.preciseDistrict;
-    delete cachedDeviceLocation.preciseLat;
-    delete cachedDeviceLocation.preciseLng;
-    delete cachedDeviceLocation.preciseFetchedAt;
-    localStorage.setItem(DEVICE_LOCATION_KEY, JSON.stringify(cachedDeviceLocation));
-  }
-  toast('已清除精確位置（改用 IP 城市）');
-  loadDeviceNameUI();
-}
-DEAD_BLOCK_END_v2_precise_location */
+// v3.3.1：v2 GPS 精確位置（requestPreciseLocation / clearPreciseLocation）已物理移除
 
-// v3.3.0：device-name-prompt-modal 已刪、且 config.sheetSyncEnabled 永遠 false，整塊 dead
-/* DEAD_BLOCK_BEGIN_v2_device_name_prompt
-const DEVICE_PROMPT_DISMISSED_KEY = 'cloud-ftDeviceNamePromptDismissed_v1';
-function maybeShowDeviceNamePrompt() {
-  if (localStorage.getItem(DEVICE_NAME_KEY)) return;
-  if (localStorage.getItem(DEVICE_PROMPT_DISMISSED_KEY) === 'true') return;
-  if (!config.sheetSyncEnabled) return;
-  const modal = document.getElementById('device-name-prompt-modal');
-  if (!modal) return;
-  const hint = document.getElementById('device-name-prompt-current');
-  if (hint) hint.textContent = `現在使用的自動識別：${getOrGenerateAutoId()}`;
-  document.getElementById('device-name-prompt-input').value = '';
-  modal.classList.add('open');
-}
-function saveDeviceNameFromPrompt() {
-  const val = document.getElementById('device-name-prompt-input').value.trim();
-  if (!val) { toast('請輸入裝置名稱，或選「先跳過」'); return; }
-  setDeviceName(val);
-  document.getElementById('device-name-prompt-modal').classList.remove('open');
-}
-function skipDeviceNamePrompt() {
-  localStorage.setItem(DEVICE_PROMPT_DISMISSED_KEY, 'true');
-  document.getElementById('device-name-prompt-modal').classList.remove('open');
-  toast('已跳過。設定頁可隨時更改裝置名稱。', 4000);
-}
-DEAD_BLOCK_END_v2_device_name_prompt */
+// v3.3.1：v2 device-name-prompt-modal 三函式（maybeShowDeviceNamePrompt / saveDeviceNameFromPrompt / skipDeviceNamePrompt）已物理移除
 
-// v3.3.0：v2 Apps Script 同步開關 stub 也徹底移除
-/* DEAD_BLOCK_BEGIN_v2_sheet_sync_toggle_stubs
-async function enableSheetSync() { console.warn('[deprecated] enableSheetSync：v3 登入即同步，無需手動啟用'); }
-function disableSheetSync() { console.warn('[deprecated] disableSheetSync：v3 登入即同步，請從 🔐 Google Drive 同步 卡片登出'); }
-DEAD_BLOCK_END_v2_sheet_sync_toggle_stubs */
+// v3.3.1：v2 Apps Script 同步開關 stub（enableSheetSync / disableSheetSync）已物理移除
 
 // v3.0.0：updateSheetSyncBadge（更新 #sheet-sync-status 文字）已移除；對應 hidden 卡片不再顯示
 
@@ -8943,188 +8519,8 @@ const SNAPSHOT_FIELD_LABELS = {
 const CLIENT_FIELDS = ['name','color','note','commissionRate','commissionTo','prepaidMode','prepayments','billingDay','billingRemindDays','unpaidRemindDaysOverride'];
 const JOB_FIELDS    = ['title','clientId','date','endDate','details','amount','tag','done','doneAt','paid','paidAt','cancelled','isEstimate','hoursWorked','timeSpentMs','discountType','discountValue','payments','writeOff','subtasks'];
 
-// v3.3.0：以下整套 v2 sheet snapshot diff modal 邏輯已徹底移除
-// 原本是 diffFields_ / computeSnapshotDiff / formatDiffValue_ / renderFieldDiffHtml / previewSnapshot / showSnapshotDiffModal
-// v3 用 cloudShowRestorePreviewModal（在 ☁️ Drive Sync Layer，含「目前 vs 還原後」對比表格）取代
-/* DEAD_BLOCK_BEGIN_v2_snapshot_diff_modal
-
-function formatDiffValue_(field, value, snapClients) {
-  if (value === undefined || value === null || value === '') return '<i style="color:var(--muted);">(空)</i>';
-  if (Array.isArray(value)) {
-    if (field === 'payments' || field === 'prepayments') {
-      const total = value.reduce((s, p) => s + (+p.amount || 0), 0);
-      return `${value.length} 筆 (${fmt(total)})`;
-    }
-    if (field === 'subtasks') {
-      const done = value.filter(s => s.done).length;
-      return `${value.length} 項 (${done} 完成)`;
-    }
-    return JSON.stringify(value).slice(0, 60);
-  }
-  if (typeof value === 'boolean') return value ? '是' : '否';
-  if (field === 'clientId') {
-    const c = (snapClients || state.clients).find(x => x.id === value);
-    return c ? escapeHtml(c.name) : `<i style="color:var(--muted);">(未知)</i>`;
-  }
-  if (field === 'discountType') return ({ none: '無', fixed: '折扣金額', percent: '折扣百分比' })[value] || value;
-  return escapeHtml(String(value));
-}
-
-function renderFieldDiffHtml(fieldDiff, snapClients) {
-  return Object.keys(fieldDiff).map(f => {
-    const label = SNAPSHOT_FIELD_LABELS[f] || f;
-    const before = formatDiffValue_(f, fieldDiff[f].before, snapClients);
-    const after = formatDiffValue_(f, fieldDiff[f].after, snapClients);
-    return `<div style="font-size: 12px; padding: 2px 0;">
-      <span style="color: var(--muted);">${label}</span>:
-      <span style="color: var(--danger); text-decoration: line-through;">${before}</span>
-      →
-      <span style="color: var(--success);">${after}</span>
-    </div>`;
-  }).join('');
-}
-
-async function previewSnapshot(id) {
-  const cfg = config.sheetConfig;
-  toastProgress('📂 載入預覽...');
-  try {
-    const resp = await fetch(cfg.apiUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'getSnapshot', token: cfg.apiToken, snapshotId: id })
-    });
-    const data = await resp.json();
-    if (!data.ok) {
-      // v2.9.3: JSON 解析失敗（之前 4-chunk 截斷的舊 snapshot）→ 友善提示
-      if (data.error && data.error.includes('Snapshot 解析失敗')) {
-        alert('⚠️ 此 snapshot 已損壞（之前 4-chunk 上限導致截斷，無法還原）\n\n以後新的 snapshot（10-chunk 上限）不會再有此問題。\n\n建議：刪除此筆並用最近建立的 snapshot 還原。');
-        return;
-      }
-      alert('失敗：' + data.error);
-      return;
-    }
-    const snap = data.snapshot;
-    const d = snap.data;
-    const snapClients = d.clients || [];
-    const snapJobs = d.jobs || [];
-
-    // v2.9.5: 計算 diff
-    const diff = computeSnapshotDiff(state.clients, state.jobs, snapClients, snapJobs);
-    showSnapshotDiffModal(snap, snapClients, snapJobs, diff, id);
-    toast('');
-  } catch (err) {
-    alert('錯誤：' + err.message);
-  }
-}
-
-// v2.9.5: Snapshot diff 預覽 modal
-const DIFF_PREVIEW_LIMIT = 10;
-
-function showSnapshotDiffModal(snap, snapClients, snapJobs, diff, snapshotId) {
-  const curTotalAmt = state.jobs.reduce((s,j) => s + (+j.amount || 0), 0);
-  const snapTotalAmt = snapJobs.reduce((s,j) => s + (+j.amount || 0), 0);
-  const totalDelta = snapTotalAmt - curTotalAmt;
-  const deltaSign = totalDelta > 0 ? '+' : (totalDelta < 0 ? '−' : '');
-
-  const tierLabels = { force: '🔒 每日強制', manual: '✋ 手動', restore: '↩️ 還原前', auto: '⚙️ 自動', legacy: '📦 舊版' };
-  const tierLabel = tierLabels[snap.tier] || snap.tier || '';
-
-  const clientName = (id, sourceClients) => {
-    const c = (sourceClients || state.clients).find(x => x.id === id);
-    return c ? escapeHtml(c.name) : `<i style="color:var(--muted);">(未知)</i>`;
-  };
-
-  const renderJobRow = (j, sourceClients) => {
-    return `<li style="padding: 3px 0;">${j.date || '-'} ${escapeHtml(j.title || '(無標題)')} ${fmt(+j.amount||0)} <span style="color:var(--muted);">${clientName(j.clientId, sourceClients)}</span></li>`;
-  };
-
-  const addedClientsHtml = diff.clients.added.length
-    ? `<ul style="margin: 4px 0 0 12px; font-size: 12px;">${diff.clients.added.slice(0, DIFF_PREVIEW_LIMIT).map(c => `<li>${escapeHtml(c.name)}</li>`).join('')}${diff.clients.added.length > DIFF_PREVIEW_LIMIT ? `<li style="color:var(--muted);">…還有 ${diff.clients.added.length - DIFF_PREVIEW_LIMIT} 位</li>` : ''}</ul>`
-    : '';
-  const addedJobsHtml = diff.jobs.added.length
-    ? `<ul style="margin: 4px 0 0 12px; font-size: 12px;">${diff.jobs.added.slice(0, DIFF_PREVIEW_LIMIT).map(j => renderJobRow(j, snapClients)).join('')}${diff.jobs.added.length > DIFF_PREVIEW_LIMIT ? `<li style="color:var(--muted);">…還有 ${diff.jobs.added.length - DIFF_PREVIEW_LIMIT} 筆</li>` : ''}</ul>`
-    : '';
-
-  const removedClientsHtml = diff.clients.removed.length
-    ? `<ul style="margin: 4px 0 0 12px; font-size: 12px;">${diff.clients.removed.slice(0, DIFF_PREVIEW_LIMIT).map(c => `<li>${escapeHtml(c.name)}</li>`).join('')}${diff.clients.removed.length > DIFF_PREVIEW_LIMIT ? `<li style="color:var(--muted);">…還有 ${diff.clients.removed.length - DIFF_PREVIEW_LIMIT} 位</li>` : ''}</ul>`
-    : '';
-  const removedJobsHtml = diff.jobs.removed.length
-    ? `<ul style="margin: 4px 0 0 12px; font-size: 12px;">${diff.jobs.removed.slice(0, DIFF_PREVIEW_LIMIT).map(j => renderJobRow(j, state.clients)).join('')}${diff.jobs.removed.length > DIFF_PREVIEW_LIMIT ? `<li style="color:var(--muted);">…還有 ${diff.jobs.removed.length - DIFF_PREVIEW_LIMIT} 筆</li>` : ''}</ul>`
-    : '';
-
-  const changedClientsHtml = diff.clients.changed.length
-    ? diff.clients.changed.slice(0, DIFF_PREVIEW_LIMIT).map(c => `
-        <div style="margin-top: 8px; padding: 6px; background: var(--bg); border-radius: 6px;">
-          <div style="font-weight: 600; font-size: 13px;">${escapeHtml(c.before.name || c.after.name)}</div>
-          ${renderFieldDiffHtml(c.fieldDiff, snapClients)}
-        </div>`).join('') + (diff.clients.changed.length > DIFF_PREVIEW_LIMIT ? `<div style="color:var(--muted); font-size: 12px; margin-top: 4px;">…還有 ${diff.clients.changed.length - DIFF_PREVIEW_LIMIT} 位</div>` : '')
-    : '';
-  const changedJobsHtml = diff.jobs.changed.length
-    ? diff.jobs.changed.slice(0, DIFF_PREVIEW_LIMIT).map(j => `
-        <div style="margin-top: 8px; padding: 6px; background: var(--bg); border-radius: 6px;">
-          <div style="font-weight: 600; font-size: 13px;">${j.after.date || j.before.date || '-'} ${escapeHtml(j.after.title || j.before.title || '')} <span style="font-weight: 400; color: var(--muted);">${clientName(j.after.clientId || j.before.clientId, snapClients)}</span></div>
-          ${renderFieldDiffHtml(j.fieldDiff, snapClients)}
-        </div>`).join('') + (diff.jobs.changed.length > DIFF_PREVIEW_LIMIT ? `<div style="color:var(--muted); font-size: 12px; margin-top: 4px;">…還有 ${diff.jobs.changed.length - DIFF_PREVIEW_LIMIT} 筆</div>` : '')
-    : '';
-
-  const html = `
-    <div style="font-size: 13px; color: var(--muted); margin-bottom: 8px;">
-      ${snap.timestamp}　${snap.dataSize ? Math.round(snap.dataSize / 1024) + ' KB' : ''}　${tierLabel}　${escapeHtml(snap.device || '')}
-    </div>
-
-    <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
-      <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">數字差異</div>
-      <table style="width: 100%; font-size: 13px;">
-        <tr><td>業主</td><td style="text-align: right;">${state.clients.length}</td><td style="text-align: center; color: var(--muted);">→</td><td style="text-align: right;"><b>${snapClients.length}</b></td><td style="text-align: right; color: ${snapClients.length === state.clients.length ? 'var(--muted)' : (snapClients.length < state.clients.length ? 'var(--danger)' : 'var(--success)')};">(${snapClients.length - state.clients.length >= 0 ? '+' : ''}${snapClients.length - state.clients.length})</td></tr>
-        <tr><td>案件</td><td style="text-align: right;">${state.jobs.length}</td><td style="text-align: center; color: var(--muted);">→</td><td style="text-align: right;"><b>${snapJobs.length}</b></td><td style="text-align: right; color: ${snapJobs.length === state.jobs.length ? 'var(--muted)' : (snapJobs.length < state.jobs.length ? 'var(--danger)' : 'var(--success)')};">(${snapJobs.length - state.jobs.length >= 0 ? '+' : ''}${snapJobs.length - state.jobs.length})</td></tr>
-        <tr><td>總額</td><td style="text-align: right;">${fmt(curTotalAmt)}</td><td style="text-align: center; color: var(--muted);">→</td><td style="text-align: right;"><b>${fmt(snapTotalAmt)}</b></td><td style="text-align: right; color: ${totalDelta === 0 ? 'var(--muted)' : (totalDelta < 0 ? 'var(--danger)' : 'var(--success)')};">(${deltaSign}${fmt(Math.abs(totalDelta)).replace('NT$','').trim()})</td></tr>
-      </table>
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <details ${diff.clients.added.length + diff.jobs.added.length > 0 ? 'open' : ''} style="background: var(--success-light); padding: 8px; border-radius: 6px; margin-bottom: 6px;">
-        <summary style="cursor: pointer; font-size: 13px; font-weight: 600; color: var(--success);">
-          🟢 還原後會「復活」：${diff.clients.added.length} 業主、${diff.jobs.added.length} 案件
-        </summary>
-        ${diff.clients.added.length ? `<div style="margin-top: 6px;"><b style="font-size: 12px;">業主：</b>${addedClientsHtml}</div>` : ''}
-        ${diff.jobs.added.length ? `<div style="margin-top: 6px;"><b style="font-size: 12px;">案件：</b>${addedJobsHtml}</div>` : ''}
-        ${!diff.clients.added.length && !diff.jobs.added.length ? '<div style="font-size: 12px; color: var(--muted); margin-top: 4px;">（無）</div>' : ''}
-      </details>
-
-      <details style="background: var(--danger-light); padding: 8px; border-radius: 6px; margin-bottom: 6px;">
-        <summary style="cursor: pointer; font-size: 13px; font-weight: 600; color: var(--danger);">
-          🔴 還原後會「消失」：${diff.clients.removed.length} 業主、${diff.jobs.removed.length} 案件
-        </summary>
-        ${diff.clients.removed.length ? `<div style="margin-top: 6px;"><b style="font-size: 12px;">業主：</b>${removedClientsHtml}</div>` : ''}
-        ${diff.jobs.removed.length ? `<div style="margin-top: 6px;"><b style="font-size: 12px;">案件：</b>${removedJobsHtml}</div>` : ''}
-        ${!diff.clients.removed.length && !diff.jobs.removed.length ? '<div style="font-size: 12px; color: var(--muted); margin-top: 4px;">（無）</div>' : ''}
-      </details>
-
-      <details style="background: var(--warning-light); padding: 8px; border-radius: 6px;">
-        <summary style="cursor: pointer; font-size: 13px; font-weight: 600; color: var(--warning);">
-          🟡 還原後會「變動」：${diff.clients.changed.length} 業主、${diff.jobs.changed.length} 案件
-        </summary>
-        ${diff.clients.changed.length ? `<div style="margin-top: 6px;"><b style="font-size: 12px;">業主變動：</b>${changedClientsHtml}</div>` : ''}
-        ${diff.jobs.changed.length ? `<div style="margin-top: 6px;"><b style="font-size: 12px;">案件變動：</b>${changedJobsHtml}</div>` : ''}
-        ${!diff.clients.changed.length && !diff.jobs.changed.length ? '<div style="font-size: 12px; color: var(--muted); margin-top: 4px;">（無）</div>' : ''}
-      </details>
-    </div>
-
-    <div style="font-size: 12px; color: var(--muted); padding: 6px; background: var(--bg); border-radius: 6px; margin-bottom: 8px;">
-      ⚠️ 還原前會自動把現在的資料先備份起來（restore tier，永久保留）
-    </div>
-  `;
-
-  const box = document.getElementById('snapshot-diff-content');
-  if (box) box.innerHTML = html;
-  document.getElementById('snapshot-diff-confirm-btn').onclick = () => {
-    document.getElementById('snapshot-diff-modal').classList.remove('open');
-    restoreSnapshot(snapshotId);
-  };
-  document.getElementById('snapshot-diff-modal').classList.add('open');
-}
-*/
-
-// v3.3.0：restoreSnapshot stub 已刪（caller 已隨 snapshot-modal 一起刪）
+// v3.3.1：v2 sheet snapshot diff modal（formatDiffValue_ / renderFieldDiffHtml / previewSnapshot / showSnapshotDiffModal）整段已物理移除
+// v3 用 cloudShowRestorePreviewModal（在 ☁️ Drive Sync Layer）取代
 
 // ============== 網頁版本偵測 ==============
 // APP_VERSION 已在檔案頂端宣告（v2.2 新增）；此處不再重複宣告
