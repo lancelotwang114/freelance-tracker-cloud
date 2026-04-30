@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-30-v3.6.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-30-v3.6.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3016,6 +3016,7 @@ function saveConfig() {
   config.enableMonthEndAlert = g('cfg-alert-month-end')?.checked !== false;
   config.enableBillingDayAlert = g('cfg-alert-billing-day')?.checked !== false;
   config.enableSlowPayAlert = g('cfg-alert-slow-pay')?.checked !== false;
+  config.enableBackupAlert = g('cfg-alert-backup')?.checked !== false;  // v3.6.2
   saveConfigOnly();  // v3.1.0-fix：之前直接寫 localStorage 沒推 Drive
   render();
   // Calendar 提醒提示文字（如果是 follow 模式，會跟著 dueSoonDays 變動）
@@ -3036,6 +3037,7 @@ function loadReminderConfigUI() {
   if (g('cfg-alert-month-end')) g('cfg-alert-month-end').checked = config.enableMonthEndAlert !== false;
   if (g('cfg-alert-billing-day')) g('cfg-alert-billing-day').checked = config.enableBillingDayAlert !== false;
   if (g('cfg-alert-slow-pay')) g('cfg-alert-slow-pay').checked = config.enableSlowPayAlert !== false;
+  if (g('cfg-alert-backup')) g('cfg-alert-backup').checked = config.enableBackupAlert !== false;  // v3.6.2
 }
 
 // ============== Utilities ==============
@@ -3752,8 +3754,8 @@ function computeAlerts() {
     });
   }
 
-  // 6. 備份提醒（> N 天沒匯出備份 + 有資料時才提示）
-  if (state.jobs.length > 0) {
+  // 6. 備份提醒（> N 天沒匯出備份 + 有資料時才提示；v3.6.2：加 enableBackupAlert toggle）
+  if (state.jobs.length > 0 && (config.enableBackupAlert !== false)) {
     const last = config.lastExportAt;
     const daysAgo = last ? daysBetween(last, today) : Infinity;
     if (daysAgo >= config.backupRemindDays) {
@@ -5695,20 +5697,28 @@ function updateNotifUI() {
   const status = document.getElementById('notif-status');
   const enableBtn = document.getElementById('notif-enable-btn');
   const disableBtn = document.getElementById('notif-disable-btn');
+  // v3.6.2：denied 狀態額外顯示瀏覽器設定步驟引導
+  const deniedHelp = document.getElementById('notif-denied-help');
   if (!status) return;
   if (!notifSupported()) {
     status.textContent = '❌ 此瀏覽器不支援';
     if (enableBtn) enableBtn.disabled = true;
+    deniedHelp?.classList.add('hidden');
   } else if (Notification.permission === 'denied') {
-    status.textContent = '🚫 已被瀏覽器拒絕（要從瀏覽器設定重新允許）';
+    status.textContent = '🚫 已被瀏覽器拒絕';
+    deniedHelp?.classList.remove('hidden');
+    enableBtn?.classList.add('hidden');
+    disableBtn?.classList.add('hidden');
   } else if (isNotifEnabled()) {
     status.textContent = '✅ 已啟用';
     enableBtn?.classList.add('hidden');
     disableBtn?.classList.remove('hidden');
+    deniedHelp?.classList.add('hidden');
   } else {
     status.textContent = '⏸ 未啟用';
     enableBtn?.classList.remove('hidden');
     disableBtn?.classList.add('hidden');
+    deniedHelp?.classList.add('hidden');
   }
 }
 

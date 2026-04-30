@@ -38,6 +38,7 @@
 | **v3.5.0** | **Revenue 拆 3 子分頁（總覽/趨勢/分析）+ 月度趨勢預設 6 個月、最近月在左、X 軸 YYYY-MM** | ✅ **完成（2026-04-30）** |
 | **v3.6.0** | **UI 第二輪（砍主題卡、搜尋列收 collapsible、Dashboard stat 可點跳轉、empty state 引導）** | ✅ **完成（2026-04-30）** |
 | **v3.6.1** | **修 Demo 計算 bug、Demo 加收款帳號、Reminder 縮小、設定頁拉平、刷新 icon 換 ↻** | ✅ **完成（2026-04-30）** |
+| **v3.6.2** | **Reminder 改 grid 自適應分欄、備份提醒加 toggle、通知 denied 引導改善** | ✅ **完成（2026-04-30）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

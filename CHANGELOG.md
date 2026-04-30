@@ -1,5 +1,37 @@
 ﻿# 版本更新歷史
 
+## v3.6.2 — Reminder 改善 + 通知拒絕後引導（2026-04-30）
+
+### 通知與提醒卡片 grid 自適應分欄
+- 從 list（每列佔滿）改 `grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))`
+- 寬螢幕自動 2-3 欄、窄螢幕 1 欄，視覺密度大幅提高
+- 整體高度減少約 50%
+- 文字再縮短：「天提醒」→「天」、「（業主頁可覆寫）」拿掉
+- input[type=number] max-width 64px → 56px
+
+### 備份提醒加 checkbox toggle
+- 新增 `cfg-alert-backup` checkbox + `config.enableBackupAlert` 設定欄
+- 預設 ON（向下相容，舊使用者不變）
+- alert 觸發加上 `config.enableBackupAlert !== false` 條件
+- saveConfig / loadReminderConfigUI 都同步加上欄位
+
+### 通知 denied 狀態引導改善
+- 加 `#notif-denied-help` 警告框，被瀏覽器拒絕時自動顯示
+- 警告框內列 Chrome / Edge / Firefox / Safari 三家瀏覽器各自的重新開啟步驟
+- 解釋：JS 沒辦法強制再叫對話框跳出來（瀏覽器安全限制），唯一解法是手動到瀏覽器設定改
+- 拒絕時把「啟用通知 / 停用通知」按鈕都隱藏（按了沒用）
+
+### Dashboard 近期案件批次保留 + 不動
+- 使用者表示需要從首頁直接快速結案，整個機制保留
+- 現況其實已支援單筆快速操作：點「完成」勾標完成、點「收款」勾標已收、點 row 編輯
+- 不另加 hover quick action（避免冗餘）
+
+### 版本 bump
+- APP_VERSION → `2026-04-30-v3.6.2`
+- SW CACHE_VERSION → `ftracker-cloud-v3.6.2`
+
+---
+
 ## v3.6.1 — Demo bug + UI 調整（2026-04-30）
 
 ### Bug：載入範例後本月待收款被多算 4500

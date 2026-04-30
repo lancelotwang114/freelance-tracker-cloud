@@ -2,6 +2,13 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.6.2 ✅ Reminder 改善 + 通知拒絕後引導（2026-04-30）
+- [x] 通知與提醒改 grid 2-3 欄自適應、整體高度 -50%
+- [x] 備份提醒加 checkbox toggle（cfg-alert-backup / config.enableBackupAlert）
+- [x] 通知 denied 狀態自動顯示瀏覽器設定步驟（Chrome / Edge / Firefox / Safari）
+- [x] Dashboard 近期案件不動（使用者要求保留）
+- [x] bump 三處版本號 → `2026-04-30-v3.6.2` / `ftracker-cloud-v3.6.2`
+
 ## v3.6.1 ✅ Demo bug + UI 調整（2026-04-30）
 - [x] 修：loadDemo 補 payments[]（已收款 4500 不再被算進待收款）
 - [x] loadDemo 同步建一筆業主收款帳號（個人 / 王小明 / 玉山）
