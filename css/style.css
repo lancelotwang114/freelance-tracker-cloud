@@ -1158,6 +1158,47 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--primary);
 }
 
+/* ==================== 工時 + 計時器合併（v3.6.3）==================== */
+.job-hours-section {
+  margin-bottom: 8px;
+}
+.job-hours-section .hours-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--bg);
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.job-hours-section .hours-row input[type="number"] {
+  max-width: 90px;
+  margin: 0;
+}
+.job-hours-section .hours-unit {
+  font-size: 13px;
+  color: var(--muted);
+}
+.job-hours-section .timer-display {
+  font-family: monospace;
+  font-size: 16px;
+  font-weight: 600;
+  background: var(--card);
+  padding: 4px 10px;
+  border-radius: 6px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  min-width: 80px;
+  text-align: center;
+}
+.job-hours-section .hourly-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  min-height: 16px;
+  padding-left: 2px;
+}
+
 /* ==================== Calendar 同步卡 compact（v3.6.3）==================== */
 .cal-compact .cal-step {
   background: var(--bg);

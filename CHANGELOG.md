@@ -1,5 +1,32 @@
 ﻿# 版本更新歷史
 
+## v3.6.3 — 行事曆縮小 + 工時計時器合併（2026-05-01）
+
+### 行事曆同步卡縮小
+- 加 `.cal-compact` 系列 CSS（cal-step / cal-step-label / cal-hint / cal-sync-grid）
+- 4 個 step 區塊 padding 12px → 8px、margin-bottom 12px → 6px
+- Step 1「建議建外包專用日曆」原本一直顯示 → 改 `<details>` 預設收摺，需要看做法才展開
+- Step 3「要同步哪些事件」改 grid `repeat(auto-fit, minmax(180px, 1fr))` 自適應分欄，6 個 checkbox 寬螢幕 2-3 欄、窄螢幕 1 欄
+- 各 checkbox 文字精簡：「案件本身（含取消的，標題前綴 "(已取消)"）」→「案件本身」，「業主固定請款日提醒」→「業主請款日提醒」
+- Step 4 自動同步說明：「save() 後 30 秒 debounce 自動推到 Calendar」→「每次改動 30 秒後推送」
+- 整體高度減約 35%
+
+### 案件 modal：工時 + 計時器合併
+- 原本工時 input 跟計時器是兩個獨立區塊（中間夾著折扣 + 金額 summary + 時薪提示）
+- 合併成單一 `.job-hours-section` 區塊：
+  - 一行：工時 input + 「小時」 + 計時器顯示 + ▶開始/⏸暫停 + ✓結束 + 重設
+  - 下方緊跟著時薪提示（移到這裡，不再夾在折扣跟 summary 之間）
+- 工時保留可手動輸入，計時器結束時依舊把累計時間加到工時欄位（沿用 finishJobTimer 邏輯，未動）
+- 順手砍掉「💡 單價 × 數量 會自動算總金額」提示文字（重複噪音）
+- 計時器顯示器改用 monospace 16px、白底邊框，視覺感更像獨立「碼錶」
+- 整體 modal 上半部高度減約 80-100px
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.6.3`
+- SW CACHE_VERSION → `ftracker-cloud-v3.6.3`
+
+---
+
 ## v3.6.2 — Reminder 改善 + 通知拒絕後引導（2026-04-30）
 
 ### 通知與提醒卡片 grid 自適應分欄

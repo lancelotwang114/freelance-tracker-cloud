@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-04-30-v3.6.2">
+<meta name="app-version" content="2026-05-01-v3.6.3">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -874,12 +874,18 @@
         <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">
       </div>
     </div>
-    <p style="font-size: 11px; color: var(--muted); margin-top: -2px; margin-bottom: 8px;">
-      💡 單價 × 數量 會自動算總金額；想直接改總金額也可以（會反算單價）。
-    </p>
-    <div>
-      <label>工時（小時，選填）</label>
-      <input type="number" id="job-hours" placeholder="0" step="0.5" oninput="updateJobHourlyHint()">
+    <!-- v3.6.3：工時 + 計時器合併成一行（保留手動輸入；計時器結束會把時間加到工時欄位） -->
+    <div class="job-hours-section">
+      <label>工時（選填，可手動輸入或用計時器自動填入）</label>
+      <div class="hours-row">
+        <input type="number" id="job-hours" placeholder="0" step="0.5" oninput="updateJobHourlyHint()">
+        <span class="hours-unit">小時</span>
+        <span id="job-timer-display" class="timer-display">00:00:00</span>
+        <button type="button" class="btn btn-primary btn-sm" id="job-timer-toggle" onclick="toggleJobTimer()" title="開始/暫停計時">▶ 開始</button>
+        <button type="button" class="btn btn-outline btn-sm" id="job-timer-finish" onclick="finishJobTimer()" title="把計時器累計時間加到工時欄位">✓ 結束</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="resetJobTimer()" title="清空計時器">重設</button>
+      </div>
+      <div id="job-hourly-hint" class="hourly-hint"></div>
     </div>
 
     <!-- v2.8.0: 折扣 -->
@@ -903,17 +909,6 @@
     </div>
 
     <div id="job-amount-summary" style="background: var(--primary-light); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-bottom: 8px; min-height: 16px;"></div>
-
-    <div id="job-hourly-hint" style="font-size: 12px; color: var(--muted); margin-top: -4px; margin-bottom: 6px; min-height: 16px;"></div>
-
-    <!-- v2.6: 計時器 -->
-    <div id="job-timer-box" style="background: var(--bg); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px;">
-      <div style="font-size: 12px; color: var(--muted);">⏱️ 計時器</div>
-      <div id="job-timer-display" style="font-family: monospace; font-size: 18px; font-weight: 600; flex: 1;">00:00:00</div>
-      <button type="button" class="btn btn-primary btn-sm" id="job-timer-toggle" onclick="toggleJobTimer()">▶ 開始</button>
-      <button type="button" class="btn btn-outline btn-sm" id="job-timer-finish" onclick="finishJobTimer()">✓ 結束計時</button>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="resetJobTimer()">重設</button>
-    </div>
 
     <!-- v2.6: 子任務 / Checklist -->
     <div style="margin-bottom: 8px;">

@@ -39,6 +39,7 @@
 | **v3.6.0** | **UI 第二輪（砍主題卡、搜尋列收 collapsible、Dashboard stat 可點跳轉、empty state 引導）** | ✅ **完成（2026-04-30）** |
 | **v3.6.1** | **修 Demo 計算 bug、Demo 加收款帳號、Reminder 縮小、設定頁拉平、刷新 icon 換 ↻** | ✅ **完成（2026-04-30）** |
 | **v3.6.2** | **Reminder 改 grid 自適應分欄、備份提醒加 toggle、通知 denied 引導改善** | ✅ **完成（2026-04-30）** |
+| **v3.6.3** | **行事曆同步卡 grid 分欄縮小、案件 modal 工時+計時器合併成一行** | ✅ **完成（2026-05-01）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

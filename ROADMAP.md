@@ -2,6 +2,13 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.6.3 ✅ 行事曆縮小 + 工時計時器合併（2026-05-01）
+- [x] 行事曆同步卡 cal-compact CSS（grid 分欄 + 4 step 縮 padding）
+- [x] 行事曆建議區改 `<details>` 預設收摺
+- [x] 案件 modal：工時 + 計時器合併單一區塊（保留手動輸入 + 計時器自動填）
+- [x] 砍掉冗長提示文字
+- [x] bump 三處版本號 → `2026-05-01-v3.6.3` / `ftracker-cloud-v3.6.3`
+
 ## v3.6.2 ✅ Reminder 改善 + 通知拒絕後引導（2026-04-30）
 - [x] 通知與提醒改 grid 2-3 欄自適應、整體高度 -50%
 - [x] 備份提醒加 checkbox toggle（cfg-alert-backup / config.enableBackupAlert）
