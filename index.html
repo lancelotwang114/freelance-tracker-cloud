@@ -284,46 +284,62 @@
 
   <!-- Invoice -->
   <section id="tab-invoice" class="hidden">
-    <div class="card no-print">
-      <label>選擇業主</label>
-      <select id="inv-client"></select>
+    <div class="card no-print" style="padding: 12px;">
 
-      <label>請款範圍</label>
-      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-        <select id="inv-mode" onchange="onInvModeChange()" style="flex: 0 0 auto;">
-          <option value="single">單月</option>
-          <option value="range">月份區間</option>
-        </select>
-        <select id="inv-month" style="flex: 1; min-width: 120px;"></select>
-        <span id="inv-range-sep" class="hidden" style="color: var(--muted);">~</span>
-        <select id="inv-month-end" class="hidden" style="flex: 1; min-width: 120px;"></select>
+      <!-- v3.2.0-ui：第 1 列 — 業主 / 範圍 / 收款帳號（單列、緊湊） -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; align-items: center;">
+        <div>
+          <span style="font-size: 11px; color: var(--muted);">業主</span>
+          <select id="inv-client" style="margin-top: 2px;"></select>
+        </div>
+        <div>
+          <span style="font-size: 11px; color: var(--muted);">請款範圍</span>
+          <div style="display: flex; gap: 4px; margin-top: 2px;">
+            <select id="inv-mode" onchange="onInvModeChange()" style="flex: 0 0 auto;">
+              <option value="single">單月</option>
+              <option value="range">區間</option>
+            </select>
+            <select id="inv-month" style="flex: 1; min-width: 0;"></select>
+            <span id="inv-range-sep" class="hidden" style="color: var(--muted); align-self: center;">~</span>
+            <select id="inv-month-end" class="hidden" style="flex: 1; min-width: 0;"></select>
+          </div>
+        </div>
+        <div>
+          <span style="font-size: 11px; color: var(--muted);">收款帳號（含個人 / 發票資訊）</span>
+          <div style="display: flex; gap: 4px; margin-top: 2px;">
+            <select id="inv-pay-account" onchange="onInvPayAccountChange()" style="flex: 1; min-width: 0;"></select>
+            <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId())" title="編輯目前選定的收款帳號">📝</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(null)" title="新增一筆收款帳號身分">➕</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="deleteSelectedPaymentAccount()" title="刪除目前選定的收款帳號" style="color: var(--danger);">🗑️</button>
+          </div>
+        </div>
       </div>
 
-      <!-- v2.10.13：選擇收款帳號（多筆收款資訊時用）-->
-      <!-- v3.2.0：每筆帳號自帶完整身分（含個人資訊+發票資訊）；CRUD 從設定頁搬到這裡 -->
-      <label style="margin-top: 12px;">收款帳號（含個人 / 發票資訊）</label>
-      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-        <select id="inv-pay-account" onchange="onInvPayAccountChange()" style="flex: 1; min-width: 200px;"></select>
-        <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId())" title="編輯目前選定的收款帳號">📝 編輯</button>
-        <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(null)" title="新增一筆收款帳號身分">➕ 新增</button>
-        <button type="button" class="btn btn-outline btn-sm" onclick="deleteSelectedPaymentAccount()" title="刪除目前選定的收款帳號" style="color: var(--danger);">🗑️ 刪除</button>
+      <!-- v3.2.0-ui：第 2 列 — 個人資訊顯示 toggle（搬出 modal、外層快速控制） -->
+      <div style="display: flex; gap: 14px; margin-top: 8px; font-size: 13px; flex-wrap: wrap; align-items: center;">
+        <span style="color: var(--muted); font-size: 12px;">👤 個人資訊：</span>
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="checkbox" id="inv-show-personal" onchange="onInvShowPersonalChange()">
+          <span>底部顯示</span>
+        </label>
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="checkbox" id="inv-show-personal-top" onchange="onInvShowPersonalChange()">
+          <span>頂端精簡顯示</span>
+        </label>
+        <span style="color: var(--muted); font-size: 11px;">（套用到目前選的收款帳號，自動儲存）</span>
       </div>
-      <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
-        💡 每筆收款帳號獨立包含個人資訊 + 發票資訊。例如：個人案 vs 工作室案分兩筆，請款單會自動帶對應內容。
-      </p>
 
-      <!-- v2.10.5：請款單狀態篩選 — preset 按鈕 + 常駐 checkbox -->
-      <label style="margin-top: 12px;">顯示狀態</label>
-      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+      <!-- 顯示狀態 preset + 詳細 checkbox 合併成緊湊一排 -->
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
+        <span style="color: var(--muted); font-size: 12px;">顯示狀態：</span>
         <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('pending')" title="只顯示已完成待收 + 部分收款">📋 請款</button>
         <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('reconcile')" title="所有已完成（含已收款）">✅ 對帳</button>
         <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('progress')" title="只顯示進行中">🔄 進度</button>
         <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('all')" title="所有狀態">📦 全部</button>
         <span id="inv-status-hint" style="font-size: 12px; color: var(--muted); margin-left: 4px;"></span>
       </div>
-      <!-- 5 個狀態 checkbox，常駐顯示 -->
-      <div style="margin-top: 8px; padding: 10px; background: var(--bg); border-radius: 8px;">
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px;">
+      <div style="margin-top: 6px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 10px 14px; font-size: 13px;">
           <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-done-unpaid" onchange="onInvoiceStatusChange()"><span>$ 已完成待收款</span></label>
           <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-partial" onchange="onInvoiceStatusChange()"><span>🔶 部分收款</span></label>
           <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-paid" onchange="onInvoiceStatusChange()"><span>✓ 已完成已收款</span></label>
@@ -833,23 +849,11 @@
     <label>標籤（自己看的，例：個人 / 工作室）</label>
     <input type="text" id="pae-label" placeholder="例：個人">
 
-    <!-- ── 個人資訊 ── -->
+    <!-- ── 個人資訊 ──（v3.2.0-ui：顯示 toggle 已搬到請款單外層；這裡只剩欄位輸入）-->
     <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-top: 12px; margin-bottom: 12px;">
-      <strong style="font-size: 14px; display: block; margin-bottom: 8px;">👤 個人資訊</strong>
-      <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 13px;">
-        <label class="checkbox-row" style="margin: 0;">
-          <input type="checkbox" id="pae-show-personal" checked>
-          <span>在請款單<b>底部</b>顯示（跟匯款 / 發票並排成 3 欄）</span>
-        </label>
-        <label class="checkbox-row" style="margin: 0;">
-          <input type="checkbox" id="pae-show-personal-top">
-          <span>在請款單<b>頂端</b>多顯示一行精簡聯絡資訊</span>
-        </label>
-      </div>
+      <strong style="font-size: 14px; display: block; margin-bottom: 4px;">👤 個人資訊</strong>
       <p style="font-size: 11px; color: var(--muted); margin: 0 0 8px 0;">
-        💡 兩個都不勾 → 請款單完全不顯示個人資訊（業主拿到只看到匯款 + 發票）。<br>
-        💡 只勾「底部」→ 預設選擇，請款單最簡短。<br>
-        💡 「頂端」加勾 → 請款單上方多一行「請款方：王小明 · 0912... · xxx@...」（有些業主習慣這樣看）。
+        💡 在請款單底部 / 頂端要不要顯示這份個人資訊，請到請款單分頁的「👤 個人資訊」勾選列直接調整。
       </p>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
         <div>

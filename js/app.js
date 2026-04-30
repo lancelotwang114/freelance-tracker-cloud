@@ -6383,6 +6383,8 @@ function renderInvoicePayAccountSelect() {
     return `<option value="${escapeHtml(a.id)}">${escapeHtml(label)}${escapeHtml(tail)}</option>`;
   }).join('');
   sel.value = u.selectedPaymentAccountId || list[0].id;
+  // v3.2.0-ui：picker 重渲染後 → 外層 toggle 跟著更新
+  if (typeof syncInvShowPersonalToggles === 'function') syncInvShowPersonalToggles();
 }
 
 function onInvPayAccountChange() {
@@ -6390,7 +6392,40 @@ function onInvPayAccountChange() {
   if (!sel || !sel.value) return;
   config.userInfo.selectedPaymentAccountId = sel.value;
   saveConfigOnly();  // v3.1.0-fix：同步推 Drive
+  syncInvShowPersonalToggles();  // v3.2.0-ui：picker 變了 → 外層 toggle 跟著切換目前帳號的設定
   drawInvoice();
+}
+
+// v3.2.0-ui：外層「個人資訊 toggle」改變 → 寫入目前選定的 paymentAccount
+function onInvShowPersonalChange() {
+  ensurePaymentAccounts();
+  const id = (config.userInfo && config.userInfo.selectedPaymentAccountId) || '';
+  const list = (config.userInfo && config.userInfo.paymentAccounts) || [];
+  const acct = list.find(a => a.id === id);
+  if (!acct) {
+    toast('還沒選定收款帳號');
+    return;
+  }
+  const cb1 = document.getElementById('inv-show-personal');
+  const cb2 = document.getElementById('inv-show-personal-top');
+  if (cb1) acct.showPersonalInfo = !!cb1.checked;
+  if (cb2) acct.showPersonalInfoOnTop = !!cb2.checked;
+  saveConfigOnly();
+  drawInvoice();
+}
+
+// v3.2.0-ui：從目前選定的 paymentAccount 讀回 showPersonalInfo / showPersonalInfoOnTop 套到 toggle UI
+function syncInvShowPersonalToggles() {
+  const id = (config.userInfo && config.userInfo.selectedPaymentAccountId) || '';
+  const list = (config.userInfo && config.userInfo.paymentAccounts) || [];
+  const acct = list.find(a => a.id === id);
+  const cb1 = document.getElementById('inv-show-personal');
+  const cb2 = document.getElementById('inv-show-personal-top');
+  if (cb1) cb1.checked = acct ? (acct.showPersonalInfo !== false) : true;
+  if (cb2) cb2.checked = acct ? !!acct.showPersonalInfoOnTop : false;
+  // 若沒帳號 → 兩個 toggle disabled
+  if (cb1) cb1.disabled = !acct;
+  if (cb2) cb2.disabled = !acct;
 }
 
 // v3.2.0：拿目前在請款單下拉選的收款帳號 id
@@ -6407,8 +6442,12 @@ function openPaymentAccountEditor(id) {
   document.getElementById('payment-account-editor-title').textContent = acct ? '編輯收款帳號' : '新增收款帳號';
   document.getElementById('pae-id').value = acct ? acct.id : '';
   document.getElementById('pae-label').value = acct ? (acct.label || '') : '';
-  document.getElementById('pae-show-personal').checked = acct ? (acct.showPersonalInfo !== false) : true;
-  document.getElementById('pae-show-personal-top').checked = acct ? !!acct.showPersonalInfoOnTop : false;
+  // v3.2.0-ui：showPersonalInfo / showPersonalInfoOnTop 兩個 toggle 已搬到請款單外層
+  // modal 內不再讀寫這兩個欄位；存檔時直接保留 acct 既有值（編輯）或預設值（新增）
+  // 暫存 acct 既有值供 save 使用
+  window._paePending = acct
+    ? { showPersonalInfo: acct.showPersonalInfo !== false, showPersonalInfoOnTop: !!acct.showPersonalInfoOnTop }
+    : { showPersonalInfo: true, showPersonalInfoOnTop: false };
   document.getElementById('pae-name').value = acct ? (acct.name || '') : '';
   document.getElementById('pae-phone').value = acct ? (acct.phone || '') : '';
   document.getElementById('pae-email').value = acct ? (acct.email || '') : '';
@@ -6436,8 +6475,9 @@ function savePaymentAccountEditor() {
   const id = document.getElementById('pae-id').value;
   const data = {
     label: document.getElementById('pae-label').value.trim(),
-    showPersonalInfo: document.getElementById('pae-show-personal').checked,
-    showPersonalInfoOnTop: document.getElementById('pae-show-personal-top').checked,
+    // v3.2.0-ui：toggle 已搬出 modal；用暫存的既有值（編輯）或預設（新增）
+    showPersonalInfo: (window._paePending && typeof window._paePending.showPersonalInfo === 'boolean') ? window._paePending.showPersonalInfo : true,
+    showPersonalInfoOnTop: (window._paePending && typeof window._paePending.showPersonalInfoOnTop === 'boolean') ? window._paePending.showPersonalInfoOnTop : false,
     name: document.getElementById('pae-name').value.trim(),
     phone: document.getElementById('pae-phone').value.trim(),
     email: document.getElementById('pae-email').value.trim(),
