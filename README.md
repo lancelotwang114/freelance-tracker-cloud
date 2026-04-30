@@ -43,6 +43,7 @@
 | **v3.6.4** | **修行事曆 grid 排版 + 案件 modal 分區重排、折扣/子任務/收款 collapsible、估價單搬到標題** | ✅ **完成（2026-05-01）** |
 | **v3.7.0** | **Calendar 同步 UX：master toggle + 登入後跳 prompt + 拿掉自動 vs 手動** | ✅ **完成（2026-05-01）** |
 | **v3.8.0** | **提醒類型矩陣（9×2 channel）：通知/Calendar 整合一張卡、immediate save、Calendar 卡精簡** | ✅ **完成（2026-05-01）** |
+| **v3.8.1** | **UI 字眼統一「Google 行事曆」+ master OFF 時 reminder 卡的行事曆欄 disable** | ✅ **完成（2026-05-01）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

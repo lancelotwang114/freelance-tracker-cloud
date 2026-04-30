@@ -1436,6 +1436,19 @@ input:focus, select:focus, textarea:focus {
   background: transparent;
   padding: 8px 10px 4px;
 }
+/* v3.8.1：master OFF 時整欄 calendar checkbox disabled 視覺 */
+.alert-matrix.cal-disabled .alert-cell input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.alert-matrix.cal-disabled .alert-cell:has(input[type="checkbox"]:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.alert-matrix-header > div:nth-child(3) {
+  /* Calendar 欄表頭文字稍微擠 */
+  white-space: nowrap;
+}
 /* 窄螢幕（< 480px）：把 cell 標題顯示在每個 checkbox 旁邊 */
 @media (max-width: 480px) {
   .alert-matrix {

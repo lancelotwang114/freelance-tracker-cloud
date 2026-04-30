@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.8.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.8.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2585,15 +2585,16 @@ function cloudOnCalendarEnabledToggle() {
   cloudUpdateCalendarSectionVisibility(enabled);
   cloudRenderCalendarStatus();
   if (enabled) {
-    toast('✓ 已啟用行事曆同步，記得選擇要同步的日曆', 4000);
+    toast('✓ 已啟用 Google 行事曆同步，記得選擇要同步的日曆', 4000);
   } else {
-    toast('已停用行事曆同步（既有事件保留在 Google 日曆裡，要清的話請手動到 Google Calendar 刪）', 5000);
+    toast('已停用 Google 行事曆同步（既有事件保留在你的日曆裡，要清的話請手動到 Google 行事曆刪）', 5000);
   }
   if (typeof logAction === 'function') logAction('cloud-calendar-' + (enabled ? 'enable' : 'disable'));
 }
 
 // v3.7.0：依 enabled 狀態 toggle 行事曆設定區的可見度
 // v3.8.0：同步刷新 reminder card 的 Calendar 欄提示文字
+// v3.8.1：master OFF 時把 reminder 卡 Google 行事曆欄的 checkbox 全 disable（保留勾選狀態，啟用後就回來）
 function cloudUpdateCalendarSectionVisibility(enabled) {
   const body = document.getElementById('cloud-cal-settings-body');
   if (body) body.classList.toggle('hidden', !enabled);
@@ -2601,6 +2602,12 @@ function cloudUpdateCalendarSectionVisibility(enabled) {
   if (masterStatus) masterStatus.textContent = enabled ? '已啟用' : '未啟用';
   const calHint = document.getElementById('alert-cal-disabled-hint');
   if (calHint) calHint.classList.toggle('hidden', enabled);
+  // 全部 calendar channel checkbox 跟著 master 切換 disabled
+  document.querySelectorAll('.alert-matrix input[id$="-calendar"]').forEach(cb => {
+    cb.disabled = !enabled;
+  });
+  const matrix = document.querySelector('.alert-matrix');
+  if (matrix) matrix.classList.toggle('cal-disabled', !enabled);
 }
 
 function cloudRenderCalendarStatus() {
@@ -3144,9 +3151,14 @@ function loadReminderConfigUI() {
     const el = g('alert-' + k + '-calendar');
     if (el) el.checked = t[k] !== false;
   });
-  // 提示「Calendar 欄需要先啟用 master toggle」
+  // 提示「Google 行事曆 欄需要先啟用 master toggle」+ disable 所有 calendar checkbox
   const hint = g('alert-cal-disabled-hint');
   if (hint) hint.classList.toggle('hidden', !!calCfg.enabled);
+  document.querySelectorAll('.alert-matrix input[id$="-calendar"]').forEach(cb => {
+    cb.disabled = !calCfg.enabled;
+  });
+  const matrix = document.querySelector('.alert-matrix');
+  if (matrix) matrix.classList.toggle('cal-disabled', !calCfg.enabled);
 }
 
 // ============== Utilities ==============

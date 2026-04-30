@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.8.0">
+<meta name="app-version" content="2026-05-01-v3.8.1">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -513,7 +513,7 @@
 
         <p class="reminder-hint" style="margin: 12px 0 6px;">
           每個提醒類型可獨立決定要走哪個通道（桌面通知 / Google 行事曆）。
-          <span id="alert-cal-disabled-hint" class="hidden" style="color: var(--warning);">📅 欄位需先在下方「行事曆同步」啟用 master toggle</span>
+          <span id="alert-cal-disabled-hint" class="hidden" style="color: var(--warning);">📅 欄位需先在下方「Google 行事曆同步」開啟 master 開關才能勾選</span>
         </p>
 
         <!-- 提醒類型矩陣 -->
@@ -521,7 +521,7 @@
           <div class="alert-matrix-header">
             <div></div>
             <div title="瀏覽器桌面通知（每天首次開頁推一次）">🖥️ 桌面</div>
-            <div title="Google 行事曆事件（要先在下方啟用同步）">📅 Calendar</div>
+            <div title="Google 行事曆事件（要先啟用 Google 行事曆同步 master）">📅 Google 行事曆</div>
           </div>
 
           <!-- 1. 逾期未完成（只有桌面） -->
@@ -585,9 +585,9 @@
             <div class="alert-cell alert-na">—</div>
           </div>
 
-          <!-- 分隔（Calendar-only 事件） -->
+          <!-- 分隔（Google 行事曆獨有的事件） -->
           <div class="alert-row alert-row--separator">
-            <div class="alert-name reminder-hint" style="font-style: italic;">— 以下只在 Calendar 同步 —</div>
+            <div class="alert-name reminder-hint" style="font-style: italic;">— 以下只在 Google 行事曆 —</div>
             <div class="alert-cell"></div>
             <div class="alert-cell"></div>
           </div>
@@ -649,7 +649,7 @@
         <div class="cal-master-toggle">
           <label class="cal-master-label">
             <input type="checkbox" id="cloud-cal-enabled" onchange="cloudOnCalendarEnabledToggle()">
-            <span><b>啟用行事曆同步</b></span>
+            <span><b>啟用 Google 行事曆同步</b></span>
           </label>
           <span id="cloud-cal-master-status" class="cal-hint">未啟用</span>
         </div>
@@ -686,8 +686,8 @@
             </div>
           </div>
 
-          <!-- v3.8.0：「要同步哪些事件」勾選已搬到「通知與提醒」卡的提醒類型矩陣 Calendar 欄 -->
-          <p class="cal-hint" style="margin: 6px 0;">💡 要同步哪些事件 → 在「🔔 通知與提醒」卡的「📅 Calendar」欄勾選</p>
+          <!-- v3.8.0：「要同步哪些事件」勾選已搬到「通知與提醒」卡的提醒類型矩陣「Google 行事曆」欄 -->
+          <p class="cal-hint" style="margin: 6px 0;">💡 要同步哪些事件 → 在「🔔 通知與提醒」卡的「📅 Google 行事曆」欄勾選</p>
 
           <!-- 同步狀態 + 立即同步 -->
           <div id="cloud-cal-sync-status" class="cal-hint" style="margin-top: 8px;">
@@ -695,7 +695,7 @@
           </div>
 
           <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
-            <button class="btn btn-primary btn-sm" id="cloud-cal-sync-btn" onclick="cloudSyncCalendar()">立即同步到 Calendar</button>
+            <button class="btn btn-primary btn-sm" id="cloud-cal-sync-btn" onclick="cloudSyncCalendar()">立即同步到 Google 行事曆</button>
           </div>
         </div>
       </div>

@@ -2,6 +2,13 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.8.1 ✅ UI 字眼統一 + Google 行事曆條件勾選（2026-05-01）
+- [x] 「Calendar」字眼全改「Google 行事曆」（表頭 / 分隔 / 按鈕 / hint / toast）
+- [x] master toggle OFF 時 reminder 卡 Google 行事曆欄整欄 disabled
+- [x] CSS `.alert-matrix.cal-disabled` 灰化視覺
+- [x] 保留勾選狀態（停-啟之間不清空）
+- [x] bump 三處版本號 → `2026-05-01-v3.8.1` / `ftracker-cloud-v3.8.1`
+
 ## v3.8.0 ✅ 提醒類型矩陣（每類自帶 2 channel）（2026-05-01）
 - [x] 通知與提醒卡重做成 9 列 × 2 通道矩陣
 - [x] 全部 toggle / 數字輸入改 immediate save（拿掉儲存按鈕）

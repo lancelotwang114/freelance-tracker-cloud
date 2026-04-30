@@ -1,5 +1,31 @@
 ﻿# 版本更新歷史
 
+## v3.8.1 — UI 字眼統一 + Google 行事曆條件勾選（2026-05-01）
+
+### UI 字眼「Calendar」全部改成「Google 行事曆」
+- alert-matrix 欄表頭：`📅 Calendar` → `📅 Google 行事曆`
+- 分隔列：「— 以下只在 Calendar 同步 —」 → 「— 以下只在 Google 行事曆 —」
+- 行事曆同步卡按鈕：「立即同步到 Calendar」 → 「立即同步到 Google 行事曆」
+- master toggle 文字：「啟用行事曆同步」 → 「啟用 Google 行事曆同步」
+- toast 訊息：「行事曆同步」 → 「Google 行事曆同步」
+- 所有 hint / title 提示文字統一為「Google 行事曆」
+
+### 提醒矩陣 Google 行事曆欄條件勾選
+- master toggle OFF 時，alert-matrix 內所有 `[id$="-calendar"]` checkbox 設為 `disabled`
+- 加 CSS class `.alert-matrix.cal-disabled` 給整欄灰化（opacity 0.35 + cursor not-allowed）
+- master toggle ON 時自動恢復可勾
+- **保留勾選狀態**（不清空），停用後再啟用，先前的勾選會回來
+- cloudUpdateCalendarSectionVisibility / loadReminderConfigUI 兩處都套用 disabled 邏輯，確保以下情境都正確：
+  - 切 master toggle 即時生效
+  - 進入設定頁第一次展開 reminder card 時就是正確狀態
+  - 從其他裝置同步進來、master 狀態變了也跟著刷
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.8.1`
+- SW CACHE_VERSION → `ftracker-cloud-v3.8.1`
+
+---
+
 ## v3.8.0 — 提醒類型矩陣（每類自帶 2 channel）（2026-05-01）
 
 > 採方案 3：通知與提醒卡重做成「提醒類型矩陣」，每個類型獨立決定走哪些通道（桌面通知 / Google 行事曆）。Calendar 卡精簡為純技術設定（master toggle / 選日曆 / 早報時段）。
