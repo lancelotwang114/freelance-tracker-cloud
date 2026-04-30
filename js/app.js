@@ -752,7 +752,12 @@ function applyTrackerData(data) {
   if (typeof ensurePaymentAccounts === 'function') ensurePaymentAccounts();
   // 寫回 localStorage（v2 既有 save() 會處理 STORAGE_KEY + CONFIG_KEY）
   if (typeof save === 'function') save();
-  // 重繪 UI
+  // 重繪 UI（v3.1.0-fix：除了 renderAll，也要重灌 settings 頁所有 input
+  // 因為 settings 不在 renderAll 範圍，pull/merge 進來新 config 後 input 不會自動更新）
+  if (typeof loadUserInfoUI === 'function') loadUserInfoUI();          // 我的收款資訊 + paymentAccounts
+  if (typeof loadReminderConfigUI === 'function') loadReminderConfigUI();
+  if (typeof loadInvoiceStatusUI === 'function') loadInvoiceStatusUI();
+  if (typeof loadDeviceNameUI === 'function') loadDeviceNameUI();
   if (typeof renderAll === 'function') renderAll();
 }
 
