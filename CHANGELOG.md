@@ -1,6 +1,43 @@
 ﻿# 版本更新歷史
 
-## v3.0.0-beta.1 — 進行中（2026-04-29 起）
+## v3.0.0 ✅ 正式 stable（2026-04-29）
+
+> 從 v2.10.15 fork 出來、改寫成 Drive App Folder 後端、走完 alpha.1/2/3 + beta.1 完整 4 個 phase 後正式 stable。
+> 一個人接案的收益與排程管理工具，使用者門檻從 v2 的 30 分鐘部署降到 10 秒登入。
+
+### 砍 dead code（v2 Apps Script 內部 helpers）
+從 beta.1 留下的 ~1500 行 dead code 砍掉約 700 行：
+- `setSyncStatus` + v2 sync 全域狀態（syncTimer / syncStatus / syncError）
+- v2 idle 偵測 + 編輯鎖整套（IDLE_THRESHOLD_MS / lastActivityAt / lockHeartbeatTimer / acquireEditLock / releaseEditLock / forceReleaseEditLock / startLockHeartbeat / stopLockHeartbeat / tryAcquireLockOrWarn / isIdle + page unload listener）
+- `manualSnapshot` / `setupDailyForceTrigger`（v2 sheet snapshot Apps Script 觸發）
+- `schedulePush`（v2 push timer）
+- `showStaleClientBanner`（v2 sheet schema 衝突警告橫幅）
+- `getDeviceLabelForUpload`（v2 上傳時帶地理位置）
+- `updateSheetSyncBadge`（v2 sync UI badge）
+- `showSnapshotList`（v2 sheet snapshot 列表）
+- 雲端優先模式 / 自動 polling 全套（saveCloudFirstMode / saveAutoPollToggle / setupAutoPoll / checkCloudForUpdate / autoPollTimer）
+- Apps Script 後端設定 UI（loadSheetConfigUI / saveSheetConfig / testSheetConnection）
+- Apps Script 中介 Calendar 同步 UI 全套（getCalReminderMinutes / describeCalReminder / loadCalendarConfigUI / updateCalendarReminderHint / updateCalendarStatusBadge / renderCalendarSyncStatus）
+- `maybeGenerateMonthlySnapshot`（v2 月報自動 snapshot）
+
+### 版本號歸正
+- `js/app.js` `APP_VERSION` → `2026-04-29-v3.0.0`
+- `index.html` `<meta name="app-version">` → 同上
+- `service-worker.js` `CACHE_VERSION` → `ftracker-cloud-v3.0.0`
+
+### 文件收尾
+- `README.md` 移除「實驗版警告」橫幅、改寫成穩定版描述、補 Cloud Layer 結構介紹
+- `ROADMAP.md` 全部 phase 打勾 ✅
+- `CHANGELOG.md` 加本段 stable 標記
+
+### 暫留
+- HTML hidden 卡片（`#card-cloud` / `#card-calendar` / `#card-portable`）整段 HTML 還在但 hidden，使用者看不到、JS handlers 都已 stub 化
+- 少量 dead code（`buildReminderEvents` / `toDateStr` / `previewSnapshot`/`computeSnapshotDiff` 等 v2 sheet snapshot 相關），所有 caller 已切斷不會執行
+- 之後想徹底乾淨可手動砍，但對運作沒影響
+
+---
+
+## v3.0.0-beta.1 ✅ 結案（2026-04-29）
 
 ### 移除 v2 Apps Script 同步進入點（β1-1）
 - `save()` 拿掉 `if (config.sheetSyncEnabled) schedulePush()` 觸發

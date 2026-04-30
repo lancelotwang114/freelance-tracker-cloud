@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-29-v3.0.0-alpha.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-29-v3.0.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6062,8 +6062,7 @@ function sortedClientsForPicker() {
 
 function openJobModal() {
   if (!state.clients.length) { toast('請先新增業主'); switchTab('clients'); openClientModal(); return; }
-  // v2.7.4: 鎖在背景拿，不擋 modal 開啟（修 FAB 點擊慢）
-  tryAcquireLockOrWarn('案件');
+  // v3.0.0：移除 tryAcquireLockOrWarn（v2 Apps Script 編輯鎖已拆，v3 用 mergeStates 三方合併處理衝突）
   editingJobId = null;
   document.getElementById('job-modal-title').textContent = '新增案件';
   document.getElementById('job-delete-btn').classList.add('hidden');
@@ -6375,7 +6374,7 @@ function closeJobModal() {
   stopJobTimerOnClose();  // v2.6: 停止計時器
   document.getElementById('job-modal').classList.remove('open');
   document.getElementById('job-date').value = '';
-  releaseEditLock();
+  // v3.0.0：移除 releaseEditLock（v2 編輯鎖已拆）
 }
 
 function saveJob() {
@@ -6459,8 +6458,7 @@ function populateBillingDayDropdown(selected) {
 }
 
 function openClientModal() {
-  // v2.7.4: 鎖在背景拿，不擋 modal 開啟
-  tryAcquireLockOrWarn('業主');
+  // v3.0.0：移除 tryAcquireLockOrWarn（v2 編輯鎖已拆）
   editingClientId = null;
   document.getElementById('client-modal-title').textContent = '新增業主';
   document.getElementById('client-delete-btn').classList.add('hidden');
@@ -6591,7 +6589,7 @@ function refreshCommissionDropdown(selected) {
 
 function closeClientModal() {
   document.getElementById('client-modal').classList.remove('open');
-  releaseEditLock();
+  // v3.0.0：移除 releaseEditLock（v2 編輯鎖已拆）
 }
 
 function renderColorPicker(selected) {
@@ -7274,83 +7272,8 @@ function importSettings(e) {
   if (e && e.target) e.target.value = '';
 }
 
-// ============== Sheet 雙向同步 ==============
-let syncTimer = null;
-let syncStatus = 'idle';  // idle | syncing | synced | offline | error
-let syncError = null;
-
-function setSyncStatus(status, err) {
-  syncStatus = status;
-  syncError = err || null;
-  const el = document.getElementById('sync-indicator');
-  if (!el) return;
-
-  // v3.0.0-alpha.1 commit 5：若已透過 Google 登入 v3 cloud，indicator 由 cloudUpdateSyncIndicator 接管
-  // 防止 v2 sync timer 把「✓ 已連 Drive」覆寫成「☁️ 未連雲端」造成閃爍
-  // beta.1 整個 v2 sync 邏輯會移除，這條 short-circuit 屆時連同此函式一起拆掉
-  if (typeof isCloudSignedIn === 'function' && isCloudSignedIn()) {
-    cloudUpdateSyncIndicator();
-    return;
-  }
-
-  const cfg = config.sheetConfig || {};
-  // 直接用日期+時間顯示，不用 hover
-  const dt = cfg.cloudLastModifiedAt ? new Date(cfg.cloudLastModifiedAt) : null;
-  const dtText = dt
-    ? `${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ` +
-      `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`
-    : '';
-  const verText = cfg.cloudVersion ? `v${cfg.cloudVersion}` : '';
-  const pendingNote = config.sheetPendingPush ? ' (待同步)' : '';
-
-  let text = '';
-  let cls = 'idle';
-  let icon = '☁️';
-
-  switch (status) {
-    case 'syncing':
-      icon = '⏳'; cls = 'syncing'; text = '同步中…';
-      break;
-    case 'synced':
-      icon = '✓'; cls = 'synced';
-      // 已取得最新 04-26 14:30 v123
-      text = '已取得最新';
-      if (dtText) text += ` ${dtText}`;
-      if (verText) text += ` ${verText}`;
-      break;
-    case 'offline':
-      icon = '⚠'; cls = 'offline';
-      text = '離線' + pendingNote;
-      break;
-    case 'idle-paused':
-      icon = '💤'; cls = 'offline';
-      text = '閒置暫停' + pendingNote;
-      break;
-    case 'lab-paused':
-      icon = '🧪'; cls = 'offline';
-      text = '開發模式（不推送）';
-      break;
-    case 'error':
-      icon = '✗'; cls = 'error'; text = '失敗';
-      break;
-    case 'idle':
-    default:
-      icon = '☁️'; cls = 'idle'; text = '未連雲端';
-  }
-  el.className = `sync-indicator sync-${cls}`;
-  el.innerHTML = `${icon} ${text}`;
-
-  // tooltip 顯示完整資訊
-  const lines = [];
-  if (cfg.cloudVersion) lines.push(`雲端版本：v${cfg.cloudVersion}`);
-  if (cfg.cloudLastModifiedAt) lines.push(`雲端最新：${new Date(cfg.cloudLastModifiedAt).toLocaleString('zh-TW')}`);
-  if (cfg.lastSyncAt) lines.push(`上次上傳：${new Date(cfg.lastSyncAt).toLocaleString('zh-TW')}`);
-  if (cfg.lastPullAt) lines.push(`上次下載：${new Date(cfg.lastPullAt).toLocaleString('zh-TW')}`);
-  if (config.cloudFirstMode) lines.push('☁️ 雲端優先模式 ON');
-  if (config.autoPollEnabled !== false) lines.push('🔄 自動偵測 ON（每 30 秒）');
-  if (err) lines.push(`錯誤：${err}`);
-  el.title = lines.join('\n') || '尚未同步';
-}
+// v3.0.0：v2 Sheet 雙向同步整套已移除（setSyncStatus / syncTimer / syncStatus / syncError）
+// indicator 全部交給 cloudUpdateSyncIndicator（在 ☁️ Cloud Auth Layer）
 
 // 切換摺疊卡片
 function toggleCard(cardId) {
@@ -7370,207 +7293,9 @@ async function pushToSheet(silent = false, force = false) {
   return false;
 }
 
-// ============== Idle 偵測（10 分鐘無操作 → 暫停自動 push）==============
-const IDLE_THRESHOLD_MS = 10 * 60 * 1000;
-let lastActivityAt = Date.now();
-let idleNotified = false;
-
-['mousedown', 'keydown', 'touchstart'].forEach(evt => {
-  document.addEventListener(evt, () => {
-    const wasIdle = (Date.now() - lastActivityAt) > IDLE_THRESHOLD_MS;
-    lastActivityAt = Date.now();
-    idleNotified = false;
-    // 從 idle 喚醒：先 pull 再清待推送旗標
-    if (wasIdle && config.sheetSyncEnabled && config.sheetPendingPush) {
-      pullFromSheet(true).then(() => {
-        if (config.sheetPendingPush) pushToSheet(true);
-      });
-    }
-  }, { passive: true });
-});
-
-function isIdle() {
-  return (Date.now() - lastActivityAt) > IDLE_THRESHOLD_MS;
-}
-
-// ============== 編輯鎖（軟鎖，5 分鐘 TTL，60 秒 heartbeat）==============
-let lockHeartbeatTimer = null;
-let currentLockHolder = null;  // 當前知道的持鎖者
-let myLockActive = false;
-
-// 開啟 modal 前嘗試取鎖，被別人鎖住時用 toast 警告但不擋（讓使用者知道風險）
-async function tryAcquireLockOrWarn(label) {
-  const result = await acquireEditLock(label);
-  if (!result.acquired && result.by) {
-    const remainingMin = Math.ceil((new Date(result.expiresAt) - Date.now()) / 60000);
-    toast(`⚠️ 「${result.by}」正在編輯中（剩 ${remainingMin} 分鐘）。建議等對方關閉後再操作。`, 6000);
-  }
-}
-
-async function acquireEditLock(reason) {
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken || !config.sheetSyncEnabled) return { acquired: true, local: true };
-  try {
-    const resp = await fetch(cfg.apiUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'acquireLock',
-        token: cfg.apiToken,
-        deviceLabel: getDeviceLabel()
-      })
-    });
-    const data = await resp.json();
-    if (!data.ok) return { acquired: false, error: data.error };
-    if (data.lock?.acquired) {
-      myLockActive = true;
-      currentLockHolder = getDeviceLabel();
-      startLockHeartbeat();
-      return { acquired: true };
-    }
-    // 別人持有鎖
-    currentLockHolder = data.lock.by;
-    return { acquired: false, by: data.lock.by, expiresAt: data.lock.expiresAt };
-  } catch (err) {
-    return { acquired: true, local: true };  // 連不上時放行（離線編輯）
-  }
-}
-
-async function releaseEditLock() {
-  stopLockHeartbeat();
-  myLockActive = false;
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken || !config.sheetSyncEnabled) return;
-  try {
-    await fetch(cfg.apiUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'releaseLock',
-        token: cfg.apiToken,
-        deviceLabel: getDeviceLabel()
-      })
-    });
-  } catch (err) {}
-}
-
-async function forceReleaseEditLock() {
-  if (!confirm(`確定要強制清除其他裝置的鎖？\n\n（如果那台 PC 還在編輯，可能會發生資料衝突）`)) return;
-  const cfg = config.sheetConfig;
-  try {
-    await fetch(cfg.apiUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'forceReleaseLock', token: cfg.apiToken })
-    });
-    toast('✓ 已強制清除鎖');
-    currentLockHolder = null;
-    updateSheetSyncBadge();
-  } catch (err) {
-    toast('清除失敗：' + err.message);
-  }
-}
-
-function startLockHeartbeat() {
-  stopLockHeartbeat();
-  // 60 秒 heartbeat（後端 TTL 3 分鐘 → 至少有 2 次重試機會）
-  lockHeartbeatTimer = setInterval(async () => {
-    if (!myLockActive) return;
-    const result = await acquireEditLock('heartbeat');
-    if (!result.acquired && !result.local) {
-      // heartbeat 失敗（鎖被別人搶走或網路斷）→ toast 警告使用者
-      myLockActive = false;
-      stopLockHeartbeat();
-      toast(`⚠️ 編輯鎖失效${result.by ? '（被「' + result.by + '」接管）' : ''}！建議先關閉視窗檢查雲端狀態。`, 8000);
-    }
-  }, 60 * 1000);
-}
-
-function stopLockHeartbeat() {
-  if (lockHeartbeatTimer) { clearInterval(lockHeartbeatTimer); lockHeartbeatTimer = null; }
-}
-
-// 在 page unload 時釋放鎖
-window.addEventListener('beforeunload', () => {
-  if (myLockActive) {
-    // 用 sendBeacon 確保送出（fetch 可能會被取消）
-    const cfg = config.sheetConfig;
-    if (cfg?.apiUrl) {
-      navigator.sendBeacon(cfg.apiUrl, JSON.stringify({
-        action: 'releaseLock',
-        token: cfg.apiToken,
-        deviceLabel: getDeviceLabel()
-      }));
-    }
-  }
-});
-
-// 手動 snapshot
-async function manualSnapshot() {
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken) { toast('請先設定雲端同步'); return; }
-  const note = (document.getElementById('manual-snapshot-note')?.value || '').trim() || '手動備份';
-  toastProgress('📸 建立 snapshot...');
-  try {
-    const resp = await fetch(cfg.apiUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'manualSnapshot',
-        token: cfg.apiToken,
-        note,
-        deviceLabel: getDeviceLabelForUpload()
-      })
-    });
-    const data = await resp.json();
-    if (data.ok && data.result) {
-      toast('✓ 已建立手動備份（永久保留）');
-      const noteInput = document.getElementById('manual-snapshot-note');
-      if (noteInput) noteInput.value = '';
-    } else {
-      toast('建立失敗：' + (data.error || '未知錯誤'));
-    }
-  } catch (err) {
-    toast('錯誤：' + err.message);
-  }
-}
-
-// 觸發每日 trigger 設定
-async function setupDailyForceTrigger() {
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken) { toast('請先設定雲端同步'); return; }
-  if (!confirm(`設定每日凌晨 03:00 自動建立強制 snapshot？\n\n首次設定會要求 Apps Script 授權 trigger 權限。`)) return;
-  toastProgress('⏰ 建立 trigger...');
-  try {
-    const resp = await fetch(cfg.apiUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'setupDailyTrigger', token: cfg.apiToken })
-    });
-    const data = await resp.json();
-    if (data.ok) toast('✓ 每日強制 snapshot 已啟用（每天 03:00）', 4000);
-    else toast('設定失敗：' + data.error);
-  } catch (err) {
-    toast('錯誤：' + err.message);
-  }
-}
-
-function schedulePush() {
-  // 只有「啟用自動同步」狀態下才會自動推
-  if (!config.sheetSyncEnabled) return;
-  // Lab/開發模式 → 完全停止任何 push（避免測試影響雲端）
-  if (isLabMode()) {
-    setSyncStatus('lab-paused');
-    return;
-  }
-  // Idle 保護：超過 10 分鐘無互動就先標記待推送，等使用者回來再推
-  if (isIdle()) {
-    config.sheetPendingPush = true;
-    if (!idleNotified) {
-      setSyncStatus('idle-paused');
-      idleNotified = true;
-    }
-    return;
-  }
-  clearTimeout(syncTimer);
-  setSyncStatus('syncing');
-  syncTimer = setTimeout(() => pushToSheet(true), 2000);
-}
+// v3.0.0：以下 v2 Apps Script 邏輯整批移除（idle 偵測 / 編輯鎖 / manualSnapshot / setupDailyForceTrigger / schedulePush）
+// v3 不需要 idle 偵測（push 是 event-driven）、不需要編輯鎖（單人多裝置場景靠 mergeStates 三方合併處理衝突）
+// snapshot 全部由 cloudCreateSnapshot / cloudPruneSnapshots（在 ☁️ Drive Sync Layer）處理
 
 // ============== 暗色模式 ==============
 const THEME_KEY = 'cloud-ftTheme_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
@@ -7736,7 +7461,8 @@ function toggleLabMode() {
   } else {
     toast('✓ 開發模式已關閉，恢復雲端同步', 4000);
   }
-  setSyncStatus(isLabMode() ? 'lab-paused' : (config.sheetSyncEnabled ? 'synced' : 'idle'));
+  // v3.0.0：移除 setSyncStatus 呼叫（v2 sync indicator 已砍）；indicator 由 cloudUpdateSyncIndicator 接管
+  if (typeof cloudUpdateSyncIndicator === 'function') cloudUpdateSyncIndicator();
   updateLabModeUI();
 }
 function showLabModeBanner() {
@@ -7756,23 +7482,7 @@ function updateLabModeUI() {
 }
 
 // ============== 過時客戶端橫幅（schema/version 不匹配時）==============
-function showStaleClientBanner(cloudSchema, cloudAppVer) {
-  if (document.getElementById('stale-banner')) return;
-  const div = document.createElement('div');
-  div.id = 'stale-banner';
-  div.style.cssText = 'position:fixed; top:0; left:0; right:0; background:#dc2626; color:#fff; padding:14px 20px; text-align:center; font-size:14px; font-weight:600; z-index:10000; box-shadow:0 2px 8px rgba(0,0,0,0.25);';
-  let msg;
-  if (cloudSchema) {
-    msg = `⚠️ 雲端資料結構已更新到 v${cloudSchema}（你目前 v${CURRENT_SCHEMA_VERSION}），請重整網頁取得新版以避免資料遺失。`;
-  } else {
-    msg = `🆕 偵測到別台 PC 推送了新版 (${cloudAppVer})，目前你是舊版，請重整網頁。`;
-  }
-  div.innerHTML = `${msg} <a onclick="location.reload(true)" style="margin-left:12px; color:#fff; text-decoration:underline; cursor:pointer;">立即重整</a>`;
-  document.body.appendChild(div);
-  // 同時禁用自動 push（避免覆蓋）
-  config.sheetPendingPush = false;
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-}
+// v3.0.0：showStaleClientBanner（v2 sheet schema 衝突警告橫幅）已移除
 
 // 裝置標籤：每台 PC 自己存在 localStorage（不上雲）
 // 注意：瀏覽器沙盒禁止讀取 OS 的電腦名稱（如 Windows 的 hostname），
@@ -7819,7 +7529,7 @@ function setDeviceName(name) {
     toast(`✓ 裝置名稱：${name.trim()}`);
   }
   loadDeviceNameUI();
-  updateSheetSyncBadge();
+  // v3.0.0：移除 updateSheetSyncBadge（v2 sync indicator 已砍）
 }
 
 function loadDeviceNameUI() {
@@ -7880,22 +7590,7 @@ async function fetchDeviceLocation() {
   }
 }
 
-// 給上傳/snapshot 用：附加地理位置（裝置名 @ 城市 區 IP）
-function getDeviceLabelForUpload() {
-  const base = getDeviceLabel();
-  const loc = cachedDeviceLocation;
-  if (!loc) return base;
-  const ip = loc.ip ? ` ${loc.ip}` : '';
-  // 優先用精確位置（GPS 反向地理編碼）
-  if (loc.preciseCity || loc.preciseDistrict) {
-    const parts = [loc.preciseCity, loc.preciseDistrict].filter(Boolean).join(' ');
-    return `${base} @ ${parts}${ip}`;
-  }
-  // 退回 IP 城市（不到區）
-  const where = loc.city || loc.country;
-  if (where) return `${base} @ ${where}${ip}`;
-  return base + ip;
-}
+// v3.0.0：getDeviceLabelForUpload（v2 上傳時帶地理位置）已移除；v3 用 getDeviceLabel 即可
 
 // 使用 HTML5 Geolocation 取得精確位置 + BigDataCloud 反向地理編碼
 async function requestPreciseLocation() {
@@ -7925,7 +7620,7 @@ async function requestPreciseLocation() {
       localStorage.setItem(DEVICE_LOCATION_KEY, JSON.stringify(loc));
 
       toast(`✓ 精確位置：${city} ${district}`, 4000);
-      updateSheetSyncBadge();
+      // v3.0.0：移除 updateSheetSyncBadge
       loadDeviceNameUI();
     } catch (err) {
       toast('反向地理編碼失敗：' + err.message);
@@ -7992,81 +7687,9 @@ function skipDeviceNamePrompt() {
 async function enableSheetSync() { console.warn('[deprecated] enableSheetSync：v3 登入即同步，無需手動啟用'); }
 function disableSheetSync() { console.warn('[deprecated] disableSheetSync：v3 登入即同步，請從 🔐 Google Drive 同步 卡片登出'); }
 
-function updateSheetSyncBadge() {
-  const el = document.getElementById('sheet-sync-status');
-  if (!el) return;
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl) {
-    el.textContent = '未連接';
-    el.style.color = 'var(--muted)';
-  } else if (!config.sheetSyncEnabled) {
-    el.textContent = '已關閉';
-    el.style.color = 'var(--muted)';
-  } else {
-    el.textContent = '✓ 已連雲端';
-    el.style.color = 'var(--success)';
-  }
-}
+// v3.0.0：updateSheetSyncBadge（更新 #sheet-sync-status 文字）已移除；對應 hidden 卡片不再顯示
 
-async function showSnapshotList() {
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken) { alert('請先設定 API URL'); return; }
-  toastProgress('📂 讀取備份歷史中...');
-  try {
-    const url = cfg.apiUrl + '?action=listSnapshots&token=' + encodeURIComponent(cfg.apiToken);
-    const resp = await fetch(url);
-    const data = await resp.json();
-    toastDismiss();
-    if (!data.ok) { alert('讀取失敗：' + data.error); return; }
-    const list = data.snapshots || [];
-
-    const box = document.getElementById('snapshot-list-modal');
-    if (!list.length) {
-      box.innerHTML = '<div class="empty"><div style="font-size: 13px;">目前沒有備份紀錄</div></div>';
-    } else {
-      box.innerHTML = list.map((s, i) => {
-        const stats = s.stats || {};
-        const cls = i === 0 ? 'recent' : '';
-        const tag = i === 0 ? '<span class="badge-status paid" style="margin-left: 6px;">最新</span>' : '';
-        // Tier 標籤顏色
-        const tierMap = {
-          'force':   { label: '🔒 每日強制', color: 'var(--primary)', bg: 'var(--primary-light)' },
-          'manual':  { label: '✋ 手動', color: 'var(--success)', bg: 'var(--success-light)' },
-          'restore': { label: '↩️ 還原前', color: 'var(--warning)', bg: 'var(--warning-light)' },
-          'auto':    { label: '⚙️ 自動', color: 'var(--muted)', bg: 'var(--bg)' },
-          'legacy':  { label: '📦 舊版', color: 'var(--muted)', bg: 'var(--bg)' }
-        };
-        const tier = tierMap[s.tier] || tierMap.auto;
-        const tierBadge = `<span style="background:${tier.bg}; color:${tier.color}; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:600;">${tier.label}</span>`;
-        const deviceText = s.device ? ` · ${escapeHtml(s.device)}` : '';
-        // 資料大小警告（>= 160KB 接近 4 欄拆分上限 180KB）
-        const dataSize = s.dataSize || 0;
-        const sizeKB = Math.round(dataSize / 1024);
-        const sizeWarn = dataSize > 160 * 1024
-          ? ` <span style="color: var(--warning);">⚠️ ${sizeKB} KB</span>`
-          : (dataSize > 0 ? ` <span style="color: var(--muted); font-size: 11px;">${sizeKB} KB</span>` : '');
-        return `<div class="snapshot-row ${cls}">
-          <div class="snapshot-info">
-            <div class="snapshot-time">${s.timestamp}${tag} ${tierBadge}${sizeWarn}</div>
-            <div class="snapshot-stats">
-              ${stats.clients || 0} 業主 · ${stats.jobs || 0} 案件 · 總額 ${fmt(stats.totalAmount || 0)}${deviceText}
-            </div>
-            <div class="snapshot-stats">${escapeHtml(s.note || '—')}</div>
-            <div class="snapshot-stats" style="font-family: monospace;">ID: ${s.id}</div>
-          </div>
-          <div class="snapshot-actions">
-            <button class="btn btn-outline btn-sm" onclick="previewSnapshot('${s.id}')">👁️ 預覽</button>
-            <button class="btn btn-primary btn-sm" onclick="restoreSnapshot('${s.id}')">⏮️ 還原</button>
-          </div>
-        </div>`;
-      }).join('');
-    }
-    document.getElementById('snapshot-modal').classList.add('open');
-    toast('✓ 載入 ' + list.length + ' 筆備份');
-  } catch (err) {
-    alert('錯誤：' + err.message);
-  }
-}
+// v3.0.0：showSnapshotList（v2 sheet snapshot 列表）已移除；v3 用 cloudListSnapshots（在 ☁️ Drive Sync Layer）
 
 // 預覽特定 snapshot 內容
 // ============== 操作日誌 UI（v2.9.5）==============
@@ -8226,23 +7849,10 @@ const SNAPSHOT_FIELD_LABELS = {
 const CLIENT_FIELDS = ['name','color','note','commissionRate','commissionTo','prepaidMode','prepayments','billingDay','billingRemindDays','unpaidRemindDaysOverride'];
 const JOB_FIELDS    = ['title','clientId','date','endDate','details','amount','tag','done','doneAt','paid','paidAt','cancelled','isEstimate','hoursWorked','timeSpentMs','discountType','discountValue','payments','writeOff','subtasks'];
 
-function diffFields_(a, b, fields) {
-  const diff = {};
-  fields.forEach(f => {
-    const av = a?.[f];
-    const bv = b?.[f];
-    const isObj = (typeof av === 'object' && av !== null) || (typeof bv === 'object' && bv !== null);
-    if (isObj) {
-      if (JSON.stringify(av) !== JSON.stringify(bv)) diff[f] = { before: av, after: bv };
-    } else if (av !== bv) {
-      // 把 undefined 跟空字串等價處理，避免雜訊
-      if ((av === undefined || av === null || av === '') && (bv === undefined || bv === null || bv === '')) return;
-      diff[f] = { before: av, after: bv };
-    }
-  });
-  return diff;
-}
-
+// v3.0.0：以下整套 v2 sheet snapshot diff modal 邏輯已移除
+// （diffFields_ / computeSnapshotDiff / formatDiffValue_ / renderFieldDiffHtml / previewSnapshot / showSnapshotDiffModal）
+// v3 用 cloudShowRestorePreviewModal（在 ☁️ Drive Sync Layer，含「目前 vs 還原後」對比表格）取代
+/*
 function computeSnapshotDiff(currentClients, currentJobs, snapClients, snapJobs) {
   const result = {
     clients: { added: [], removed: [], changed: [] },
@@ -8448,8 +8058,9 @@ function showSnapshotDiffModal(snap, snapClients, snapJobs, diff, snapshotId) {
   };
   document.getElementById('snapshot-diff-modal').classList.add('open');
 }
+*/
 
-// v3.0.0-beta.1：v2 sheet-based restoreSnapshot 已移除；v3 用 cloudRestoreSnapshot（從 Drive 還原）
+// v3.0.0：v2 sheet-based restoreSnapshot 已移除；v3 用 cloudRestoreSnapshot（從 Drive 還原）
 async function restoreSnapshot(id) { console.warn('[deprecated] restoreSnapshot：v3 已改用 cloudRestoreSnapshot 從 Drive 還原'); }
 
 // ============== 網頁版本偵測 ==============
@@ -8607,176 +8218,15 @@ async function pollAppVersion() {
   }
 }
 
-// ============== 雲端優先模式 + 自動 polling ==============
-function saveCloudFirstMode() {
-  config.cloudFirstMode = document.getElementById('cloud-first').checked;
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-  toast(config.cloudFirstMode ? '✓ 雲端優先模式已啟用' : '已關閉雲端優先模式');
-  if (config.cloudFirstMode && !config.sheetSyncEnabled) {
-    if (confirm('雲端優先需要搭配「自動同步」一起使用。\n\n要現在啟用自動同步嗎？')) {
-      enableSheetSync();
-    }
-  }
-}
+// v3.0.0：以下整批 v2 邏輯已移除：
+//   - 雲端優先模式 + 自動 polling（saveCloudFirstMode / saveAutoPollToggle / setupAutoPoll / checkCloudForUpdate / autoPollTimer）
+//   - Apps Script 後端設定 UI（loadSheetConfigUI / saveSheetConfig / testSheetConnection）
+//   - Google Calendar Apps Script 中介同步（getCalReminderMinutes / describeCalReminder / loadCalendarConfigUI /
+//     updateCalendarReminderHint / updateCalendarStatusBadge / renderCalendarSyncStatus）
+// v3 同步全部交給 ☁️ Cloud Auth Layer / Drive Sync Layer
 
-function saveAutoPollToggle() {
-  config.autoPollEnabled = document.getElementById('auto-poll-toggle').checked;
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-  setupAutoPoll();
-  toast(config.autoPollEnabled ? '✓ 已啟用自動偵測（每 30 秒）' : '已關閉自動偵測');
-}
-
-let autoPollTimer = null;
-function setupAutoPoll() {
-  if (autoPollTimer) { clearInterval(autoPollTimer); autoPollTimer = null; }
-  if (!config.autoPollEnabled) return;
-  if (!config.sheetConfig?.apiUrl || !config.sheetConfig?.apiToken) return;
-  autoPollTimer = setInterval(checkCloudForUpdate, 30 * 1000);
-}
-
-async function checkCloudForUpdate() {
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken) return;
-  if (syncStatus === 'syncing') return;  // 別跟正在進行的同步衝突
-  try {
-    const resp = await fetch(cfg.apiUrl + '?action=getMeta&token=' + encodeURIComponent(cfg.apiToken));
-    const data = await resp.json();
-    if (!data.ok || !data.meta) return;
-    const cloudVer = +data.meta.version || 0;
-    const localCloudVer = +cfg.cloudVersion || 0;
-    if (cloudVer > localCloudVer) {
-      // 雲端有新版本
-      toast(`☁️ 雲端有新版本 (v${cloudVer})，自動下載中...`, 3500);
-      await pullFromSheet(true);
-      toast(`✓ 已同步雲端最新（v${cloudVer}）`, 3500);
-    }
-  } catch (err) {
-    // 靜默失敗
-  }
-}
-
-// ============== Apps Script 後端（Sheet URL + API URL）==============
-function loadSheetConfigUI() {
-  const g = (id) => document.getElementById(id);
-  if (!g('sheet-api')) return;
-  g('sheet-api').value = config.sheetConfig?.apiUrl || '';
-  g('sheet-url').value = config.sheetConfig?.sheetUrl || '';
-  loadDeviceNameUI();
-  updateLabModeUI();
-  // 雲端優先 + 自動偵測已強制永久開啟，無 UI
-}
-
-function saveSheetConfig() {
-  config.sheetConfig = config.sheetConfig || {};
-  config.sheetConfig.apiUrl = document.getElementById('sheet-api').value.trim();
-  config.sheetConfig.sheetUrl = document.getElementById('sheet-url').value.trim();
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-  toast('✓ 已儲存');
-}
-
-async function testSheetConnection() {
-  const apiUrl = document.getElementById('sheet-api').value.trim();
-  if (!apiUrl) { toast('請先填入 API URL'); return; }
-  const token = prompt('請輸入 API Token');
-  if (!token) return;
-  toastProgress('🔌 正在測試雲端連線...');
-  try {
-    const resp = await fetch(apiUrl + '?action=ping&token=' + encodeURIComponent(token));
-    const data = await resp.json();
-    if (data.ok) {
-      config.sheetConfig = config.sheetConfig || {};
-      config.sheetConfig.apiUrl = apiUrl;
-      config.sheetConfig.apiToken = token;
-      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-      alert(`✓ 連線成功！\n\n伺服器時間：${data.time}\n\nToken 已記錄，之後不用再輸入。`);
-    } else {
-      alert('✗ 連線失敗：' + data.error);
-    }
-  } catch (err) {
-    alert('✗ 連線錯誤：' + err.message);
-  }
-}
-
-// ============== Google Calendar 同步 ==============
-
-/**
- * 解析 calReminderMode 為實際的提醒分鐘數
- *   'follow'  → dueSoonDays * 1440
- *   '0'       → 0（不提醒）
- *   '60' 等   → 60
- *   未設定    → 預設 follow → dueSoonDays * 1440
- */
-function getCalReminderMinutes() {
-  const mode = config.calReminderMode || 'follow';
-  if (mode === 'follow') {
-    const days = Math.max(1, +config.dueSoonDays || 3);
-    return days * 24 * 60;
-  }
-  const n = +mode;
-  return isNaN(n) ? (3 * 24 * 60) : Math.max(0, n);
-}
-
-function describeCalReminder() {
-  const min = getCalReminderMinutes();
-  if (min === 0) return '不提醒';
-  if (min < 60) return `${min} 分鐘前`;
-  if (min < 1440) return `${Math.round(min / 60)} 小時前`;
-  const days = Math.round(min / 1440 * 10) / 10;
-  return `${days} 天前`;
-}
-
-function loadCalendarConfigUI() {
-  const g = (id) => document.getElementById(id);
-  if (g('cal-enabled')) g('cal-enabled').checked = !!config.calEnabled;
-  if (g('cal-id')) g('cal-id').value = config.calId || '';
-  if (g('cal-autosync')) g('cal-autosync').checked = !!config.calAutoSync;
-  // 提醒模式
-  if (g('cal-reminder-mode')) {
-    g('cal-reminder-mode').value = config.calReminderMode || 'follow';
-  }
-  updateCalendarReminderHint();
-  updateCalendarStatusBadge();
-  renderCalendarSyncStatus();
-}
-
-function updateCalendarReminderHint() {
-  const hint = document.getElementById('cal-reminder-hint');
-  if (!hint) return;
-  const days = +config.dueSoonDays || 3;
-  const desc = describeCalReminder();
-  hint.innerHTML = `目前提醒：<b>${desc}</b>　·　套用範圍：Google 行事曆同步事件、iCal 訂閱通知<br><span style="font-size: 11px;">「跟隨即將到期」目前對應 ${days} 天前（在「提醒設定」可調整）</span>`;
-}
-
-function updateCalendarStatusBadge() {
-  const badge = document.getElementById('cal-status-badge');
-  if (!badge) return;
-  if (!config.calId) {
-    badge.textContent = '未設定';
-    badge.style.color = 'var(--muted)';
-  } else if (!config.calEnabled) {
-    badge.textContent = '已關閉';
-    badge.style.color = 'var(--muted)';
-  } else {
-    badge.textContent = '✓ 同步中';
-    badge.style.color = 'var(--success)';
-  }
-}
-
-function renderCalendarSyncStatus() {
-  const el = document.getElementById('cal-sync-status');
-  if (!el) return;
-  if (!config.calLastSyncAt) {
-    el.innerHTML = '<span style="color: var(--muted);">尚未同步過</span>';
-    return;
-  }
-  const when = config.calLastSyncAt;
-  const count = config.calLastSyncCount || 0;
-  el.innerHTML = `✓ 上次同步：${when}　已建立 ${count} 個事件`;
-}
-
-// v3.0.0-beta.1：Google 行事曆同步依賴 Apps Script 中介，已移除；之後若要重做要走 OAuth
+// v3.0.0：Google 行事曆 Apps Script 中介同步已移除；之後若要重做要走 GIS OAuth
 function saveCalendarConfig() { console.warn('[deprecated] saveCalendarConfig：v3 已停用 Apps Script 中介行事曆同步'); }
-
 async function testCalendarConnection() { console.warn('[deprecated] testCalendarConnection：v3 已停用 Apps Script 中介行事曆同步'); }
 
 /**
@@ -8964,40 +8414,7 @@ renderAll();  // 啟動時全部畫一次
 // 啟動時抓 IP 地理位置（24h 快取，失敗不擋）
 fetchDeviceLocation();
 
-// v2.2: 月初自動產生月報 snapshot（每月 1～3 號開頁時，且當月還沒產過）
-function maybeGenerateMonthlySnapshot() {
-  const cfg = config.sheetConfig;
-  if (!cfg?.apiUrl || !cfg?.apiToken || !config.sheetSyncEnabled) return;
-  if (isLabMode()) return;
-  const now = new Date();
-  if (now.getDate() > 3) return;  // 只在 1~3 號跑（給跨日緩衝）
-  const monthKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-  const lastKey = localStorage.getItem('ftLastMonthlyReport_v1');
-  if (lastKey === monthKey) return;  // 本月已產過
-
-  // 上個月的數字
-  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lmKey = lastMonth.getFullYear() + '-' + String(lastMonth.getMonth() + 1).padStart(2, '0');
-  const lmJobs = state.jobs.filter(j => !j.cancelled && getMonth(jobBelongMonth(j)) === lmKey);
-  const total = lmJobs.reduce((s,j) => s + jobFinalAmount(j), 0);
-  const paid = lmJobs.reduce((s,j) => s + jobPaidTotal(j), 0);
-  const note = `${lmKey} 月報：${lmJobs.length} 案件、總額 ${fmt(total)}、已收 ${fmt(paid)}、未收 ${fmt(total - paid)}`;
-
-  fetch(cfg.apiUrl, {
-    method: 'POST',
-    body: JSON.stringify({
-      action: 'manualSnapshot',
-      token: cfg.apiToken,
-      note: '[monthly] ' + note,
-      deviceLabel: getDeviceLabelForUpload()
-    })
-  }).then(r => r.json()).then(data => {
-    if (data.ok) {
-      localStorage.setItem('ftLastMonthlyReport_v1', monthKey);
-      toast('📊 已自動產生 ' + lmKey + ' 月報備份', 5000);
-    }
-  }).catch(() => {});
-}
+// v3.0.0：maybeGenerateMonthlySnapshot（v2 月報自動 snapshot）已移除；v3 不再依靠 Apps Script 月報
 
 // v2.2: 啟動時套用主題 + Lab Mode UI
 loadThemeUI();

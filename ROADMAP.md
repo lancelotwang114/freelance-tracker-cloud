@@ -42,10 +42,12 @@
 - [x] localStorage 正式退化為純快取（概念落地；alpha.2/3 架構已是 Drive 為 source of truth）
 - [-] dead code 暫留（setSyncStatus / schedulePush / 編輯鎖 / 行事曆事件建構等），所有 caller 都已切斷不會執行；v3.0.0 stable 再徹底移除
 
-## v3.0.0 — 正式 stable
-- [ ] 完全移除 backend/ 相關引用
-- [ ] CHANGELOG 標記 stable
-- [ ] README 移除「實驗版警告」橫幅
+## v3.0.0 ✅ 正式 stable（2026-04-29）
+- [x] 砍 ~700 行 v2 Apps Script dead code（setSyncStatus / 編輯鎖整套 / setupAutoPoll / showSnapshotList / 雲端優先模式 UI / Apps Script Calendar 整套 / maybeGenerateMonthlySnapshot 等）
+- [x] 版本號 bump 三處（APP_VERSION / index.html meta / SW CACHE_VERSION）→ `2026-04-29-v3.0.0` / `ftracker-cloud-v3.0.0`
+- [x] README 移除「實驗版警告」橫幅、改成穩定版描述
+- [x] CHANGELOG 標 stable
+- [-] HTML hidden 卡片暫留（#card-cloud / #card-calendar / #card-portable），對使用者透明、不影響運作；之後想徹底乾淨可手動砍
 
 ## 待保留功能（從 v2 沿用，邏輯不動）
 - 案件 / 業主 CRUD
