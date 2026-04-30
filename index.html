@@ -624,70 +624,67 @@
         <span class="card-status" id="cloud-cal-status">未設定</span>
         <span class="toggle-arrow">▼</span>
       </div>
-      <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          同步案件 + 提醒到 Google 行事曆，只動帶 <code>ftSource</code> 標記的事件，不會碰到你其他事件。
+      <!-- v3.6.3：欄位整體縮小（仿 reminder-compact） -->
+      <div class="card-body cal-compact">
+        <p class="cal-hint" style="margin-bottom: 8px;">
+          只動帶 <code>ftSource</code> 標記的事件，不會碰到你其他事件。
         </p>
 
         <!-- Step 1：選擇 Calendar -->
-        <div style="background: var(--bg); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
-          <label style="font-weight: 600; font-size: 14px;">① 同步到哪一本日曆？</label>
-          <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
-            <select id="cloud-cal-picker" style="flex: 1; min-width: 200px;" onchange="cloudOnCalendarPicked()">
+        <div class="cal-step">
+          <label class="cal-step-label">① 同步到哪一本日曆？</label>
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <select id="cloud-cal-picker" style="flex: 1; min-width: 180px;" onchange="cloudOnCalendarPicked()">
               <option value="">— 請先載入 —</option>
             </select>
-            <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshCalendarList()">🔄 重新整理</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshCalendarList()">重新整理</button>
           </div>
-          <div id="cloud-cal-recommend" style="font-size: 12px; color: var(--warning); margin-top: 8px;">
-            💡 <b>強烈建議</b>建一本「外包」專用日曆，避免跟個人約會混在一起。<br>
-            做法：開 <a href="https://calendar.google.com" target="_blank" rel="noopener" style="color: var(--primary);">calendar.google.com</a> → 左側「其他日曆」+ 號 → 「建立新日曆」→ 名稱「外包」→ 建立 → 回來按「🔄 重新整理」。
-          </div>
+          <details id="cloud-cal-recommend-wrap" style="margin-top: 6px;">
+            <summary class="cal-hint" style="cursor: pointer;">💡 建議建一本「外包」專用日曆（點看做法）</summary>
+            <div id="cloud-cal-recommend" class="cal-hint" style="margin-top: 4px; padding-left: 16px;">
+              做法：開 <a href="https://calendar.google.com" target="_blank" rel="noopener" style="color: var(--primary);">calendar.google.com</a> → 左側「其他日曆」+ 號 → 建立新日曆 → 名稱「外包」 → 建立 → 回來按「重新整理」。
+            </div>
+          </details>
         </div>
 
         <!-- Step 2：每日早報時段 -->
-        <div style="background: var(--bg); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
-          <label style="font-weight: 600; font-size: 14px;">② 每日早報時段</label>
-          <p style="font-size: 12px; color: var(--muted); margin: 4px 0 8px 0;">
-            每天有事的日子，這個時段會跳一筆「📋 [外包] 今日 N 件事」（手機會原生通知）。
-          </p>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <input type="time" id="cloud-cal-morning-time" value="09:30" onchange="cloudOnCalendarConfigChange()" style="font-size: 14px;">
-            <span style="font-size: 12px; color: var(--muted);">長度 15 分鐘，當日無事自動不建</span>
+        <div class="cal-step">
+          <label class="cal-step-label">② 每日早報時段</label>
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <input type="time" id="cloud-cal-morning-time" value="09:30" onchange="cloudOnCalendarConfigChange()" style="font-size: 13px;">
+            <span class="cal-hint">當日無事自動不建</span>
           </div>
         </div>
 
-        <!-- Step 3：要同步哪些事件 -->
-        <div style="background: var(--bg); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
-          <label style="font-weight: 600; font-size: 14px;">③ 要同步哪些事件</label>
-          <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: 13px;">
-            <label><input type="checkbox" id="cloud-cal-sync-jobs" onchange="cloudOnCalendarConfigChange()" checked> 案件本身（含取消的，標題前綴 "(已取消)"）</label>
-            <label><input type="checkbox" id="cloud-cal-sync-unpaidLong" onchange="cloudOnCalendarConfigChange()" checked> 完成已久未收款提醒</label>
+        <!-- Step 3：要同步哪些事件（grid 自適應分欄） -->
+        <div class="cal-step">
+          <label class="cal-step-label">③ 要同步哪些事件</label>
+          <div class="cal-sync-grid">
+            <label><input type="checkbox" id="cloud-cal-sync-jobs" onchange="cloudOnCalendarConfigChange()" checked> 案件本身</label>
+            <label><input type="checkbox" id="cloud-cal-sync-unpaidLong" onchange="cloudOnCalendarConfigChange()" checked> 完成未收款提醒</label>
             <label><input type="checkbox" id="cloud-cal-sync-monthEnd" onchange="cloudOnCalendarConfigChange()" checked> 月底提醒</label>
-            <label><input type="checkbox" id="cloud-cal-sync-billingDay" onchange="cloudOnCalendarConfigChange()" checked> 業主固定請款日提醒</label>
+            <label><input type="checkbox" id="cloud-cal-sync-billingDay" onchange="cloudOnCalendarConfigChange()" checked> 業主請款日提醒</label>
             <label><input type="checkbox" id="cloud-cal-sync-slowPay" onchange="cloudOnCalendarConfigChange()" checked> 智慧拖款警告</label>
-            <label><input type="checkbox" id="cloud-cal-sync-dailyMorning" onchange="cloudOnCalendarConfigChange()" checked> 每日早報（含當天所有上面項目綜合摘要）</label>
+            <label><input type="checkbox" id="cloud-cal-sync-dailyMorning" onchange="cloudOnCalendarConfigChange()" checked> 每日早報摘要</label>
           </div>
         </div>
 
-        <!-- Step 4：自動同步 + 立即同步按鈕 -->
-        <div style="background: var(--bg); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
-          <label style="font-weight: 600; font-size: 14px;">④ 自動 vs 手動</label>
-          <label style="display: block; margin-top: 8px; font-size: 13px;">
+        <!-- Step 4：自動同步 -->
+        <div class="cal-step">
+          <label class="cal-step-label">④ 自動 vs 手動</label>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
             <input type="checkbox" id="cloud-cal-autosync" onchange="cloudOnCalendarConfigChange()">
-            啟用自動同步（save() 後 30 秒 debounce 自動推到 Calendar）
+            <span>啟用自動同步（每次改動 30 秒後推送）</span>
           </label>
-          <p style="font-size: 12px; color: var(--muted); margin: 4px 0 0 0;">
-            未啟用時：只有按下方「🔄 立即同步」才會推到 Calendar。
-          </p>
         </div>
 
-        <!-- 同步狀態 + 立即同步按鈕 -->
-        <div id="cloud-cal-sync-status" style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+        <!-- 同步狀態 + 立即同步 -->
+        <div id="cloud-cal-sync-status" class="cal-hint" style="margin-top: 8px;">
           尚未同步過。
         </div>
 
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-primary btn-sm" id="cloud-cal-sync-btn" onclick="cloudSyncCalendar()">🔄 立即同步到 Calendar</button>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+          <button class="btn btn-primary btn-sm" id="cloud-cal-sync-btn" onclick="cloudSyncCalendar()">立即同步到 Calendar</button>
         </div>
       </div>
     </div>

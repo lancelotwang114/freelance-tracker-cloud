@@ -1158,6 +1158,36 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--primary);
 }
 
+/* ==================== Calendar 同步卡 compact（v3.6.3）==================== */
+.cal-compact .cal-step {
+  background: var(--bg);
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.cal-compact .cal-step-label {
+  display: block;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.cal-compact .cal-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.cal-compact .cal-sync-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+.cal-compact .cal-sync-grid label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ==================== Reminder 卡片 compact（v3.6.2 二次調整）==================== */
 .reminder-compact .reminder-row {
   background: var(--bg);
