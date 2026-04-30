@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-04-30-v3.3.1">
+<meta name="app-version" content="2026-04-30-v3.4.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -52,9 +52,9 @@
         </div>
       </div>
       <div style="display: flex; gap: 6px; align-items: center;">
-        <button id="hard-reload-btn" onclick="hardReload()" title="強制刷新（清除所有快取、Service Worker、Cookie）" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text); white-space: nowrap;">🔄 刷新頁面</button>
-        <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;">📜 日誌</button>
-        <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;">主題:系統</button>
+        <button id="hard-reload-btn" onclick="hardReload()" title="強制刷新（清除所有快取、Service Worker、Cookie）" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 14px; cursor: pointer; color: var(--text); white-space: nowrap;" aria-label="強制刷新">🔄</button>
+        <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 14px; cursor: pointer; color: var(--text); white-space: nowrap;" aria-label="操作日誌">📜</button>
+        <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;">主題</button>
         <div id="sync-indicator" class="sync-indicator sync-idle" onclick="switchTab('settings')" title="點擊開啟設定頁">○ 未啟用</div>
       </div>
     </div>
@@ -223,35 +223,27 @@
     </div>
 
     <div class="card">
-      <h3>🥧 案件類型分佈</h3>
-      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">依「類型/標籤」欄位分類已收款案件（沒填類型 = 未分類）</p>
+      <h3>案件類型分佈</h3>
       <div id="rev-tag-pie"></div>
     </div>
 
     <div class="card">
-      <h3>🔥 工作熱圖（最近 365 天）</h3>
-      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">每格代表一天的收款金額，顏色越深 = 那天越忙</p>
+      <h3>工作熱圖（最近 365 天）</h3>
       <div id="rev-heatmap"></div>
     </div>
 
-    <!-- v2.9: 收款時間軸 -->
     <div class="card">
-      <h3>💵 收款時間軸（最近 12 個月）</h3>
-      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">每個月實際入帳金額（按 payment 日期歸月）</p>
+      <h3>收款時間軸（最近 12 個月）</h3>
       <div id="rev-payment-timeline"></div>
     </div>
 
-    <!-- v2.7: 忙閒週期 -->
     <div class="card">
-      <h3>📅 忙閒週期分析</h3>
-      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">過去全部歷史的月份分布與週幾分布</p>
+      <h3>忙閒週期分析</h3>
       <div id="rev-busy-cycle"></div>
     </div>
 
-    <!-- v2.7: 時薪趨勢 -->
     <div class="card">
-      <h3>💰 個人時薪趨勢</h3>
-      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">統計有填工時的案件，計算每月平均時薪</p>
+      <h3>時薪趨勢</h3>
       <div id="rev-hourly-trend"></div>
     </div>
 
@@ -396,7 +388,7 @@
         <!-- 狀態 B：未登入（v3.0.0-alpha.1 commit 3 階段：預設顯示，按鈕永遠 disabled）-->
         <div id="cloud-auth-signed-out" class="cloud-auth-signed-out">
           <p style="font-size: 13px; color: var(--muted); margin: 0 0 12px 0;">
-            用 Google 帳號登入，資料自動同步到你自己的 Google Drive 「應用程式資料夾」（其他人看不到，本 app 也看不到你的其他檔案）。
+            登入後資料同步到你自己的 Google Drive 應用程式資料夾。
           </p>
           <button type="button" id="cloud-signin-btn" class="cloud-signin-btn" onclick="cloudSignIn()" disabled>
             <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -431,8 +423,7 @@
           </div>
 
           <p style="font-size: 12px; color: var(--muted); margin: 12px 0 0 0;">
-            每次改動 2 秒後自動推送到 Drive。需要主動拉取多裝置改動時按上方「🔄 立即同步」。<br>
-            access token 預設 1 小時後過期，過期後請重新登入。
+            自動同步，1 小時後 token 過期需重新登入。
           </p>
         </div>
 
@@ -449,8 +440,7 @@
       </div>
       <div class="card-body">
         <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          每筆備份是 Drive App Folder 內的獨立檔案，按需下載。<br>
-          手動備份永遠不會被自動清理；自動每日備份會做分層保留（α2-7b 上線後生效）。
+          手動備份永久保留；自動每日備份會分層保留。
         </p>
 
         <div style="display: flex; gap: 8px; margin-bottom: 12px;">
@@ -472,17 +462,16 @@
     <!-- v2.10.3：重組分類 — 我的資料、通知與提醒、資料備份 -->
     <div class="settings-section-title">🌟 常用設定</div>
 
-    <!-- 我的收款資訊（v2.10.13：bank/account 改成多筆收款帳號） -->
-    <!-- v3.2.0：個人 + 收款帳號管理整套搬到請款單分頁，這裡只留導引 -->
-    <div class="card" id="card-myinfo">
-      <h3>👤 我的收款資訊</h3>
-      <p style="font-size: 13px; color: var(--muted); margin: 8px 0 12px 0;">
-        每筆收款帳號自帶完整身分（個人資訊 + 發票資訊 + 匯款資訊），編輯介面已搬到「請款單」分頁。
-      </p>
-      <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('invoice')">📋 前往請款單分頁編輯</button>
-      <p style="font-size: 11px; color: var(--muted); margin-top: 12px;">
-        💡 例如：可建一筆「個人」、一筆「工作室」，產生請款單時自動切換顯示對應的姓名、抬頭、匯款帳號。
-      </p>
+    <!-- v3.4.0：改成 collapsible collapsed + 砍掉冗長提示 -->
+    <div class="card collapsible collapsed" id="card-myinfo">
+      <div class="card-head" onclick="toggleCard('card-myinfo')">
+        <h3>我的收款資訊</h3>
+        <span class="card-status">已搬到請款單分頁</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('invoice')">前往請款單分頁編輯</button>
+      </div>
     </div>
 
     <!-- 通知與提醒（合併「桌面通知 + 提醒設定」）-->
@@ -498,8 +487,7 @@
         <div style="margin-bottom: 16px; padding: 12px; background: var(--bg); border-radius: 8px;">
           <label style="font-size: 13px; font-weight: 600;">🖥️ 瀏覽器桌面通知</label>
           <p style="font-size: 12px; color: var(--muted); margin: 2px 0 6px;">
-            開啟後，每天首次開頁時若有逾期、即將到期、拖款的案件，會跳系統通知。<br>
-            ⚠️ 僅在 APP 開啟時運作；若 PWA 安裝到桌面，效果類似原生 APP。
+            每天首次開頁時若有逾期/即將到期/拖款，會跳系統通知。
           </p>
           <div id="notif-status" style="font-size: 13px; padding: 6px 10px; background: var(--card); border-radius: 6px; margin-bottom: 6px;"></div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -628,8 +616,7 @@
       </div>
       <div class="card-body">
         <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          把案件 + 5 種提醒 + 每日早報同步到你選定的 Google 行事曆。<br>
-          <b>安全：</b>只動帶有 <code>ftSource</code> 標記的事件，你日曆裡其他事件 100% 不會被觸碰。
+          同步案件 + 提醒到 Google 行事曆，只動帶 <code>ftSource</code> 標記的事件，不會碰到你其他事件。
         </p>
 
         <!-- Step 1：選擇 Calendar -->
@@ -705,7 +692,7 @@
         <span class="toggle-arrow">▼</span>
       </div>
       <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">選擇 APP 的顏色主題。「自動」會跟著系統設定切換。<br>右上角的「主題」按鈕可以快速切換。</p>
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">「自動」會跟著系統切換，右上角按鈕可快速切換。</p>
         <div style="display: flex; gap: 16px; flex-wrap: wrap;">
           <label class="checkbox-row" style="margin: 0;">
             <input type="radio" name="theme-mode" value="auto" onchange="setTheme('auto')">

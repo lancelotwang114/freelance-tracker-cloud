@@ -1,5 +1,49 @@
 ﻿# 版本更新歷史
 
+## v3.4.0 — UI 簡化（Top bar / 卡片描述 / Settings collapsed）（2026-04-30）
+
+> 純 UI 瘦身，無業務邏輯改動。Revenue 子分頁拆分（Task 3）暫不做、先預覽。
+
+### Top bar 精簡
+- 「🔄 刷新頁面」→ icon-only `🔄`（含 title tooltip 保留語意）
+- 「📜 日誌」→ icon-only `📜`
+- 「主題:系統」→「🪄 主題」（auto）/「☀️ 主題」（light）/「🌙 主題」（dark），icon 透露目前模式
+- 同步 indicator 維持原樣
+- 在窄螢幕上釋出更多空間給標題
+
+### 設定頁卡片預設全部收起
+- `#card-myinfo`（我的收款資訊）改成 `collapsible collapsed` + 簡化成導引按鈕
+- 其他 6 張 card（Drive 同步以外）原本就 collapsed，本版確認一致
+- 入口卡 `#card-cloud-auth` 維持展開
+
+### 卡片描述文字砍一半
+- Revenue 5 張卡：刪除每張底下的 12px 描述文字（chart 標題已足夠）
+- Drive 同步未登入提示：「登入後資料同步到你自己的 Google Drive 應用程式資料夾」（從 1.5 行變半行）
+- Drive 同步已登入提示：「自動同步，1 小時後 token 過期需重新登入」（從 2 行變半行）
+- 備份歷史描述：「手動備份永久保留；自動每日備份會分層保留」（從 2 行變 1 行）
+- 桌面通知描述：縮成「每天首次開頁時若有逾期/即將到期/拖款，會跳系統通知」
+- 行事曆描述：縮成「同步案件 + 提醒到 Google 行事曆，只動帶 ftSource 標記的事件」
+- 主題描述：「『自動』會跟著系統切換，右上角按鈕可快速切換」
+
+### Revenue 5 張卡標題去裝飾性 emoji
+- 「🥧 案件類型分佈」→「案件類型分佈」
+- 「🔥 工作熱圖」→「工作熱圖」
+- 「💵 收款時間軸」→「收款時間軸」
+- 「📅 忙閒週期分析」→「忙閒週期分析」
+- 「💰 個人時薪趨勢」→「時薪趨勢」
+
+### 版本 bump
+- APP_VERSION → `2026-04-30-v3.4.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.4.0`
+
+### 不在這版範圍
+- Revenue 拆 3 子分頁（Task 3）— 已 mock 預覽，待決定是否動工
+- Dashboard 4 stat 改 3 stat（Task 2）— 待決定砍哪張
+- 請款單控制區進階篩選收摺（Task 5）
+- 7 tabs 縮成 6（Task 8）
+
+---
+
 ## v3.3.1 — 物理刪除 DEAD_BLOCK 純清理（2026-04-30）
 
 > v3.3.0 把 9 個 v2 dead code 區塊用 `/* DEAD_BLOCK_BEGIN ... DEAD_BLOCK_END */` 包起來不執行；本版直接從 app.js 物理刪除這些區塊，每個換成單行說明註解。

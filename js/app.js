@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-30-v3.3.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-30-v3.4.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -8152,9 +8152,10 @@ function updateThemeToggleIcon() {
   const btn = document.getElementById('theme-toggle-btn');
   if (!btn) return;
   const cur = localStorage.getItem(THEME_KEY) || 'auto';
-  // v2.10.5：顯示「主題:淺色/深色/系統」
+  // v3.4.0：top bar 精簡，按鈕只顯示「主題」+ icon 提示目前狀態
+  const icon = cur === 'auto' ? '🪄' : (cur === 'dark' ? '🌙' : '☀️');
   const label = cur === 'auto' ? '系統' : (cur === 'dark' ? '深色' : '淺色');
-  btn.textContent = `主題:${label}`;
+  btn.textContent = `${icon} 主題`;
   btn.title = `目前主題：${label}（點擊循環切換 系統 → 淺色 → 深色）`;
 }
 

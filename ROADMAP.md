@@ -2,6 +2,20 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.4.0 ✅ UI 簡化（Top bar / 描述瘦身 / Settings collapsed）（2026-04-30）
+- [x] Top bar 三按鈕精簡：刷新頁面 / 日誌 改 icon-only、主題改 「icon + 主題」
+- [x] 設定頁全部 collapsed by default（card-myinfo 從 always-open 改成 collapsible）
+- [x] Revenue 5 張卡刪除冗長描述
+- [x] Drive 同步 / 備份 / 通知 / 行事曆 / 主題卡描述縮成半行
+- [x] Revenue 5 張卡標題去裝飾性 emoji
+- [x] bump 三處版本號 → `2026-04-30-v3.4.0` / `ftracker-cloud-v3.4.0`
+
+## 暫緩（Task 2/3/5/8）
+- Task 3 — Revenue 拆 3 子分頁（總覽 / 趨勢 / 分析）：已 mock 預覽，待決定
+- Task 2 — Dashboard 4 stat 改 3 stat：待決定砍哪張
+- Task 5 — 請款單 5 個狀態 checkbox 收進「進階篩選」
+- Task 8 — 7 tabs 縮成 6（業主 → 案件子篩選）
+
 ## v3.3.1 ✅ 物理刪除 DEAD_BLOCK 純清理（2026-04-30）
 - [x] 9 個 DEAD_BLOCK 區塊整段從 app.js 物理移除（健檢、Sheet 容量、settings 收款帳號 v2 UI、Lab mode、裝置名稱輸入 UI、GPS、裝置名稱提醒、sheet sync toggle stubs、snapshot diff modal）
 - [x] 每塊換成單行 `// v3.3.1：xxx 已物理移除` 說明
