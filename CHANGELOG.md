@@ -1,5 +1,42 @@
 ﻿# 版本更新歷史
 
+## v3.8.0 — 提醒類型矩陣（每類自帶 2 channel）（2026-05-01）
+
+> 採方案 3：通知與提醒卡重做成「提醒類型矩陣」，每個類型獨立決定走哪些通道（桌面通知 / Google 行事曆）。Calendar 卡精簡為純技術設定（master toggle / 選日曆 / 早報時段）。
+
+### 通知與提醒卡 — 新矩陣 UI
+- 砍掉舊的 1-column reminder-grid + 「儲存」按鈕
+- 改成 grid 三欄：類型名稱（含天數參數） / 🖥️ 桌面 / 📅 Calendar
+- 9 個提醒類型 + 1 條分隔線：
+  - 1-7 桌面 + Calendar 雙通道（unpaidLong / monthEnd / billingDay / slowPay）或單通道（overdue / dueSoon / backup 只桌面）
+  - 8-9 Calendar-only（jobs 案件本身 / dailyMorning 每日早報摘要）
+- 每個 cell 用 ☑ checkbox 表示啟用、— 表示該通道不適用
+- 寬螢幕 1-line per 類型、窄螢幕 (<480px) 自動縮 cell 寬度
+
+### 全部 toggle / 數字輸入改 immediate save
+- 拿掉「儲存」按鈕（過去要按才生效，不直覺）
+- onAlertChannelToggle(key, channel) — 立即寫對應 config 欄
+- onAlertNumberChange(field, value) — 立即寫對應 config 數字欄、自動 clamp 到合法範圍
+- desktop channel 寫 `config.enable*Alert`、calendar channel 寫 `cloudCalendarConfig.syncTypes.*`（資料層保留 v2 結構，UI 層整合）
+
+### 行事曆同步卡精簡
+- 移除 Step 3「要同步哪些事件」整段（已搬到通知與提醒卡）
+- 在原位置加 hint：「💡 要同步哪些事件 → 在『🔔 通知與提醒』卡的『📅 Calendar』欄勾選」
+- cloudOnCalendarConfigChange 不再讀 syncTypes（只剩早報時段）
+- cloudRenderCalendarUI 不再 restore syncTypes，改 call loadReminderConfigUI 一併刷新
+- master toggle 切換時同步刷新 reminder card 的「📅 Calendar 欄需先啟用 master toggle」hint
+
+### 順手砍掉
+- 通知與提醒卡的 `cfg-alert-X` checkbox + `cfg-X-days` number 全套舊 ID（改 `alert-{key}-{channel}` 命名）
+- saveConfig 主邏輯（變成 stub，留給萬一漏網之魚）
+- toast「✓ 已儲存設定」不再彈出（immediate save 不需要）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.8.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.8.0`
+
+---
+
 ## v3.7.0 — Calendar 同步 UX 改造（2026-05-01）
 
 > 採方案 B + 兩件配套：保留兩張卡的清晰分工（Drive = 基礎、Calendar = 延伸），但 Calendar 卡頂端加 master toggle、登入後跳一次 prompt、移除自動 vs 手動。

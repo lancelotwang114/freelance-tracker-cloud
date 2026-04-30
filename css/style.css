@@ -1368,6 +1368,85 @@ input:focus, select:focus, textarea:focus {
   flex: 0 0 auto;
 }
 
+/* ==================== 提醒類型矩陣（v3.8.0：每類自帶 desktop + calendar 兩 channel）==================== */
+.alert-matrix {
+  display: grid;
+  grid-template-columns: 1fr 60px 80px;
+  gap: 2px 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.alert-matrix-header {
+  display: contents;
+}
+.alert-matrix-header > div {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.alert-matrix-header > div:first-child {
+  border-bottom: none;
+}
+.alert-matrix .alert-row {
+  display: contents;
+}
+.alert-matrix .alert-row > .alert-name {
+  background: var(--bg);
+  padding: 8px 10px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.alert-matrix .alert-cell {
+  text-align: center;
+  background: var(--bg);
+  padding: 8px 0;
+  border-radius: 6px;
+}
+.alert-matrix .alert-cell input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+.alert-matrix .alert-na {
+  color: var(--muted);
+  font-size: 14px;
+  user-select: none;
+}
+.alert-matrix .alert-config {
+  font-size: 12px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.alert-matrix .alert-config input[type="number"] {
+  max-width: 56px;
+  padding: 2px 5px;
+  font-size: 12px;
+  margin: 0;
+}
+.alert-matrix .alert-row--separator > .alert-name {
+  background: transparent;
+  padding: 8px 10px 4px;
+}
+/* 窄螢幕（< 480px）：把 cell 標題顯示在每個 checkbox 旁邊 */
+@media (max-width: 480px) {
+  .alert-matrix {
+    grid-template-columns: 1fr 50px 60px;
+    gap: 2px 4px;
+  }
+  .alert-matrix-header > div {
+    font-size: 10px;
+  }
+}
+
 /* ==================== Reminder 卡片 compact（v3.6.2 二次調整）==================== */
 .reminder-compact .reminder-row {
   background: var(--bg);

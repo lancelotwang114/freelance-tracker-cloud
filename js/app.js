@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.7.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.8.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2487,13 +2487,12 @@ function cloudRenderCalendarUI() {
   if (masterCb) masterCb.checked = !!cfg.enabled;
   cloudUpdateCalendarSectionVisibility(!!cfg.enabled);
 
-  // 還原 UI 狀態
+  // 還原早報時段
   const tEl = document.getElementById('cloud-cal-morning-time');
   if (tEl) tEl.value = cfg.dailyMorningTime || '09:30';
-  ['jobs', 'unpaidLong', 'monthEnd', 'billingDay', 'slowPay', 'dailyMorning'].forEach(k => {
-    const cb = document.getElementById('cloud-cal-sync-' + k);
-    if (cb) cb.checked = !!cfg.syncTypes[k];
-  });
+
+  // v3.8.0：syncTypes 已搬到「通知與提醒」卡的 Calendar channel 欄；也順手刷一下 reminder UI
+  if (typeof loadReminderConfigUI === 'function') loadReminderConfigUI();
 
   // 載入 calendar list（idempotent，已載入就直接顯示）
   cloudRefreshCalendarList();
@@ -2570,15 +2569,10 @@ function cloudOnCalendarPicked() {
 }
 
 function cloudOnCalendarConfigChange() {
+  // v3.8.0：syncTypes 已搬到 reminder card；這裡只處理早報時段
   const tEl = document.getElementById('cloud-cal-morning-time');
-  const syncTypes = {};
-  ['jobs', 'unpaidLong', 'monthEnd', 'billingDay', 'slowPay', 'dailyMorning'].forEach(k => {
-    const cb = document.getElementById('cloud-cal-sync-' + k);
-    syncTypes[k] = cb ? !!cb.checked : true;
-  });
   cloudSaveCalendarConfig({
-    dailyMorningTime: (tEl && tEl.value) || '09:30',
-    syncTypes
+    dailyMorningTime: (tEl && tEl.value) || '09:30'
   });
 }
 
@@ -2599,11 +2593,14 @@ function cloudOnCalendarEnabledToggle() {
 }
 
 // v3.7.0：依 enabled 狀態 toggle 行事曆設定區的可見度
+// v3.8.0：同步刷新 reminder card 的 Calendar 欄提示文字
 function cloudUpdateCalendarSectionVisibility(enabled) {
   const body = document.getElementById('cloud-cal-settings-body');
   if (body) body.classList.toggle('hidden', !enabled);
   const masterStatus = document.getElementById('cloud-cal-master-status');
   if (masterStatus) masterStatus.textContent = enabled ? '已啟用' : '未啟用';
+  const calHint = document.getElementById('alert-cal-disabled-hint');
+  if (calHint) calHint.classList.toggle('hidden', enabled);
 }
 
 function cloudRenderCalendarStatus() {
@@ -3070,40 +3067,86 @@ function saveConfigOnly() {
   if (typeof cloudScheduleCalendarSync === 'function') cloudScheduleCalendarSync();
 }
 
-function saveConfig() {
-  const g = (id) => document.getElementById(id);
-  config.unpaidRemindDays = Math.max(1, Math.min(120, +g('cfg-unpaid-days-input').value || 7));
-  config.dueSoonDays = Math.max(1, Math.min(30, +g('cfg-due-soon-days')?.value || 3));
-  config.monthEndReminderDay = Math.max(20, Math.min(31, +g('cfg-month-end-day')?.value || 25));
-  config.backupRemindDays = Math.max(1, Math.min(90, +g('cfg-backup-days-input')?.value || 14));
-  config.enableOverdueAlert = g('cfg-alert-overdue')?.checked !== false;
-  config.enableDueSoonAlert = g('cfg-alert-due-soon')?.checked !== false;
-  config.enableUnpaidLongAlert = g('cfg-alert-unpaid-long')?.checked !== false;
-  config.enableMonthEndAlert = g('cfg-alert-month-end')?.checked !== false;
-  config.enableBillingDayAlert = g('cfg-alert-billing-day')?.checked !== false;
-  config.enableSlowPayAlert = g('cfg-alert-slow-pay')?.checked !== false;
-  config.enableBackupAlert = g('cfg-alert-backup')?.checked !== false;  // v3.6.2
-  saveConfigOnly();  // v3.1.0-fix：之前直接寫 localStorage 沒推 Drive
-  render();
-  // Calendar 提醒提示文字（如果是 follow 模式，會跟著 dueSoonDays 變動）
-  if (typeof updateCalendarReminderHint === 'function') updateCalendarReminderHint();
-  toast('✓ 已儲存設定');
+// v3.8.0：alertKey → config 欄位 mapping（desktop channel 寫 config.enable*Alert）
+const ALERT_DESKTOP_FIELD = {
+  overdue: 'enableOverdueAlert',
+  dueSoon: 'enableDueSoonAlert',
+  unpaidLong: 'enableUnpaidLongAlert',
+  monthEnd: 'enableMonthEndAlert',
+  billingDay: 'enableBillingDayAlert',
+  slowPay: 'enableSlowPayAlert',
+  backup: 'enableBackupAlert'
+};
+
+// v3.8.0：使用者切某個提醒類型的某 channel → 立即存
+function onAlertChannelToggle(alertKey, channel) {
+  const cb = document.getElementById(`alert-${alertKey}-${channel}`);
+  if (!cb) return;
+  if (channel === 'desktop') {
+    const field = ALERT_DESKTOP_FIELD[alertKey];
+    if (!field) return;
+    config[field] = !!cb.checked;
+    saveConfigOnly();
+    render();
+  } else if (channel === 'calendar') {
+    const cur = (typeof cloudGetCalendarConfig === 'function') ? cloudGetCalendarConfig() : { syncTypes: {} };
+    cloudSaveCalendarConfig({
+      syncTypes: { ...(cur.syncTypes || {}), [alertKey]: !!cb.checked }
+    });
+    if (typeof cloudScheduleCalendarSync === 'function') cloudScheduleCalendarSync();
+  }
 }
 
-// 載入提醒設定 UI
+// v3.8.0：使用者改某個提醒類型的天數參數 → 立即存
+function onAlertNumberChange(configField, value) {
+  const v = +value;
+  if (Number.isNaN(v)) return;
+  const limits = {
+    dueSoonDays: [1, 30],
+    unpaidRemindDays: [1, 120],
+    monthEndReminderDay: [20, 31],
+    backupRemindDays: [1, 90]
+  };
+  const [min, max] = limits[configField] || [1, 365];
+  config[configField] = Math.max(min, Math.min(max, v));
+  saveConfigOnly();
+  render();
+  if (typeof updateCalendarReminderHint === 'function') updateCalendarReminderHint();
+}
+
+// v3.8.0：saveConfig 改成 stub（所有 toggle 已改 immediate save）
+function saveConfig() {
+  saveConfigOnly();
+  render();
+  if (typeof updateCalendarReminderHint === 'function') updateCalendarReminderHint();
+}
+
+// 載入提醒設定 UI（v3.8.0：新 ID 結構 alert-{key}-{channel} + Calendar channel 從 syncTypes 讀）
 function loadReminderConfigUI() {
   const g = (id) => document.getElementById(id);
-  if (g('cfg-unpaid-days-input')) g('cfg-unpaid-days-input').value = config.unpaidRemindDays || 7;
-  if (g('cfg-due-soon-days')) g('cfg-due-soon-days').value = config.dueSoonDays || 3;
-  if (g('cfg-month-end-day')) g('cfg-month-end-day').value = config.monthEndReminderDay || 25;
-  if (g('cfg-backup-days-input')) g('cfg-backup-days-input').value = config.backupRemindDays || 14;
-  if (g('cfg-alert-overdue')) g('cfg-alert-overdue').checked = config.enableOverdueAlert !== false;
-  if (g('cfg-alert-due-soon')) g('cfg-alert-due-soon').checked = config.enableDueSoonAlert !== false;
-  if (g('cfg-alert-unpaid-long')) g('cfg-alert-unpaid-long').checked = config.enableUnpaidLongAlert !== false;
-  if (g('cfg-alert-month-end')) g('cfg-alert-month-end').checked = config.enableMonthEndAlert !== false;
-  if (g('cfg-alert-billing-day')) g('cfg-alert-billing-day').checked = config.enableBillingDayAlert !== false;
-  if (g('cfg-alert-slow-pay')) g('cfg-alert-slow-pay').checked = config.enableSlowPayAlert !== false;
-  if (g('cfg-alert-backup')) g('cfg-alert-backup').checked = config.enableBackupAlert !== false;  // v3.6.2
+  // 數字欄位
+  if (g('alert-dueSoon-days')) g('alert-dueSoon-days').value = config.dueSoonDays || 3;
+  if (g('alert-unpaidLong-days')) g('alert-unpaidLong-days').value = config.unpaidRemindDays || 7;
+  if (g('alert-monthEnd-day')) g('alert-monthEnd-day').value = config.monthEndReminderDay || 25;
+  if (g('alert-backup-days')) g('alert-backup-days').value = config.backupRemindDays || 14;
+  // Desktop channel
+  if (g('alert-overdue-desktop')) g('alert-overdue-desktop').checked = config.enableOverdueAlert !== false;
+  if (g('alert-dueSoon-desktop')) g('alert-dueSoon-desktop').checked = config.enableDueSoonAlert !== false;
+  if (g('alert-unpaidLong-desktop')) g('alert-unpaidLong-desktop').checked = config.enableUnpaidLongAlert !== false;
+  if (g('alert-monthEnd-desktop')) g('alert-monthEnd-desktop').checked = config.enableMonthEndAlert !== false;
+  if (g('alert-billingDay-desktop')) g('alert-billingDay-desktop').checked = config.enableBillingDayAlert !== false;
+  if (g('alert-slowPay-desktop')) g('alert-slowPay-desktop').checked = config.enableSlowPayAlert !== false;
+  if (g('alert-backup-desktop')) g('alert-backup-desktop').checked = config.enableBackupAlert !== false;
+  // Calendar channel（讀 cloudCalendarConfig.syncTypes）
+  const calCfg = (typeof cloudGetCalendarConfig === 'function') ? cloudGetCalendarConfig() : { syncTypes: {} };
+  const t = calCfg.syncTypes || {};
+  ['unpaidLong', 'monthEnd', 'billingDay', 'slowPay', 'jobs', 'dailyMorning'].forEach(k => {
+    const el = g('alert-' + k + '-calendar');
+    if (el) el.checked = t[k] !== false;
+  });
+  // 提示「Calendar 欄需要先啟用 master toggle」
+  const hint = g('alert-cal-disabled-hint');
+  if (hint) hint.classList.toggle('hidden', !!calCfg.enabled);
 }
 
 // ============== Utilities ==============

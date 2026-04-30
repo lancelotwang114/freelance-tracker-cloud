@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.7.0">
+<meta name="app-version" content="2026-05-01-v3.8.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -490,14 +490,14 @@
         <span class="card-status">桌面通知 + 提醒項目</span>
         <span class="toggle-arrow">▼</span>
       </div>
-      <!-- v3.6.2：欄位再縮窄、改 grid 自適應分欄、備份加 checkbox、通知 denied 引導改善 -->
+      <!-- v3.8.0：提醒類型矩陣（每類自帶 desktop + calendar 兩 channel toggle） -->
+      <!-- 取消「儲存」按鈕，所有 toggle 改 immediate save -->
       <div class="card-body reminder-compact">
 
-        <!-- 瀏覽器桌面通知 -->
+        <!-- 桌面通知狀態（瀏覽器權限） -->
         <div class="reminder-row reminder-row--full">
           <label style="font-size: 13px; font-weight: 600;">🖥️ 瀏覽器桌面通知</label>
           <div id="notif-status" class="reminder-hint" style="background: var(--card); padding: 4px 8px; border-radius: 6px; margin-top: 4px;"></div>
-          <!-- v3.6.2：denied 狀態下顯示瀏覽器設定步驟 -->
           <div id="notif-denied-help" class="reminder-hint hidden" style="margin-top: 6px; padding: 8px; background: var(--warning-light); color: var(--warning); border-radius: 6px; font-size: 12px; line-height: 1.5;">
             ⚠️ 瀏覽器已記住「拒絕」，JS 沒辦法再叫對話框跳出來。要重新啟用：<br>
             <b>Chrome / Edge</b>：點網址列左邊的鎖頭 🔒 → 「網站設定」→ 把「通知」改成「允許」<br>
@@ -511,83 +511,102 @@
           </div>
         </div>
 
-        <p class="reminder-hint" style="margin: 8px 0;">每種提醒可獨立啟用/關閉、調整天數。業主層級可在業主編輯頁覆寫。</p>
+        <p class="reminder-hint" style="margin: 12px 0 6px;">
+          每個提醒類型可獨立決定要走哪個通道（桌面通知 / Google 行事曆）。
+          <span id="alert-cal-disabled-hint" class="hidden" style="color: var(--warning);">📅 欄位需先在下方「行事曆同步」啟用 master toggle</span>
+        </p>
 
-        <!-- v3.6.2：用 grid auto-fit 分欄，wide 螢幕 2-3 欄、窄螢幕 1 欄 -->
-        <div class="reminder-grid">
-
-          <div class="reminder-row">
-            <label class="checkbox-row" style="margin: 0;">
-              <input type="checkbox" id="cfg-alert-overdue">
-              <span>🔴 逾期未完成</span>
-            </label>
+        <!-- 提醒類型矩陣 -->
+        <div class="alert-matrix">
+          <div class="alert-matrix-header">
+            <div></div>
+            <div title="瀏覽器桌面通知（每天首次開頁推一次）">🖥️ 桌面</div>
+            <div title="Google 行事曆事件（要先在下方啟用同步）">📅 Calendar</div>
           </div>
 
-          <div class="reminder-row">
-            <label class="checkbox-row" style="margin: 0;">
-              <input type="checkbox" id="cfg-alert-due-soon">
-              <span>🟡 即將到期</span>
-            </label>
-            <div class="reminder-inline">
-              <span>提前</span>
-              <input type="number" id="cfg-due-soon-days" min="1" max="30" value="3">
-              <span>天</span>
+          <!-- 1. 逾期未完成（只有桌面） -->
+          <div class="alert-row">
+            <div class="alert-name">🔴 逾期未完成</div>
+            <div class="alert-cell"><input type="checkbox" id="alert-overdue-desktop" onchange="onAlertChannelToggle('overdue','desktop')"></div>
+            <div class="alert-cell alert-na">—</div>
+          </div>
+
+          <!-- 2. 即將到期（只有桌面 + 提前天數） -->
+          <div class="alert-row">
+            <div class="alert-name">
+              🟡 即將到期
+              <span class="alert-config">提前 <input type="number" id="alert-dueSoon-days" min="1" max="30" value="3" onchange="onAlertNumberChange('dueSoonDays', this.value)"> 天</span>
             </div>
+            <div class="alert-cell"><input type="checkbox" id="alert-dueSoon-desktop" onchange="onAlertChannelToggle('dueSoon','desktop')"></div>
+            <div class="alert-cell alert-na">—</div>
           </div>
 
-          <div class="reminder-row">
-            <label class="checkbox-row" style="margin: 0;">
-              <input type="checkbox" id="cfg-alert-unpaid-long">
-              <span>🟠 完成已久未收款</span>
-            </label>
-            <div class="reminder-inline">
-              <span>超過</span>
-              <input type="number" id="cfg-unpaid-days-input" min="1" max="120" value="7">
-              <span>天</span>
+          <!-- 3. 完成已久未收款（兩通道 + 天數） -->
+          <div class="alert-row">
+            <div class="alert-name">
+              🟠 完成已久未收款
+              <span class="alert-config">超過 <input type="number" id="alert-unpaidLong-days" min="1" max="120" value="7" onchange="onAlertNumberChange('unpaidRemindDays', this.value)"> 天</span>
             </div>
+            <div class="alert-cell"><input type="checkbox" id="alert-unpaidLong-desktop" onchange="onAlertChannelToggle('unpaidLong','desktop')"></div>
+            <div class="alert-cell"><input type="checkbox" id="alert-unpaidLong-calendar" onchange="onAlertChannelToggle('unpaidLong','calendar')"></div>
           </div>
 
-          <div class="reminder-row">
-            <label class="checkbox-row" style="margin: 0;">
-              <input type="checkbox" id="cfg-alert-month-end">
-              <span>📅 月底提醒</span>
-            </label>
-            <div class="reminder-inline">
-              <span>每月</span>
-              <input type="number" id="cfg-month-end-day" min="20" max="31" value="25">
-              <span>號後</span>
+          <!-- 4. 月底提醒（兩通道 + 日期） -->
+          <div class="alert-row">
+            <div class="alert-name">
+              📅 月底提醒
+              <span class="alert-config">每月 <input type="number" id="alert-monthEnd-day" min="20" max="31" value="25" onchange="onAlertNumberChange('monthEndReminderDay', this.value)"> 號後</span>
             </div>
+            <div class="alert-cell"><input type="checkbox" id="alert-monthEnd-desktop" onchange="onAlertChannelToggle('monthEnd','desktop')"></div>
+            <div class="alert-cell"><input type="checkbox" id="alert-monthEnd-calendar" onchange="onAlertChannelToggle('monthEnd','calendar')"></div>
           </div>
 
-          <div class="reminder-row">
-            <label class="checkbox-row" style="margin: 0;">
-              <input type="checkbox" id="cfg-alert-billing-day">
-              <span>💼 業主固定請款日</span>
-            </label>
+          <!-- 5. 業主固定請款日（兩通道） -->
+          <div class="alert-row">
+            <div class="alert-name">💼 業主固定請款日</div>
+            <div class="alert-cell"><input type="checkbox" id="alert-billingDay-desktop" onchange="onAlertChannelToggle('billingDay','desktop')"></div>
+            <div class="alert-cell"><input type="checkbox" id="alert-billingDay-calendar" onchange="onAlertChannelToggle('billingDay','calendar')"></div>
           </div>
 
-          <div class="reminder-row">
-            <label class="checkbox-row" style="margin: 0;">
-              <input type="checkbox" id="cfg-alert-slow-pay">
-              <span>⏱️ 智慧拖款警告</span>
-            </label>
+          <!-- 6. 智慧拖款警告（兩通道） -->
+          <div class="alert-row">
+            <div class="alert-name">⏱️ 智慧拖款警告</div>
+            <div class="alert-cell"><input type="checkbox" id="alert-slowPay-desktop" onchange="onAlertChannelToggle('slowPay','desktop')"></div>
+            <div class="alert-cell"><input type="checkbox" id="alert-slowPay-calendar" onchange="onAlertChannelToggle('slowPay','calendar')"></div>
           </div>
 
-          <div class="reminder-row">
-            <label class="checkbox-row" style="margin: 0;">
-              <input type="checkbox" id="cfg-alert-backup">
-              <span>💾 備份提醒</span>
-            </label>
-            <div class="reminder-inline">
-              <span>超過</span>
-              <input type="number" id="cfg-backup-days-input" min="1" max="90" value="14">
-              <span>天</span>
+          <!-- 7. 備份提醒（只有桌面 + 天數） -->
+          <div class="alert-row">
+            <div class="alert-name">
+              💾 備份提醒
+              <span class="alert-config">超過 <input type="number" id="alert-backup-days" min="1" max="90" value="14" onchange="onAlertNumberChange('backupRemindDays', this.value)"> 天</span>
             </div>
+            <div class="alert-cell"><input type="checkbox" id="alert-backup-desktop" onchange="onAlertChannelToggle('backup','desktop')"></div>
+            <div class="alert-cell alert-na">—</div>
+          </div>
+
+          <!-- 分隔（Calendar-only 事件） -->
+          <div class="alert-row alert-row--separator">
+            <div class="alert-name reminder-hint" style="font-style: italic;">— 以下只在 Calendar 同步 —</div>
+            <div class="alert-cell"></div>
+            <div class="alert-cell"></div>
+          </div>
+
+          <!-- 8. 案件本身（只有 Calendar） -->
+          <div class="alert-row">
+            <div class="alert-name">📋 案件本身（含取消的）</div>
+            <div class="alert-cell alert-na">—</div>
+            <div class="alert-cell"><input type="checkbox" id="alert-jobs-calendar" onchange="onAlertChannelToggle('jobs','calendar')"></div>
+          </div>
+
+          <!-- 9. 每日早報摘要（只有 Calendar） -->
+          <div class="alert-row">
+            <div class="alert-name">🌅 每日早報摘要</div>
+            <div class="alert-cell alert-na">—</div>
+            <div class="alert-cell"><input type="checkbox" id="alert-dailyMorning-calendar" onchange="onAlertChannelToggle('dailyMorning','calendar')"></div>
           </div>
 
         </div>
-
-        <button class="btn btn-primary btn-sm" style="margin-top: 10px;" onclick="saveConfig()">儲存</button>
       </div>
     </div>
 
@@ -667,18 +686,8 @@
             </div>
           </div>
 
-          <!-- Step 3：要同步哪些事件 -->
-          <div class="cal-step">
-            <label class="cal-step-label">③ 要同步哪些事件</label>
-            <div class="cal-sync-grid">
-              <label><input type="checkbox" id="cloud-cal-sync-jobs" onchange="cloudOnCalendarConfigChange()" checked> 案件本身</label>
-              <label><input type="checkbox" id="cloud-cal-sync-unpaidLong" onchange="cloudOnCalendarConfigChange()" checked> 完成未收款提醒</label>
-              <label><input type="checkbox" id="cloud-cal-sync-monthEnd" onchange="cloudOnCalendarConfigChange()" checked> 月底提醒</label>
-              <label><input type="checkbox" id="cloud-cal-sync-billingDay" onchange="cloudOnCalendarConfigChange()" checked> 業主請款日提醒</label>
-              <label><input type="checkbox" id="cloud-cal-sync-slowPay" onchange="cloudOnCalendarConfigChange()" checked> 智慧拖款警告</label>
-              <label><input type="checkbox" id="cloud-cal-sync-dailyMorning" onchange="cloudOnCalendarConfigChange()" checked> 每日早報摘要</label>
-            </div>
-          </div>
+          <!-- v3.8.0：「要同步哪些事件」勾選已搬到「通知與提醒」卡的提醒類型矩陣 Calendar 欄 -->
+          <p class="cal-hint" style="margin: 6px 0;">💡 要同步哪些事件 → 在「🔔 通知與提醒」卡的「📅 Calendar」欄勾選</p>
 
           <!-- 同步狀態 + 立即同步 -->
           <div id="cloud-cal-sync-status" class="cal-hint" style="margin-top: 8px;">

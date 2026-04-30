@@ -2,6 +2,14 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.8.0 ✅ 提醒類型矩陣（每類自帶 2 channel）（2026-05-01）
+- [x] 通知與提醒卡重做成 9 列 × 2 通道矩陣
+- [x] 全部 toggle / 數字輸入改 immediate save（拿掉儲存按鈕）
+- [x] Calendar 卡 Step 3「要同步哪些事件」搬到 reminder card
+- [x] cloudOnCalendarConfigChange 不再讀 syncTypes
+- [x] CSS alert-matrix grid（窄螢幕自適應）
+- [x] bump 三處版本號 → `2026-05-01-v3.8.0` / `ftracker-cloud-v3.8.0`
+
 ## v3.7.0 ✅ Calendar 同步 UX 改造（2026-05-01）
 - [x] Calendar 卡頂端加 master toggle（OFF 時整個設定區隱藏）
 - [x] 登入後跳一次 prompt 介紹 Calendar 同步（`#cal-prompt-modal`）
