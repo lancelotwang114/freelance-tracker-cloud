@@ -389,15 +389,29 @@ class DriveAuthError extends Error {
 }
 
 // 內部 helper：包裝 fetch，自動附 Authorization header、統一錯誤訊息
+// v3.1.0：除了 Drive API、Calendar API 也共用此 wrapper，所以錯誤標籤改為 generic「Google API」
 async function driveFetch(url, options = {}) {
   const token = getValidAccessToken();
   if (!token) throw new DriveAuthError('未登入 Google 或 access token 已過期，請先登入');
   const headers = new Headers(options.headers || {});
   headers.set('Authorization', 'Bearer ' + token);
   const r = await fetch(url, { ...options, headers });
-  if (r.status === 401) throw new DriveAuthError('access token 已失效，請重新登入');
+  if (r.status === 401) throw new DriveAuthError('access token 已失效或缺少新 scope，請登出再登入');
+  if (r.status === 403) {
+    // 403 通常是 API 在 GCP 沒啟用、或 quota 超過。Google 的錯誤訊息含啟用連結，直接傳給 caller
+    let msg = 'Google API 403：權限不足或 API 未啟用';
+    try {
+      const errBody = await r.json();
+      if (errBody && errBody.error && errBody.error.message) msg = errBody.error.message;
+    } catch (_) {}
+    throw new Error(msg);
+  }
   if (!r.ok) {
-    let msg = `Drive API ${r.status}`;
+    // 推測是哪個 API（從 URL 判斷）讓錯誤訊息更精準
+    let apiLabel = 'Google API';
+    if (url.includes('drive.google')) apiLabel = 'Drive API';
+    else if (url.includes('calendar/v3') || url.includes('calendarList')) apiLabel = 'Calendar API';
+    let msg = `${apiLabel} ${r.status}`;
     try {
       const errBody = await r.json();
       if (errBody && errBody.error && errBody.error.message) msg += `: ${errBody.error.message}`;
@@ -2472,7 +2486,25 @@ async function cloudRefreshCalendarList() {
   } catch (e) {
     console.error('[calendar] list calendars failed:', e);
     sel.innerHTML = '<option value="">（載入失敗，請刷新）</option>';
-    toast('載入日曆清單失敗：' + e.message);
+    // 偵測「Calendar API 未啟用」錯誤 → 給更清楚的引導
+    const msg = e.message || '';
+    if (msg.includes('Calendar API has not been used') || msg.includes('not been used in project')) {
+      const link = msg.match(/https:\/\/console\.developers\.google\.com[^\s]+/);
+      const linkUrl = link ? link[0] : 'https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview';
+      alert(
+        '⚠️ Google Calendar API 尚未在 GCP 專案啟用\n\n' +
+        '解法（30 秒）：\n' +
+        '1. 點下方連結（會帶到 GCP Console）\n' +
+        '2. 按右上角「啟用 (Enable)」\n' +
+        '3. 等 1~2 分鐘 propagate\n' +
+        '4. 回來按「🔄 重新整理」\n\n' +
+        linkUrl
+      );
+    } else if (msg.includes('access token') || e instanceof DriveAuthError) {
+      alert('登入 token 缺少 Calendar 權限\n\n請登出 → 重新登入（彈窗會多列出 Calendar 權限請求，要勾「允許」）');
+    } else {
+      toast('載入日曆清單失敗：' + msg);
+    }
   }
 }
 
@@ -7685,6 +7717,11 @@ function renderPaymentAccountsUI() {
       </div>
     </div>
   `).join('');
+  // v3.1.0-fix：renderPaymentAccountsUI 渲染完立刻 hydrate，不然 settings 頁的 placeholder 不會被換掉
+  // （renderAll 結尾雖然有叫 hydrate，但 saveUserInfo / addPaymentAccount / removePaymentAccount 不會跑 renderAll）
+  if (typeof cloudHydrateBankbookImages === 'function') {
+    cloudHydrateBankbookImages().catch(e => console.warn('[bankbook] hydrate after renderPaymentAccountsUI failed:', e));
+  }
 }
 
 function addPaymentAccount() {
