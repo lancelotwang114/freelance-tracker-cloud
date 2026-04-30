@@ -2,6 +2,15 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.6.1 ✅ Demo bug + UI 調整（2026-04-30）
+- [x] 修：loadDemo 補 payments[]（已收款 4500 不再被算進待收款）
+- [x] loadDemo 同步建一筆業主收款帳號（個人 / 王小明 / 玉山）
+- [x] 收益範圍 label 視覺分組（label+select 包成 chip）
+- [x] 通知與提醒卡片整體縮小（reminder-compact CSS、密度提高）
+- [x] 設定頁拿掉常用/進階分類、雲端備份歷史搬到最下面
+- [x] 強制刷新 icon 從 🔄 換成 ↻、右上 icon 統一 18px 放大
+- [x] bump 三處版本號 → `2026-04-30-v3.6.1` / `ftracker-cloud-v3.6.1`
+
 ## v3.6.0 ✅ UI 簡化第二輪（2026-04-30）
 - [x] 砍設定頁「🌗 顯示主題」卡（跟 top bar 重複）
 - [x] 全域搜尋列改 collapsible（top bar 加 🔍 按鈕、Esc 關閉）

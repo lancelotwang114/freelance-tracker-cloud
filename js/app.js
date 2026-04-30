@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-30-v3.6.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-30-v3.6.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -8100,19 +8100,52 @@ function loadDemo() {
   const m = thisMonth();
   const today = todayStr();
   state.jobs = [
-    // 已收款
-    { id: uid(), clientId: c1, date: m+'-03', title: 'FB 廣告 banner 5 張', details: '1080x1080，含兩次修改', amount: 4500, done: true, paid: true, doneAt: m+'-05', paidAt: m+'-10' },
+    // 已收款（v3.6.1：payments[] 才是 source of truth，paid 旗標只是 mirror）
+    { id: uid(), clientId: c1, date: m+'-03', title: 'FB 廣告 banner 5 張', details: '1080x1080，含兩次修改', amount: 4500, quantity: 1, done: true, paid: true, doneAt: m+'-05', paidAt: m+'-10',
+      payments: [{ id: uid(), date: m+'-10', amount: 4500, note: '範例收款' }] },
     // 完成未收款（超過 7 天 → 會觸發提醒）
-    { id: uid(), clientId: c1, date: m+'-12', title: '官網首頁改版', details: '首頁 + 3 內頁', amount: 18000, done: true, paid: false, doneAt: addDays(new Date(), -10), paidAt: null },
+    { id: uid(), clientId: c1, date: m+'-12', title: '官網首頁改版', details: '首頁 + 3 內頁', amount: 18000, quantity: 1, done: true, paid: false, doneAt: addDays(new Date(), -10), paidAt: null,
+      payments: [] },
     // 剛完成待收款
-    { id: uid(), clientId: c2, date: m+'-08', title: '產品攝影後製', details: '15 張', amount: 3000, done: true, paid: false, doneAt: addDays(new Date(), -2), paidAt: null },
+    { id: uid(), clientId: c2, date: m+'-08', title: '產品攝影後製', details: '15 張', amount: 3000, quantity: 1, done: true, paid: false, doneAt: addDays(new Date(), -2), paidAt: null,
+      payments: [] },
     // 進行中（未來）
-    { id: uid(), clientId: c2, date: addDays(new Date(), 2), title: 'EDM 設計', details: '春季促銷 EDM', amount: 2500, done: false, paid: false, doneAt: null, paidAt: null },
+    { id: uid(), clientId: c2, date: addDays(new Date(), 2), title: 'EDM 設計', details: '春季促銷 EDM', amount: 2500, quantity: 1, done: false, paid: false, doneAt: null, paidAt: null,
+      payments: [] },
     // 逾期未完成
-    { id: uid(), clientId: c3, date: addDays(new Date(), -3), title: '形象動畫', details: '30 秒片頭', amount: 12000, done: false, paid: false, doneAt: null, paidAt: null },
+    { id: uid(), clientId: c3, date: addDays(new Date(), -3), title: '形象動畫', details: '30 秒片頭', amount: 12000, quantity: 1, done: false, paid: false, doneAt: null, paidAt: null,
+      payments: [] },
     // 未來案件
-    { id: uid(), clientId: c3, date: addDays(new Date(), 10), title: 'Logo 優化', details: '主視覺調整', amount: 5000, done: false, paid: false, doneAt: null, paidAt: null },
+    { id: uid(), clientId: c3, date: addDays(new Date(), 10), title: 'Logo 優化', details: '主視覺調整', amount: 5000, quantity: 1, done: false, paid: false, doneAt: null, paidAt: null,
+      payments: [] },
   ];
+
+  // v3.6.1：載入範例時也建一筆收款帳號，請款單分頁立刻可用（避免空狀態看不到範例）
+  config.userInfo = config.userInfo || {};
+  const pa1 = uid();
+  config.userInfo.paymentAccounts = [{
+    id: pa1,
+    label: '個人',
+    holderName: '王小明',
+    bank: '玉山銀行 (808)',
+    account: '0000-000-000000',
+    note: '請註明案件名稱',
+    bankbookImage: '',
+    bankbookImageFileId: '',
+    name: '王小明',
+    phone: '0912-000-000',
+    email: 'demo@example.com',
+    invoiceTitle: '',
+    taxId: '',
+    address: '',
+    invoiceNote: '',
+    showPersonalInfo: true,
+    showPersonalInfoOnTop: false,
+    showInvoiceInfo: false
+  }];
+  config.userInfo.selectedPaymentAccountId = pa1;
+  saveConfigOnly();
+
   logAction('data-load-demo', { clients: state.clients.length, jobs: state.jobs.length });
   save(); renderAll(); toast('✓ 已載入範例');
 }

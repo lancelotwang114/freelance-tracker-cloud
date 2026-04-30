@@ -1,5 +1,49 @@
 ﻿# 版本更新歷史
 
+## v3.6.1 — Demo bug + UI 調整（2026-04-30）
+
+### Bug：載入範例後本月待收款被多算 4500
+- 範例資料設了 `paid: true` 但沒寫 `payments[]` 陣列
+- 自 v2.8.0 起所有「已收款」相關計算改吃 payments[]，沒陣列等於沒收過
+- 結果：第一筆 4500 範例被算進「待收款」、本月已收款顯示 0
+- 修：loadDemo() 為已收款案件補上對應 payments 條目，所有未收的也補空陣列、quantity=1
+- 已驗證 jobUnpaidAmount / jobPaidTotal / jobIsFullyPaid / jobFinalAmount / Dashboard / Revenue 計算邏輯本身正確，bug 純粹是 demo 資料層
+
+### Demo 加業主收款帳號
+- loadDemo() 同步寫一筆 `config.userInfo.paymentAccounts`（個人 / 王小明 / 玉山銀行範例）
+- selectedPaymentAccountId 也設定好
+- 載入範例後直接到請款單分頁就能產出範例請款單，不必先去設定收款帳號
+
+### 收益分頁「範圍」label 視覺分組
+- 原本「月度|年度 toggle」+「範圍」label +「業主」label 全部 flex 平鋪，看起來「範圍」黏在 toggle 上
+- 改用 `<label class="rev-control-group">` 把 label + select 包成一組
+- 加 `.rev-control-group` CSS：淡背景 + 圓角，視覺成獨立 chip
+
+### 通知與提醒卡片整體縮小
+- 加 `.reminder-compact` 系列 CSS（reminder-row / reminder-list / reminder-inline / reminder-hint）
+- padding 12px → 6-8px、gap 10px → 4px、字 13-14px → 12-13px
+- input[type=number] 縮小：max-width 80px → 64px、font 12px
+- 文字縮短：「逾期未完成（過了案件日期還沒勾完成）」→「逾期未完成」（多餘解釋砍）
+- 按鈕「💾 儲存」→「儲存」、「🧪 試發一則」→「試發一則」
+- 整體卡高度大概減 30-35%
+
+### 設定頁順序重整
+- 移除「🌟 常用設定」「🔧 進階設定」section title — 對個人使用情境意義不大
+- 「📦 雲端備份歷史」從 Drive 同步底下搬到設定頁最下面
+- 新順序：Drive 同步 → 我的收款資訊 → 通知與提醒 → 資料備份 → Google 行事曆同步 → 雲端備份歷史
+
+### Top bar icon 改進
+- 強制刷新 icon 從 🔄 換成 ↻（U+21BB，看起來更像「重新整理」而非「同步循環」）
+- title 從「強制刷新」改成「重新整理（清除所有快取、Service Worker、Cookie）」
+- 加 `.topbar-icon-btn` CSS：font-size 14 → 18、padding 6/10 → 6/11
+- hover 加邊框變主色 + 背景變淡的視覺回饋
+
+### 版本 bump
+- APP_VERSION → `2026-04-30-v3.6.1`
+- SW CACHE_VERSION → `ftracker-cloud-v3.6.1`
+
+---
+
 ## v3.6.0 — UI 簡化第二輪（2026-04-30）
 
 > 4 個改動：砍設定頁主題卡、全域搜尋列收 collapsible、Dashboard stat 卡可點跳轉、第一次使用顯示引導 empty state。Task 6/7（緊湊模式 / 行事曆 legend）暫緩。
