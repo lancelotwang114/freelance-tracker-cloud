@@ -6396,7 +6396,7 @@ function onInvPayAccountChange() {
   drawInvoice();
 }
 
-// v3.2.0-ui：外層「個人資訊 toggle」改變 → 寫入目前選定的 paymentAccount
+// v3.2.0-ui：外層 toggle 改變 → 寫入目前選定的 paymentAccount（含個人 + 發票）
 function onInvShowPersonalChange() {
   ensurePaymentAccounts();
   const id = (config.userInfo && config.userInfo.selectedPaymentAccountId) || '';
@@ -6408,24 +6408,29 @@ function onInvShowPersonalChange() {
   }
   const cb1 = document.getElementById('inv-show-personal');
   const cb2 = document.getElementById('inv-show-personal-top');
+  const cb3 = document.getElementById('inv-show-invoice');
   if (cb1) acct.showPersonalInfo = !!cb1.checked;
   if (cb2) acct.showPersonalInfoOnTop = !!cb2.checked;
+  if (cb3) acct.showInvoiceInfo = !!cb3.checked;
   saveConfigOnly();
   drawInvoice();
 }
 
-// v3.2.0-ui：從目前選定的 paymentAccount 讀回 showPersonalInfo / showPersonalInfoOnTop 套到 toggle UI
+// v3.2.0-ui：從目前選定的 paymentAccount 讀回 3 個 flag 套到 toggle UI
 function syncInvShowPersonalToggles() {
   const id = (config.userInfo && config.userInfo.selectedPaymentAccountId) || '';
   const list = (config.userInfo && config.userInfo.paymentAccounts) || [];
   const acct = list.find(a => a.id === id);
   const cb1 = document.getElementById('inv-show-personal');
   const cb2 = document.getElementById('inv-show-personal-top');
+  const cb3 = document.getElementById('inv-show-invoice');
   if (cb1) cb1.checked = acct ? (acct.showPersonalInfo !== false) : true;
   if (cb2) cb2.checked = acct ? !!acct.showPersonalInfoOnTop : false;
-  // 若沒帳號 → 兩個 toggle disabled
+  if (cb3) cb3.checked = acct ? !!acct.showInvoiceInfo : false;
+  // 若沒帳號 → 全部 toggle disabled
   if (cb1) cb1.disabled = !acct;
   if (cb2) cb2.disabled = !acct;
+  if (cb3) cb3.disabled = !acct;
 }
 
 // v3.2.0：拿目前在請款單下拉選的收款帳號 id
@@ -6442,12 +6447,15 @@ function openPaymentAccountEditor(id) {
   document.getElementById('payment-account-editor-title').textContent = acct ? '編輯收款帳號' : '新增收款帳號';
   document.getElementById('pae-id').value = acct ? acct.id : '';
   document.getElementById('pae-label').value = acct ? (acct.label || '') : '';
-  // v3.2.0-ui：showPersonalInfo / showPersonalInfoOnTop 兩個 toggle 已搬到請款單外層
-  // modal 內不再讀寫這兩個欄位；存檔時直接保留 acct 既有值（編輯）或預設值（新增）
-  // 暫存 acct 既有值供 save 使用
+  // v3.2.0-ui：showPersonalInfo / showPersonalInfoOnTop / showInvoiceInfo 三個 toggle 已搬到請款單外層
+  // modal 內不再讀寫；存檔時直接保留 acct 既有值（編輯）或預設值（新增）
   window._paePending = acct
-    ? { showPersonalInfo: acct.showPersonalInfo !== false, showPersonalInfoOnTop: !!acct.showPersonalInfoOnTop }
-    : { showPersonalInfo: true, showPersonalInfoOnTop: false };
+    ? {
+        showPersonalInfo: acct.showPersonalInfo !== false,
+        showPersonalInfoOnTop: !!acct.showPersonalInfoOnTop,
+        showInvoiceInfo: !!acct.showInvoiceInfo
+      }
+    : { showPersonalInfo: true, showPersonalInfoOnTop: false, showInvoiceInfo: false };
   document.getElementById('pae-name').value = acct ? (acct.name || '') : '';
   document.getElementById('pae-phone').value = acct ? (acct.phone || '') : '';
   document.getElementById('pae-email').value = acct ? (acct.email || '') : '';
@@ -6478,6 +6486,7 @@ function savePaymentAccountEditor() {
     // v3.2.0-ui：toggle 已搬出 modal；用暫存的既有值（編輯）或預設（新增）
     showPersonalInfo: (window._paePending && typeof window._paePending.showPersonalInfo === 'boolean') ? window._paePending.showPersonalInfo : true,
     showPersonalInfoOnTop: (window._paePending && typeof window._paePending.showPersonalInfoOnTop === 'boolean') ? window._paePending.showPersonalInfoOnTop : false,
+    showInvoiceInfo: (window._paePending && typeof window._paePending.showInvoiceInfo === 'boolean') ? window._paePending.showInvoiceInfo : false,
     name: document.getElementById('pae-name').value.trim(),
     phone: document.getElementById('pae-phone').value.trim(),
     email: document.getElementById('pae-email').value.trim(),
@@ -6801,9 +6810,10 @@ function drawInvoice() {
   };
   const showPersonal = !activeAcct || activeAcct.showPersonalInfo !== false;     // 預設 true（底部 3 欄會顯示個人欄）
   const showPersonalOnTop = !!(activeAcct && activeAcct.showPersonalInfoOnTop);   // 預設 false（不在頂端顯示，避免請款單太長）
+  const showInvoice = !!(activeAcct && activeAcct.showInvoiceInfo);                // 預設 false（個人接案者不開發票）
   const hasPersonalInfo = showPersonal && (aPersonal.name || aPersonal.phone || aPersonal.email);
   const hasPayInfo = !!(activeAcct && (activeAcct.bank || activeAcct.account));
-  const hasInvoiceInfo = !!(aPersonal.invoiceTitle || aPersonal.taxId || aPersonal.address || aPersonal.invoiceNote);
+  const hasInvoiceInfo = showInvoice && (aPersonal.invoiceTitle || aPersonal.taxId || aPersonal.address || aPersonal.invoiceNote);
 
   // 頂端精簡個人資訊（1 行 inline 形式，可選）
   const topPersonalParts = [];
@@ -7826,6 +7836,8 @@ function ensurePaymentAccounts() {
     if (a.showPersonalInfo == null) a.showPersonalInfo = true;
     // v3.2.0-fix：新增「也在頂端精簡顯示」flag，預設 false（避免請款單變太長）
     if (a.showPersonalInfoOnTop == null) a.showPersonalInfoOnTop = false;
+    // v3.2.0-ui：是否顯示發票資訊，預設 false（個人接案者不開發票，不需要這塊）
+    if (a.showInvoiceInfo == null) a.showInvoiceInfo = false;
     // 既有 a.note 是「帳號備註」（請款單顯示在匯款資訊那一塊），維持不變
     // a.holderName 既有，維持不變
   });

@@ -318,16 +318,20 @@
         </div>
       </div>
 
-      <!-- v3.2.0-ui：第 2 列 — 個人資訊顯示 toggle（搬出 modal、外層快速控制） -->
+      <!-- v3.2.0-ui：請款單顯示 toggle（個人 + 發票）— 搬出 modal、外層快速控制 -->
       <div style="display: flex; gap: 14px; margin-top: 8px; font-size: 13px; flex-wrap: wrap; align-items: center;">
-        <span style="color: var(--muted); font-size: 12px;">👤 個人資訊：</span>
+        <span style="color: var(--muted); font-size: 12px;">請款單顯示：</span>
         <label class="checkbox-row" style="margin: 0;">
           <input type="checkbox" id="inv-show-personal" onchange="onInvShowPersonalChange()">
-          <span>底部顯示</span>
+          <span>👤 底部個人資訊</span>
         </label>
         <label class="checkbox-row" style="margin: 0;">
           <input type="checkbox" id="inv-show-personal-top" onchange="onInvShowPersonalChange()">
-          <span>頂端精簡顯示</span>
+          <span>👤 頂端精簡個人資訊</span>
+        </label>
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="checkbox" id="inv-show-invoice" onchange="onInvShowPersonalChange()">
+          <span>🧾 發票資訊（公司 / 行號才需要）</span>
         </label>
         <span style="color: var(--muted); font-size: 11px;">（套用到目前選的收款帳號，自動儲存）</span>
       </div>
