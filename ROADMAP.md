@@ -2,6 +2,17 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.1.0 ✅ Google Calendar 整合（2026-04-29）
+- [x] AUTH_SCOPES 加 `calendar.events` + `calendar.readonly`
+- [x] Calendar API Client 5 函式（list calendars / list events / create / update / delete）
+- [x] Calendar Sync Layer：增量同步引擎、6 種事件類型建構、安全標記 ftSource
+- [x] UI 重做（4 步驟設定，強制讓使用者選日曆，「外包」推薦提示）
+- [x] 案件狀態 emoji + Calendar colorId（🔵🟡🔴🟢✅⚫️）
+- [x] 取消案件同步、標題前綴「(已取消)」
+- [x] 每日早報：自由選 HH:MM 時段、當日有事才建
+- [x] 自動同步：save() 後 30 秒 debounce
+- [x] 操作日誌：calendar-sync / calendar-sync-error
+
 ## v3.0.0-alpha.1 ✅ 完成（2026-04-29）
 - [x] GCP Console OAuth Client ID 申請
 - [x] Google Identity Services SDK 整合

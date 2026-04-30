@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-29-v3.0.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-29-v3.1.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -34,8 +34,11 @@ const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appfolder';
 //     - openid：發 ID token（之後 commit 6 持久化登入狀態用得到）
 //     - email：oauth2/v3/userinfo 回傳 email
 //     - profile：oauth2/v3/userinfo 回傳 name / picture
-//   都是非機敏 scope，使用者授權畫面會多一行「See your name, email and profile」。
-const AUTH_SCOPES = `openid email profile ${DRIVE_SCOPE}`;
+//     - calendar.events：v3.1.0 起新增，能讀寫使用者選定的單一 Calendar 內事件
+//   都是非機敏 scope，使用者授權畫面會多列出對應權限。
+const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const CALENDAR_LIST_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+const AUTH_SCOPES = `openid email profile ${DRIVE_SCOPE} ${CALENDAR_SCOPE} ${CALENDAR_LIST_SCOPE}`;
 
 // CLOUD_AUTH_KEY：access token + 過期時間 + user info 存在這個 localStorage key
 // 跟 v2 隔離（cloud- 前綴）；存的內容：{ accessToken, tokenExpiresAt, user: { name, email, picture } }
@@ -540,6 +543,60 @@ async function driveDownloadImageAsDataUrl(fileId) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(blob);
   });
+}
+
+// ============== 📅 Calendar API Client（v3.1.0 起新增）==============
+// scope = calendar.events + calendar.readonly（後者只給「列出 calendars 給使用者選」用）
+// 同樣走 driveFetch 共用 token，登入後就能直接打 Calendar API
+// 文件：https://developers.google.com/calendar/api/v3/reference/events
+
+// 列出使用者所有 calendars（給選擇器用）
+async function calendarListCalendars() {
+  const r = await driveFetch('https://www.googleapis.com/calendar/v3/users/me/calendarList?fields=items(id,summary,primary,backgroundColor,accessRole)&maxResults=250');
+  const data = await r.json();
+  return data.items || [];
+}
+
+// 列出指定 calendar 內的事件，可選 filter
+// extendedQuery 會被加到 query string，例：'privateExtendedProperty=ftSource=freelance-tracker-cloud'
+async function calendarListEvents(calendarId, extendedQuery) {
+  const params = new URLSearchParams({
+    maxResults: '2500',
+    showDeleted: 'false',
+    singleEvents: 'true',
+    fields: 'items(id,summary,description,start,end,colorId,extendedProperties)',
+  });
+  let url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`;
+  if (extendedQuery) url += '&' + extendedQuery;
+  const r = await driveFetch(url);
+  const data = await r.json();
+  return data.items || [];
+}
+
+async function calendarCreateEvent(calendarId, eventResource) {
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+  const r = await driveFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(eventResource),
+  });
+  return r.json();
+}
+
+async function calendarUpdateEvent(calendarId, eventId, eventResource) {
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
+  const r = await driveFetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(eventResource),
+  });
+  return r.json();
+}
+
+async function calendarDeleteEvent(calendarId, eventId) {
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
+  await driveFetch(url, { method: 'DELETE' });
+  return true;
 }
 
 // ---------- 存摺照片：fileId 下載 + sessionStorage 快取 + DOM hydrate（α3-3）----------
@@ -1834,6 +1891,646 @@ async function cloudMigrateBankbookImages() {
   }
 }
 
+// ============== 📅 Calendar Sync Layer（v3.1.0 起新增）==============
+// 把 v3 的 jobs + 5 種提醒 + 每日早報，增量同步到使用者選定的 Google Calendar
+// 安全保證：只動帶 ftSource=freelance-tracker-cloud 標記的事件，其他事件 100% 不碰
+
+const CLOUD_CALENDAR_KEY = 'cloud-freelance-tracker-calendar';
+const FT_CALENDAR_SOURCE = 'freelance-tracker-cloud';
+const CALENDAR_TIMEZONE = 'Asia/Taipei';
+
+// localStorage 結構：
+// {
+//   calendarId, calendarName,                 ← 使用者選定的目標日曆
+//   dailyMorningTime: '09:30',                ← 每日早報 HH:MM（local time）
+//   syncTypes: { jobs, unpaidLong, monthEnd, billingDay, slowPay, dailyMorning }
+//   autoSync: false,                          ← 改動後 30 秒 debounce 自動同步
+//   lastSyncedAt: ISO,
+//   lastSyncResult: { added, updated, deleted }
+// }
+
+function cloudGetCalendarConfig() {
+  try {
+    const raw = localStorage.getItem(CLOUD_CALENDAR_KEY);
+    const cfg = raw ? JSON.parse(raw) : {};
+    // 預設值
+    return {
+      calendarId: '',
+      calendarName: '',
+      dailyMorningTime: '09:30',
+      syncTypes: {
+        jobs: true,
+        unpaidLong: true,
+        monthEnd: true,
+        billingDay: true,
+        slowPay: true,
+        dailyMorning: true,
+        ...(cfg.syncTypes || {})
+      },
+      autoSync: false,
+      lastSyncedAt: null,
+      lastSyncResult: null,
+      ...cfg
+    };
+  } catch (_) { return { calendarId: '', dailyMorningTime: '09:30', syncTypes: {}, autoSync: false }; }
+}
+
+function cloudSaveCalendarConfig(patch) {
+  try {
+    const cur = cloudGetCalendarConfig();
+    const next = { ...cur, ...patch };
+    localStorage.setItem(CLOUD_CALENDAR_KEY, JSON.stringify(next));
+    return next;
+  } catch (e) { console.warn('[calendar] save config failed:', e); return null; }
+}
+
+// ---------- 標題 / 描述 / 顏色（v3.1.0）----------
+
+// 案件狀態 → emoji + Calendar colorId（1~11）
+// colorId 對照：1 Lavender / 2 Sage / 3 Grape / 4 Flamingo / 5 Banana / 6 Tangerine
+//                7 Peacock / 8 Graphite / 9 Blueberry / 10 Basil / 11 Tomato
+function _calendarJobStatus(j) {
+  if (j.cancelled) return { emoji: '⚫️', color: '8' };  // 灰
+  if (j.paid) return { emoji: '✅', color: '10' };       // 深綠（已收款）
+  if (j.done) return { emoji: '🟢', color: '2' };        // 綠（已完成待收款）
+  // 還沒完成 → 看是否逾期 / 即將到期
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due = j.endDate ? new Date(j.endDate) : new Date(j.date);
+  due.setHours(0,0,0,0);
+  const daysToDue = Math.round((due - today) / 86400000);
+  if (daysToDue < 0) return { emoji: '🔴', color: '11' };       // 紅（逾期）
+  if (daysToDue <= 3) return { emoji: '🟡', color: '5' };       // 黃（即將到期）
+  return { emoji: '🔵', color: '7' };                            // 藍（進行中）
+}
+
+function _calendarBuildJobEvent(job, client, todayStr) {
+  const status = _calendarJobStatus(job);
+  const cancelPrefix = job.cancelled ? '(已取消) ' : '';
+  const summary = `${status.emoji} ${cancelPrefix}${job.title || '(無標題)'} · ${client?.name || '?'}`;
+
+  const lines = [];
+  lines.push(`業主：${client?.name || '?'}`);
+  lines.push(`金額：NT$ ${(+job.amount || 0).toLocaleString('en-US')}`);
+  if (job.tag) lines.push(`類型：${job.tag}`);
+  lines.push('─────────');
+  let progress = '進行中';
+  if (job.cancelled) progress = '已取消';
+  else if (job.paid) progress = '已完成已收款';
+  else if (job.done) progress = '已完成待收款';
+  lines.push(`進度：${progress}`);
+  if (job.doneAt) lines.push(`完成日：${job.doneAt}`);
+  // 收款累計
+  let paidSum = 0;
+  if (Array.isArray(job.payments) && job.payments.length > 0) {
+    paidSum = job.payments.reduce((s, p) => s + (+p.amount || 0), 0);
+  } else if (job.paid) {
+    paidSum = +job.amount || 0;
+  }
+  lines.push(`收款：NT$ ${paidSum.toLocaleString('en-US')} / NT$ ${(+job.amount || 0).toLocaleString('en-US')}`);
+  if (job.details) {
+    lines.push('─────────');
+    lines.push(`詳情：${job.details}`);
+  }
+  lines.push('');
+  lines.push('在 App 中查看：');
+  lines.push(`https://lancelotwang114.github.io/freelance-tracker-cloud/#job-${job.id}`);
+
+  return {
+    ftKey: `job-${job.id}`,
+    summary,
+    description: lines.join('\n'),
+    start: { date: job.date },
+    end: { date: _calendarDayAfter(job.endDate || job.date) },  // Calendar all-day end is exclusive
+    colorId: status.color,
+  };
+}
+
+// Calendar 全天事件 end.date 是 exclusive（不包含當天），所以加 1 天
+function _calendarDayAfter(dateStr) {
+  if (!dateStr) return dateStr;
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// 收集當天涉及的所有 items（給每日早報用）
+function _calendarCollectDayItems(dateStr, cfg) {
+  const items = [];
+  const clientById = {};
+  state.clients.forEach(c => { clientById[c.id] = c; });
+
+  // 案件：今天開始 / 結束 / 區間內的
+  if (cfg.syncTypes.jobs) {
+    state.jobs.forEach(j => {
+      if (j.cancelled) return;  // 取消的不放進每日早報
+      const start = j.date || '';
+      const end = j.endDate || j.date || '';
+      if (start <= dateStr && dateStr <= end) {
+        const status = _calendarJobStatus(j);
+        const c = clientById[j.clientId];
+        const span = (start === dateStr && end === dateStr) ? '今天'
+          : (start === dateStr) ? `今天開始（到 ${_calendarShortDate(end)}）`
+          : (end === dateStr) ? '今天到期！'
+          : `進行中 (${_calendarShortDate(start)}~${_calendarShortDate(end)})`;
+        items.push({
+          icon: status.emoji,
+          line: `${status.emoji} ${j.title || '(無標題)'} · ${c?.name || '?'}（${span}，NT$ ${(+j.amount || 0).toLocaleString('en-US')}）`,
+          group: '📌 案件'
+        });
+      }
+    });
+  }
+
+  // 提醒（5 種，邏輯沿用 v2 的 buildReminderEvents 但改成「今天命中」判斷）
+  if (cfg.syncTypes.unpaidLong) {
+    state.jobs.forEach(j => {
+      if (j.cancelled || j.paid || !j.done || !j.doneAt) return;
+      const c = clientById[j.clientId];
+      const days = (c?.unpaidRemindDaysOverride != null) ? c.unpaidRemindDaysOverride : (config.unpaidRemindDays || 7);
+      const remindStr = _calendarAddDays(j.doneAt, days);
+      if (remindStr === dateStr) {
+        items.push({
+          icon: '🟠',
+          line: `🟠 ${c?.name || '?'} 完成 ${days} 天未收款：${j.title}`,
+          group: '⏰ 提醒'
+        });
+      }
+    });
+  }
+
+  if (cfg.syncTypes.monthEnd) {
+    const day = +(dateStr.split('-')[2]);
+    const startDay = config.monthEndReminderDay || 25;
+    if (day === startDay) {
+      items.push({ icon: '📅', line: `📅 月底提醒：可開始整理請款`, group: '⏰ 提醒' });
+    }
+  }
+
+  if (cfg.syncTypes.billingDay) {
+    const [yStr, mStr, dStr] = dateStr.split('-');
+    state.clients.forEach(c => {
+      if (!c.billingDay || c.billingDay < 1 || c.billingDay > 31) return;
+      const remindDays = +c.billingRemindDays || 3;
+      // 找這個月的 billing 日
+      const bm = new Date(+yStr, +mStr - 1, c.billingDay);
+      // 處理月份天數不足
+      if (bm.getMonth() !== (+mStr - 1)) return;
+      const remindDate = _calendarAddDays(`${bm.getFullYear()}-${String(bm.getMonth()+1).padStart(2,'0')}-${String(bm.getDate()).padStart(2,'0')}`, -remindDays);
+      if (remindDate === dateStr) {
+        items.push({
+          icon: '📋',
+          line: `📋 ${c.name} 月 ${c.billingDay} 日請款（提前 ${remindDays} 天）`,
+          group: '⏰ 提醒'
+        });
+      }
+    });
+  }
+
+  if (cfg.syncTypes.slowPay) {
+    // 拖款警告：今天命中的拖款 jobs（每天重新計算）
+    if (dateStr === todayStr()) {
+      const slowJobs = (typeof computeSlowPayJobs === 'function') ? computeSlowPayJobs(state.jobs.filter(j => !j.cancelled)) : [];
+      slowJobs.forEach(j => {
+        const c = clientById[j.clientId];
+        items.push({
+          icon: '🐢',
+          line: `🐢 拖款警告：${c?.name || '?'} · ${j.title}（已過 ${j.daysSince} 天）`,
+          group: '⏰ 提醒'
+        });
+      });
+    }
+  }
+
+  return items;
+}
+
+function _calendarAddDays(dateStr, days) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function _calendarShortDate(dateStr) {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  return parts.length === 3 ? `${+parts[1]}/${+parts[2]}` : dateStr;
+}
+
+// 加 N 分鐘到 HH:MM
+function _calendarAddMinutes(hhmm, mins) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = h * 60 + m + mins;
+  const nh = Math.floor(total / 60) % 24;
+  const nm = total % 60;
+  return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
+}
+
+// ---------- 建構目標事件（target events）----------
+
+function buildTargetCalendarEvents(cfg) {
+  const events = [];
+  const clientById = {};
+  state.clients.forEach(c => { clientById[c.id] = c; });
+  const today = todayStr();
+
+  // 1. 案件本身
+  if (cfg.syncTypes.jobs) {
+    state.jobs.forEach(j => {
+      if (!j.date) return;  // 沒日期的不同步
+      const c = clientById[j.clientId];
+      events.push(_calendarBuildJobEvent(j, c, today));
+    });
+  }
+
+  // 2. 完成已久未收款提醒
+  if (cfg.syncTypes.unpaidLong) {
+    state.jobs.forEach(j => {
+      if (j.cancelled || j.paid || !j.done || !j.doneAt) return;
+      const c = clientById[j.clientId];
+      const days = (c?.unpaidRemindDaysOverride != null) ? c.unpaidRemindDaysOverride : (config.unpaidRemindDays || 7);
+      const remindStr = _calendarAddDays(j.doneAt, days);
+      events.push({
+        ftKey: `unpaid-long-${j.id}-${remindStr}`,
+        summary: `🟠 ${c?.name || '?'} 完成 ${days} 天未收款 · ${j.title}`,
+        description: `業主：${c?.name || '?'}\n案件：${j.title}\n金額：NT$ ${(+j.amount || 0).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n今天已過 ${days} 天還沒收款，可考慮發提醒。`,
+        start: { date: remindStr },
+        end: { date: _calendarDayAfter(remindStr) },
+        colorId: '6',  // Tangerine
+      });
+    });
+  }
+
+  // 3. 月底提醒（未來 12 個月）
+  if (cfg.syncTypes.monthEnd) {
+    const startDay = config.monthEndReminderDay || 25;
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const dt = new Date(now.getFullYear(), now.getMonth() + i, startDay);
+      // 處理 2 月 31 號之類
+      if (dt.getMonth() !== ((now.getMonth() + i) % 12 + 12) % 12) continue;
+      const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      if (dateStr < today) continue;
+      events.push({
+        ftKey: `month-end-${dateStr.slice(0, 7)}`,
+        summary: '📅 月底提醒：可開始整理請款',
+        description: `每月 ${startDay} 號之後可開始整理本月可請款案件。\n\n到 App 的「請款單」分頁勾選要請款的案件。`,
+        start: { date: dateStr },
+        end: { date: _calendarDayAfter(dateStr) },
+        colorId: '5',  // Banana
+      });
+    }
+  }
+
+  // 4. 業主固定請款日提醒（未來 12 個月）
+  if (cfg.syncTypes.billingDay) {
+    const now = new Date();
+    state.clients.forEach(c => {
+      if (!c.billingDay || c.billingDay < 1 || c.billingDay > 31) return;
+      const remindDays = +c.billingRemindDays || 3;
+      for (let i = 0; i < 12; i++) {
+        const billingDate = new Date(now.getFullYear(), now.getMonth() + i, c.billingDay);
+        if (billingDate.getMonth() !== ((now.getMonth() + i) % 12 + 12) % 12) continue;
+        const billingStr = `${billingDate.getFullYear()}-${String(billingDate.getMonth()+1).padStart(2,'0')}-${String(billingDate.getDate()).padStart(2,'0')}`;
+        const remindStr = _calendarAddDays(billingStr, -remindDays);
+        if (remindStr < today) continue;
+        events.push({
+          ftKey: `billing-${c.id}-${billingStr.slice(0, 7)}`,
+          summary: `📋 ${c.name} 月 ${c.billingDay} 日請款（提前 ${remindDays} 天）`,
+          description: `業主：${c.name}\n固定請款日：每月 ${c.billingDay} 號\n\n請於 ${billingStr} 前送出請款單。`,
+          start: { date: remindStr },
+          end: { date: _calendarDayAfter(remindStr) },
+          colorId: '1',  // Lavender
+        });
+      }
+    });
+  }
+
+  // 5. 拖款警告（只建今天命中的，每次同步重算）
+  if (cfg.syncTypes.slowPay) {
+    const slowJobs = (typeof computeSlowPayJobs === 'function') ? computeSlowPayJobs(state.jobs.filter(j => !j.cancelled)) : [];
+    slowJobs.forEach(j => {
+      const c = clientById[j.clientId];
+      events.push({
+        ftKey: `slow-pay-${j.id}-${today}`,
+        summary: `🐢 拖款警告：${c?.name || '?'} · ${j.title}`,
+        description: `業主：${c?.name || '?'} 平均收款 ${j.avgDays} 天\n案件：${j.title}\n金額：NT$ ${(+j.amount || 0).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n已過 ${j.daysSince} 天（超過該業主平均），建議主動聯繫。`,
+        start: { date: today },
+        end: { date: _calendarDayAfter(today) },
+        colorId: '11',  // Tomato
+      });
+    });
+  }
+
+  // 6. 每日早報（未來 60 天，每天若有事就建一筆）
+  if (cfg.syncTypes.dailyMorning && cfg.dailyMorningTime) {
+    const startTime = cfg.dailyMorningTime;
+    const endTime = _calendarAddMinutes(startTime, 15);
+    for (let dayOffset = 0; dayOffset < 60; dayOffset++) {
+      const d = new Date();
+      d.setDate(d.getDate() + dayOffset);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+      const items = _calendarCollectDayItems(dateStr, cfg);
+      if (items.length === 0) continue;
+
+      // 標題：取第一筆作為示意 + 件數
+      const firstShort = items[0].line.replace(/^[^\s]+\s/, '').split('（')[0].split('·')[0].trim();
+      const summary = `📋 [外包] 今日 ${items.length} 件事${items.length > 1 ? ` · ${firstShort}+${items.length - 1}` : ` · ${firstShort}`}`;
+
+      // 描述：分組列出
+      const lines = [`今天 (${dateStr}) 涉及的事項：`, ''];
+      const groups = {};
+      items.forEach(it => {
+        groups[it.group] = groups[it.group] || [];
+        groups[it.group].push(it.line);
+      });
+      Object.keys(groups).forEach(g => {
+        lines.push(g);
+        groups[g].forEach(l => lines.push('  ' + l));
+        lines.push('');
+      });
+      lines.push('在 App 中查看詳情：');
+      lines.push('https://lancelotwang114.github.io/freelance-tracker-cloud/');
+
+      events.push({
+        ftKey: `daily-${dateStr}`,
+        summary,
+        description: lines.join('\n'),
+        start: { dateTime: `${dateStr}T${startTime}:00`, timeZone: CALENDAR_TIMEZONE },
+        end:   { dateTime: `${dateStr}T${endTime}:00`,   timeZone: CALENDAR_TIMEZONE },
+        colorId: '7',  // Peacock
+      });
+    }
+  }
+
+  return events;
+}
+
+// 把 target event 物件轉成 Calendar API 需要的 event resource（補上 ftSource 標記）
+function _calendarBuildEventResource(target) {
+  return {
+    summary: target.summary,
+    description: target.description,
+    start: target.start,
+    end: target.end,
+    colorId: target.colorId,
+    extendedProperties: {
+      private: {
+        ftSource: FT_CALENDAR_SOURCE,
+        ftKey: target.ftKey
+      }
+    }
+  };
+}
+
+// 比對既有事件跟目標事件，回傳是否需要更新
+function _calendarEventDiffers(existing, target) {
+  if ((existing.summary || '') !== target.summary) return true;
+  if ((existing.description || '') !== target.description) return true;
+  if ((existing.colorId || '') !== (target.colorId || '')) return true;
+  // start
+  if (target.start.date && existing.start?.date !== target.start.date) return true;
+  if (target.start.dateTime && existing.start?.dateTime !== target.start.dateTime) return true;
+  // end
+  if (target.end.date && existing.end?.date !== target.end.date) return true;
+  if (target.end.dateTime && existing.end?.dateTime !== target.end.dateTime) return true;
+  return false;
+}
+
+// ---------- 主同步引擎 ----------
+
+let cloudCalendarSyncInProgress = false;
+
+async function cloudSyncCalendar() {
+  if (cloudCalendarSyncInProgress) { toast('同步已在進行中…'); return; }
+  if (!isCloudSignedIn()) { alert('請先登入 Google'); return; }
+
+  const cfg = cloudGetCalendarConfig();
+  if (!cfg.calendarId) { alert('請先選擇要同步的日曆'); return; }
+
+  cloudCalendarSyncInProgress = true;
+  try {
+    toastProgress('📅 讀取 Calendar 現有事件…', 30000);
+    const existing = await calendarListEvents(cfg.calendarId, `privateExtendedProperty=${encodeURIComponent('ftSource=' + FT_CALENDAR_SOURCE)}`);
+
+    toastProgress('🔍 比對差異中…', 30000);
+    const existingMap = new Map();
+    for (const ev of existing) {
+      const key = ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.ftKey;
+      if (key) existingMap.set(key, ev);
+    }
+
+    const target = buildTargetCalendarEvents(cfg);
+    const targetKeys = new Set(target.map(t => t.ftKey));
+
+    const toCreate = [];
+    const toUpdate = [];
+    const toDelete = [];
+    for (const t of target) {
+      const ex = existingMap.get(t.ftKey);
+      if (!ex) toCreate.push(t);
+      else if (_calendarEventDiffers(ex, t)) toUpdate.push({ ex, t });
+    }
+    for (const [key, ev] of existingMap) {
+      if (!targetKeys.has(key)) toDelete.push(ev);
+    }
+
+    let added = 0, updated = 0, deleted = 0;
+
+    if (toCreate.length > 0) {
+      toastProgress(`📝 建立 ${toCreate.length} 個新事件…`, 60000);
+      for (const t of toCreate) {
+        try {
+          await calendarCreateEvent(cfg.calendarId, _calendarBuildEventResource(t));
+          added++;
+        } catch (e) { console.warn('[calendar] create failed:', t.ftKey, e); }
+      }
+    }
+    if (toUpdate.length > 0) {
+      toastProgress(`🔧 更新 ${toUpdate.length} 個變動事件…`, 60000);
+      for (const { ex, t } of toUpdate) {
+        try {
+          await calendarUpdateEvent(cfg.calendarId, ex.id, _calendarBuildEventResource(t));
+          updated++;
+        } catch (e) { console.warn('[calendar] update failed:', t.ftKey, e); }
+      }
+    }
+    if (toDelete.length > 0) {
+      toastProgress(`🗑️ 清除 ${toDelete.length} 個過期事件…`, 60000);
+      for (const ev of toDelete) {
+        try {
+          await calendarDeleteEvent(cfg.calendarId, ev.id);
+          deleted++;
+        } catch (e) { console.warn('[calendar] delete failed:', ev.id, e); }
+      }
+    }
+
+    const result = { added, updated, deleted };
+    cloudSaveCalendarConfig({ lastSyncedAt: new Date().toISOString(), lastSyncResult: result });
+    toastDismiss();
+    toast(`✓ Calendar 同步完成（新增 ${added} / 更新 ${updated} / 刪除 ${deleted}）`, 4000);
+    if (typeof logAction === 'function') {
+      logAction('calendar-sync', result);
+    }
+    cloudRenderCalendarStatus();
+  } catch (e) {
+    toastDismiss();
+    console.error('[calendar] sync failed:', e);
+    if (e instanceof DriveAuthError) {
+      alert('Calendar 同步失敗：請重新登入 Google\n\n' + e.message);
+    } else {
+      alert('Calendar 同步失敗：' + e.message);
+    }
+    if (typeof logAction === 'function') {
+      logAction('calendar-sync-error', { error: e.message || String(e) });
+    }
+  } finally {
+    cloudCalendarSyncInProgress = false;
+  }
+}
+
+// ---------- 自動同步（auto sync）----------
+
+let cloudCalendarAutoSyncTimer = null;
+
+function cloudScheduleCalendarSync() {
+  const cfg = cloudGetCalendarConfig();
+  if (!cfg.autoSync || !cfg.calendarId) return;
+  if (cloudCalendarAutoSyncTimer) clearTimeout(cloudCalendarAutoSyncTimer);
+  // 比 Drive 同步晚一點觸發（debounce 30 秒，避免每改一筆案件就同步一次）
+  cloudCalendarAutoSyncTimer = setTimeout(() => {
+    cloudCalendarAutoSyncTimer = null;
+    cloudSyncCalendar().catch(e => console.error('[calendar-auto] failed:', e));
+  }, 30000);
+}
+
+// ---------- Calendar UI handlers（v3.1.0）----------
+
+// 卡片展開時觸發：載入既存配置 + 列出 calendars + 渲染狀態
+function cloudRenderCalendarUI() {
+  if (!isCloudSignedIn()) {
+    const status = document.getElementById('cloud-cal-status');
+    if (status) status.textContent = '請先登入';
+    return;
+  }
+  const cfg = cloudGetCalendarConfig();
+
+  // 還原 UI 狀態
+  const tEl = document.getElementById('cloud-cal-morning-time');
+  if (tEl) tEl.value = cfg.dailyMorningTime || '09:30';
+  ['jobs', 'unpaidLong', 'monthEnd', 'billingDay', 'slowPay', 'dailyMorning'].forEach(k => {
+    const cb = document.getElementById('cloud-cal-sync-' + k);
+    if (cb) cb.checked = !!cfg.syncTypes[k];
+  });
+  const auto = document.getElementById('cloud-cal-autosync');
+  if (auto) auto.checked = !!cfg.autoSync;
+
+  // 載入 calendar list（idempotent，已載入就直接顯示）
+  cloudRefreshCalendarList();
+  cloudRenderCalendarStatus();
+}
+
+async function cloudRefreshCalendarList() {
+  const sel = document.getElementById('cloud-cal-picker');
+  if (!sel) return;
+  if (!isCloudSignedIn()) {
+    sel.innerHTML = '<option value="">— 請先登入 —</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">載入中…</option>';
+  try {
+    const list = await calendarListCalendars();
+    const cfg = cloudGetCalendarConfig();
+    if (list.length === 0) {
+      sel.innerHTML = '<option value="">（沒有任何日曆）</option>';
+      return;
+    }
+    // 排序：primary 第一、其他依名稱
+    list.sort((a, b) => {
+      if (a.primary && !b.primary) return -1;
+      if (!a.primary && b.primary) return 1;
+      return (a.summary || '').localeCompare(b.summary || '', 'zh-Hant');
+    });
+    sel.innerHTML = '<option value="">— 請選擇 —</option>' + list.map(c => {
+      const label = c.primary ? `${c.summary}（主要）` : c.summary;
+      const selected = (c.id === cfg.calendarId) ? ' selected' : '';
+      return `<option value="${cloudEscapeHtml(c.id)}" data-name="${cloudEscapeHtml(c.summary)}"${selected}>${cloudEscapeHtml(label)}</option>`;
+    }).join('');
+    // 沒選過、列表中又有「外包」→ 給個提示但不自動選
+    if (!cfg.calendarId) {
+      const hasFreelance = list.find(c => c.summary && c.summary.includes('外包'));
+      if (hasFreelance) {
+        toast('💡 偵測到名稱含「外包」的日曆，建議選它', 4000);
+      }
+    }
+  } catch (e) {
+    console.error('[calendar] list calendars failed:', e);
+    sel.innerHTML = '<option value="">（載入失敗，請刷新）</option>';
+    toast('載入日曆清單失敗：' + e.message);
+  }
+}
+
+function cloudOnCalendarPicked() {
+  const sel = document.getElementById('cloud-cal-picker');
+  if (!sel) return;
+  const id = sel.value;
+  const opt = sel.selectedOptions[0];
+  const name = opt && opt.dataset.name ? opt.dataset.name : '';
+  cloudSaveCalendarConfig({ calendarId: id, calendarName: name });
+  cloudRenderCalendarStatus();
+  if (id) toast(`✓ 已選擇日曆：${name}`, 2500);
+}
+
+function cloudOnCalendarConfigChange() {
+  const tEl = document.getElementById('cloud-cal-morning-time');
+  const auto = document.getElementById('cloud-cal-autosync');
+  const syncTypes = {};
+  ['jobs', 'unpaidLong', 'monthEnd', 'billingDay', 'slowPay', 'dailyMorning'].forEach(k => {
+    const cb = document.getElementById('cloud-cal-sync-' + k);
+    syncTypes[k] = cb ? !!cb.checked : true;
+  });
+  cloudSaveCalendarConfig({
+    dailyMorningTime: (tEl && tEl.value) || '09:30',
+    autoSync: !!(auto && auto.checked),
+    syncTypes
+  });
+}
+
+function cloudRenderCalendarStatus() {
+  const cfg = cloudGetCalendarConfig();
+  const status = document.getElementById('cloud-cal-status');
+  const detail = document.getElementById('cloud-cal-sync-status');
+  const btn = document.getElementById('cloud-cal-sync-btn');
+
+  if (!cfg.calendarId) {
+    if (status) { status.textContent = '未選擇日曆'; status.style.color = 'var(--muted)'; }
+    if (detail) detail.innerHTML = '請先在上方選擇要同步的日曆。';
+    if (btn) btn.disabled = true;
+    return;
+  }
+  if (status) {
+    status.textContent = `✓ ${cfg.calendarName || '已選日曆'}`;
+    status.style.color = 'var(--success)';
+  }
+  if (btn) btn.disabled = false;
+  if (detail) {
+    if (cfg.lastSyncedAt) {
+      const dt = new Date(cfg.lastSyncedAt);
+      const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+      const r = cfg.lastSyncResult || {};
+      detail.innerHTML = `上次同步：${dtStr}　結果：新增 ${r.added || 0} / 更新 ${r.updated || 0} / 刪除 ${r.deleted || 0}`;
+    } else {
+      detail.innerHTML = '尚未同步過。按右下「🔄 立即同步」開始第一次同步。';
+    }
+  }
+}
+
 // ---------- 立即同步（α2-6）----------
 // 使用者主動觸發：拉雲端最新版 → 走三方合併 → 推回 Drive（如果有改動）
 // UI：🔐 Google Drive 同步 卡片內「🔄 立即同步」按鈕
@@ -1985,7 +2682,10 @@ const ACTION_LABELS = {
   // v3.0.0-alpha.3：存摺照片獨立化埋點
   'cloud-image-upload':     { icon: '🖼️', label: '上傳存摺照片到 Drive' },
   'cloud-image-delete':     { icon: '🗑️', label: '刪除 Drive 存摺照片' },
-  'cloud-image-migrate':    { icon: '📦', label: '存摺照片遷移到 Drive' }
+  'cloud-image-migrate':    { icon: '📦', label: '存摺照片遷移到 Drive' },
+  // v3.1.0：Calendar 同步
+  'calendar-sync':          { icon: '📅', label: '同步到 Google Calendar' },
+  'calendar-sync-error':    { icon: '⚠️', label: 'Calendar 同步失敗' }
 };
 const COLORS = ['#ef4444','#f59e0b','#10b981','#2563eb','#8b5cf6','#ec4899','#14b8a6','#64748b'];
 
@@ -2236,6 +2936,10 @@ function save() {
   // v3 雲端同步：debounce 推到 Drive
   if (typeof cloudSchedulePush === 'function') {
     cloudSchedulePush();
+  }
+  // v3.1.0：若啟用 Calendar 自動同步 → 30 秒 debounce 推到 Calendar
+  if (typeof cloudScheduleCalendarSync === 'function') {
+    cloudScheduleCalendarSync();
   }
 }
 

@@ -1,5 +1,57 @@
 ﻿# 版本更新歷史
 
+## v3.1.0 — Google Calendar 整合（2026-04-29）
+
+> v3.0.0 stable 之後第一個功能擴充。重做 v2 的 Google 行事曆同步——這次直接打 Calendar API、不再經過 Apps Script。
+
+### 新增 Scope
+- `AUTH_SCOPES` 增加 `calendar.events` + `calendar.readonly`
+- 既有登入 user 需要登出 → 重新登入才能授權新 scope（會多顯示 Calendar 權限要求）
+
+### 📅 Calendar API Client（5 個函式）
+- `calendarListCalendars()`：列出使用者所有 calendars（給選擇器用）
+- `calendarListEvents(calendarId, query)`：列出事件，支援 `privateExtendedProperty` filter
+- `calendarCreateEvent(calendarId, event)` / `calendarUpdateEvent` / `calendarDeleteEvent`
+- 都共用 driveFetch wrapper（自動帶 Authorization header、401 → DriveAuthError）
+
+### 📅 Calendar Sync Layer
+- 新增 `CLOUD_CALENDAR_KEY = 'cloud-freelance-tracker-calendar'` localStorage 儲存配置
+- 配置內容：`{ calendarId, calendarName, dailyMorningTime, syncTypes, autoSync, lastSyncedAt, lastSyncResult }`
+- 增量同步引擎 `cloudSyncCalendar()`：
+  1. 列既有事件（用 `privateExtendedProperty=ftSource=freelance-tracker-cloud` filter，不會列到使用者其他事件）
+  2. 用 `ftKey` 比對 → 算出 toCreate / toUpdate / toDelete
+  3. 執行 API → toast 進度反饋
+  4. 結果記到 lastSyncResult + 操作日誌
+- 自動同步：`cloudScheduleCalendarSync()` 在 save() 內 fire（30 秒 debounce）
+
+### 6 種事件類型
+1. **案件本身**：依狀態自動變 emoji + Calendar colorId（🔵🟡🔴🟢✅⚫️）；含取消的（標題前綴 "(已取消)"）
+2. **完成已久未收款提醒**（🟠 Tangerine）
+3. **月底提醒**（📅 Banana）
+4. **業主固定請款日提醒**（📋 Lavender）
+5. **智慧拖款警告**（🐢 Tomato）
+6. **每日早報**：當天有事的日子，使用者選定時段建一筆「📋 [外包] 今日 N 件事」（會跳手機通知）
+
+### 安全保證
+- 只動帶 `extendedProperties.private.ftSource === 'freelance-tracker-cloud'` 標記的事件
+- 列事件時帶 `privateExtendedProperty` filter，使用者其他事件**完全不會被讀到、修改、刪除**
+- 強制讓使用者選定一本 Calendar，未選不能同步
+
+### UI 重做（解 hidden + 重寫 #card-calendar）
+- 4 步驟設定流程：① 選擇日曆（含「外包」推薦提示）→ ② 設定每日早報時段（任意 HH:MM）→ ③ 勾選要同步的事件類型 → ④ 自動 vs 手動
+- 立即同步按鈕 + 上次同步狀態（時間 + 新增/更新/刪除統計）
+- 進度 toast：讀取既有 → 比對差異 → 建立 → 更新 → 清除 → 完成
+
+### ACTION_LABELS
+- 加 `calendar-sync` / `calendar-sync-error`
+
+### 版本 bump 三處
+- `js/app.js` `APP_VERSION` → `2026-04-29-v3.1.0`
+- `index.html` meta → 同上
+- `service-worker.js` `CACHE_VERSION` → `ftracker-cloud-v3.1.0`
+
+---
+
 ## v3.0.0 ✅ 正式 stable（2026-04-29）
 
 > 從 v2.10.15 fork 出來、改寫成 Drive App Folder 後端、走完 alpha.1/2/3 + beta.1 完整 4 個 phase 後正式 stable。

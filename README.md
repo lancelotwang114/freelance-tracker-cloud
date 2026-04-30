@@ -29,6 +29,7 @@
 | v3.0.0-alpha.3 | 存摺照片從 base64 遷移成 Drive 個別檔（schema 升 v8） | ✅ 完成（2026-04-29） |
 | v3.0.0-beta.1 | 移除 v2 Apps Script 同步進入點、stub HTML onclick 函式 | ✅ 完成（2026-04-29） |
 | **v3.0.0** | **正式 stable，砍 dead code、版本號歸正** | ✅ **完成（2026-04-29）** |
+| **v3.1.0** | **Google Calendar 整合（直接打 Calendar API、6 種事件、增量同步）** | ✅ **完成（2026-04-29）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
