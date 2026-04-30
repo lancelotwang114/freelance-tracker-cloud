@@ -1,5 +1,42 @@
 ﻿# 版本更新歷史
 
+## v3.7.0 — Calendar 同步 UX 改造（2026-05-01）
+
+> 採方案 B + 兩件配套：保留兩張卡的清晰分工（Drive = 基礎、Calendar = 延伸），但 Calendar 卡頂端加 master toggle、登入後跳一次 prompt、移除自動 vs 手動。
+
+### Calendar 卡 master toggle（B 主軸）
+- 卡頂端加 `<input id="cloud-cal-enabled">` master switch（藍色 primary-light 背景強調）
+- toggle 關 → 整個設定區（Step 1-3 + 同步狀態 + 立即同步按鈕）整段 hidden
+- toggle 開 → 自動展開所有設定欄、提示「記得選擇要同步的日曆」
+- toggle 關時 toast 提醒既有事件保留在 Google Calendar，要清要手動
+- config 加 `enabled: false` 預設值（向下相容、舊使用者升級後預設關閉）
+
+### 登入後跳一次 prompt
+- 加 `#cal-prompt-modal` 介紹 Calendar 同步功能
+- `cloudMaybeShowCalendarPrompt()` 在登入完成 1.5 秒後檢查並跳出
+- localStorage key `cloud-ftCalendarPromptShown_v1` 記錄已看過
+- 兩個按鈕：
+  - **立刻設定** → 自動把 master toggle 切 ON、跳到設定頁、展開行事曆卡 + scrollIntoView
+  - **先不要** → 標記已看過、不再跳；toast 告知之後可以從設定啟用
+- 已啟用 Calendar 的使用者不會跳（直接標記已看過）
+
+### 拿掉「自動 vs 手動」Step 4
+- 移除 HTML Step 4 區塊 + `#cloud-cal-autosync` checkbox
+- `cloudGetCalendarConfig` 移除 `autoSync` 欄位（既存值會被 spread 蓋掉但無害）
+- `cloudOnCalendarConfigChange` 不再讀寫 autoSync
+- `cloudScheduleCalendarSync` 條件從 `cfg.autoSync` 改成 `cfg.enabled`
+- 啟用 = 一律自動同步（save() 後 30 秒 debounce），「立即同步到 Calendar」按鈕保留給手動觸發
+
+### 操作日誌新增
+- `cloud-calendar-enable` / `cloud-calendar-disable`（master toggle 切換）
+- `cloud-calendar-prompt-accept` / `cloud-calendar-prompt-dismiss`（首次 prompt）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.7.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.7.0`
+
+---
+
 ## v3.6.4 — 修行事曆 grid + 案件 modal 大改（2026-05-01）
 
 ### Bug 修：行事曆同步卡 grid 排版（v3.6.3 引入）

@@ -1302,6 +1302,32 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ==================== Calendar 同步卡 compact（v3.6.3）==================== */
+/* v3.7.0：master toggle 區塊 */
+.cal-compact .cal-master-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--primary-light);
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.cal-compact .cal-master-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  margin: 0;
+}
+.cal-compact .cal-master-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
 .cal-compact .cal-step {
   background: var(--bg);
   padding: 8px 10px;

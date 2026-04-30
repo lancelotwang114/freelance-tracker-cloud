@@ -2,6 +2,15 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.7.0 ✅ Calendar 同步 UX 改造（2026-05-01）
+- [x] Calendar 卡頂端加 master toggle（OFF 時整個設定區隱藏）
+- [x] 登入後跳一次 prompt 介紹 Calendar 同步（`#cal-prompt-modal`）
+- [x] 移除「自動 vs 手動」Step 4（啟用 = 一律自動）
+- [x] config 加 `enabled` 欄位、移除 `autoSync` 欄位
+- [x] cloudScheduleCalendarSync 條件改成 `cfg.enabled`
+- [x] 操作日誌埋點 4 個（enable / disable / prompt-accept / prompt-dismiss）
+- [x] bump 三處版本號 → `2026-05-01-v3.7.0` / `ftracker-cloud-v3.7.0`
+
 ## v3.6.4 ✅ 修行事曆 grid + 案件 modal 大改（2026-05-01）
 - [x] 修行事曆 grid 排版（flex-wrap 取代 grid auto-fit、checkbox 寬度 override）
 - [x] 案件 modal 拆 3 區（基本/金額/進度收款）

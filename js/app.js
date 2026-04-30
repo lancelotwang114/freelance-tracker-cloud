@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.6.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.7.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -231,6 +231,46 @@ async function cloudOnTokenResponse(resp) {
   // v3.0.0-alpha.2：登入成功後立刻初始化 tracker.json（fire-and-forget）
   // 失敗不影響登入狀態，使用者可看 console / 日誌
   cloudInitTrackerFile().catch(e => console.error('[cloud-init] async failed:', e));
+
+  // v3.7.0：首次登入後 prompt「要不要啟用行事曆同步」
+  setTimeout(cloudMaybeShowCalendarPrompt, 1500);
+}
+
+// v3.7.0：登入後跳一次 prompt 介紹 Calendar 同步
+const CAL_PROMPT_KEY = 'cloud-ftCalendarPromptShown_v1';
+function cloudMaybeShowCalendarPrompt() {
+  if (!isCloudSignedIn()) return;
+  // 已 prompt 過 → 不重複跳
+  if (localStorage.getItem(CAL_PROMPT_KEY) === '1') return;
+  // 已啟用 → 不需要 prompt（使用者已經設定過了）
+  const cfg = cloudGetCalendarConfig();
+  if (cfg.enabled) { localStorage.setItem(CAL_PROMPT_KEY, '1'); return; }
+  const modal = document.getElementById('cal-prompt-modal');
+  if (modal) modal.classList.add('open');
+}
+
+function cloudAcceptCalendarPrompt() {
+  localStorage.setItem(CAL_PROMPT_KEY, '1');
+  cloudSaveCalendarConfig({ enabled: true });
+  document.getElementById('cal-prompt-modal')?.classList.remove('open');
+  switchTab('settings');
+  // 等切過去後展開行事曆卡 + 滾過去
+  setTimeout(() => {
+    const card = document.getElementById('card-calendar');
+    if (card) {
+      card.classList.remove('collapsed');
+      cloudRenderCalendarUI();
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, 200);
+  if (typeof logAction === 'function') logAction('cloud-calendar-prompt-accept');
+}
+
+function cloudDismissCalendarPrompt() {
+  localStorage.setItem(CAL_PROMPT_KEY, '1');
+  document.getElementById('cal-prompt-modal')?.classList.remove('open');
+  toast('行事曆同步已跳過。需要時可到「設定 → 📅 Google 行事曆同步」啟用。', 5000);
+  if (typeof logAction === 'function') logAction('cloud-calendar-prompt-dismiss');
 }
 
 // 把 cloudAuthState.user 渲染到「已登入」區塊
@@ -1933,8 +1973,9 @@ function cloudGetCalendarConfig() {
   try {
     const raw = localStorage.getItem(CLOUD_CALENDAR_KEY);
     const cfg = raw ? JSON.parse(raw) : {};
-    // 預設值
+    // 預設值（v3.7.0：加 enabled master toggle、移除 autoSync — 啟用就自動）
     return {
+      enabled: false,                              // v3.7.0：master toggle，OFF = 不 auto sync
       calendarId: '',
       calendarName: '',
       dailyMorningTime: '09:30',
@@ -1947,12 +1988,11 @@ function cloudGetCalendarConfig() {
         dailyMorning: true,
         ...(cfg.syncTypes || {})
       },
-      autoSync: false,
       lastSyncedAt: null,
       lastSyncResult: null,
       ...cfg
     };
-  } catch (_) { return { calendarId: '', dailyMorningTime: '09:30', syncTypes: {}, autoSync: false }; }
+  } catch (_) { return { enabled: false, calendarId: '', dailyMorningTime: '09:30', syncTypes: {} }; }
 }
 
 function cloudSaveCalendarConfig(patch) {
@@ -2421,7 +2461,8 @@ let cloudCalendarAutoSyncTimer = null;
 
 function cloudScheduleCalendarSync() {
   const cfg = cloudGetCalendarConfig();
-  if (!cfg.autoSync || !cfg.calendarId) return;
+  // v3.7.0：master toggle 關 / 沒選日曆都不 auto sync（autoSync 欄位已廢除，啟用就自動）
+  if (!cfg.enabled || !cfg.calendarId) return;
   if (cloudCalendarAutoSyncTimer) clearTimeout(cloudCalendarAutoSyncTimer);
   // 比 Drive 同步晚一點觸發（debounce 30 秒，避免每改一筆案件就同步一次）
   cloudCalendarAutoSyncTimer = setTimeout(() => {
@@ -2441,6 +2482,11 @@ function cloudRenderCalendarUI() {
   }
   const cfg = cloudGetCalendarConfig();
 
+  // v3.7.0：還原 master toggle 狀態 + 切顯示
+  const masterCb = document.getElementById('cloud-cal-enabled');
+  if (masterCb) masterCb.checked = !!cfg.enabled;
+  cloudUpdateCalendarSectionVisibility(!!cfg.enabled);
+
   // 還原 UI 狀態
   const tEl = document.getElementById('cloud-cal-morning-time');
   if (tEl) tEl.value = cfg.dailyMorningTime || '09:30';
@@ -2448,8 +2494,6 @@ function cloudRenderCalendarUI() {
     const cb = document.getElementById('cloud-cal-sync-' + k);
     if (cb) cb.checked = !!cfg.syncTypes[k];
   });
-  const auto = document.getElementById('cloud-cal-autosync');
-  if (auto) auto.checked = !!cfg.autoSync;
 
   // 載入 calendar list（idempotent，已載入就直接顯示）
   cloudRefreshCalendarList();
@@ -2527,7 +2571,6 @@ function cloudOnCalendarPicked() {
 
 function cloudOnCalendarConfigChange() {
   const tEl = document.getElementById('cloud-cal-morning-time');
-  const auto = document.getElementById('cloud-cal-autosync');
   const syncTypes = {};
   ['jobs', 'unpaidLong', 'monthEnd', 'billingDay', 'slowPay', 'dailyMorning'].forEach(k => {
     const cb = document.getElementById('cloud-cal-sync-' + k);
@@ -2535,9 +2578,32 @@ function cloudOnCalendarConfigChange() {
   });
   cloudSaveCalendarConfig({
     dailyMorningTime: (tEl && tEl.value) || '09:30',
-    autoSync: !!(auto && auto.checked),
     syncTypes
   });
+}
+
+// v3.7.0：master toggle 切換（啟用 / 停用 Calendar 同步）
+function cloudOnCalendarEnabledToggle() {
+  const cb = document.getElementById('cloud-cal-enabled');
+  if (!cb) return;
+  const enabled = !!cb.checked;
+  cloudSaveCalendarConfig({ enabled });
+  cloudUpdateCalendarSectionVisibility(enabled);
+  cloudRenderCalendarStatus();
+  if (enabled) {
+    toast('✓ 已啟用行事曆同步，記得選擇要同步的日曆', 4000);
+  } else {
+    toast('已停用行事曆同步（既有事件保留在 Google 日曆裡，要清的話請手動到 Google Calendar 刪）', 5000);
+  }
+  if (typeof logAction === 'function') logAction('cloud-calendar-' + (enabled ? 'enable' : 'disable'));
+}
+
+// v3.7.0：依 enabled 狀態 toggle 行事曆設定區的可見度
+function cloudUpdateCalendarSectionVisibility(enabled) {
+  const body = document.getElementById('cloud-cal-settings-body');
+  if (body) body.classList.toggle('hidden', !enabled);
+  const masterStatus = document.getElementById('cloud-cal-master-status');
+  if (masterStatus) masterStatus.textContent = enabled ? '已啟用' : '未啟用';
 }
 
 function cloudRenderCalendarStatus() {
