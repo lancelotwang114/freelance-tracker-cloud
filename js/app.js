@@ -6810,7 +6810,9 @@ function drawInvoice() {
   };
   const showPersonal = !activeAcct || activeAcct.showPersonalInfo !== false;     // 預設 true（底部 3 欄會顯示個人欄）
   const showPersonalOnTop = !!(activeAcct && activeAcct.showPersonalInfoOnTop);   // 預設 false（不在頂端顯示，避免請款單太長）
-  const showInvoice = !!(activeAcct && activeAcct.showInvoiceInfo);                // 預設 false（個人接案者不開發票）
+  // v3.2.0-ui：發票功能暫時隱藏（feature flag）；資料 / migration / input 保留，未來解 hidden 即可恢復
+  const FEATURE_INVOICE_INFO = false;
+  const showInvoice = FEATURE_INVOICE_INFO && !!(activeAcct && activeAcct.showInvoiceInfo);
   const hasPersonalInfo = showPersonal && (aPersonal.name || aPersonal.phone || aPersonal.email);
   const hasPayInfo = !!(activeAcct && (activeAcct.bank || activeAcct.account));
   const hasInvoiceInfo = showInvoice && (aPersonal.invoiceTitle || aPersonal.taxId || aPersonal.address || aPersonal.invoiceNote);

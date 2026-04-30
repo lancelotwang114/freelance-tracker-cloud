@@ -329,7 +329,8 @@
           <input type="checkbox" id="inv-show-personal-top" onchange="onInvShowPersonalChange()">
           <span>👤 頂端精簡個人資訊</span>
         </label>
-        <label class="checkbox-row" style="margin: 0;">
+        <!-- v3.2.0-ui：發票功能暫時隱藏（保留 input + JS 邏輯，未來 user 升級成行號 / 公司再解 hidden） -->
+        <label class="checkbox-row hidden" style="margin: 0;">
           <input type="checkbox" id="inv-show-invoice" onchange="onInvShowPersonalChange()">
           <span>🧾 發票資訊（公司 / 行號才需要）</span>
         </label>
@@ -878,8 +879,8 @@
       </div>
     </div>
 
-    <!-- ── 發票資訊 ── -->
-    <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
+    <!-- ── 發票資訊 ──（v3.2.0-ui：發票功能整段暫時隱藏，input id 保留供未來解 hidden 使用） -->
+    <div class="hidden" style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
       <strong style="font-size: 14px; display: block; margin-bottom: 8px;">🧾 發票 / 抬頭資訊（不填則請款單不會顯示這塊）</strong>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
         <div>
