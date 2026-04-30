@@ -6408,6 +6408,7 @@ function openPaymentAccountEditor(id) {
   document.getElementById('pae-id').value = acct ? acct.id : '';
   document.getElementById('pae-label').value = acct ? (acct.label || '') : '';
   document.getElementById('pae-show-personal').checked = acct ? (acct.showPersonalInfo !== false) : true;
+  document.getElementById('pae-show-personal-top').checked = acct ? !!acct.showPersonalInfoOnTop : false;
   document.getElementById('pae-name').value = acct ? (acct.name || '') : '';
   document.getElementById('pae-phone').value = acct ? (acct.phone || '') : '';
   document.getElementById('pae-email').value = acct ? (acct.email || '') : '';
@@ -6436,6 +6437,7 @@ function savePaymentAccountEditor() {
   const data = {
     label: document.getElementById('pae-label').value.trim(),
     showPersonalInfo: document.getElementById('pae-show-personal').checked,
+    showPersonalInfoOnTop: document.getElementById('pae-show-personal-top').checked,
     name: document.getElementById('pae-name').value.trim(),
     phone: document.getElementById('pae-phone').value.trim(),
     email: document.getElementById('pae-email').value.trim(),
@@ -6757,22 +6759,23 @@ function drawInvoice() {
     address:      (activeAcct && activeAcct.address)      || '',
     invoiceNote:  (activeAcct && activeAcct.invoiceNote)  || ''
   };
-  const showPersonal = !activeAcct || activeAcct.showPersonalInfo !== false;  // 預設 true
+  const showPersonal = !activeAcct || activeAcct.showPersonalInfo !== false;     // 預設 true（底部 3 欄會顯示個人欄）
+  const showPersonalOnTop = !!(activeAcct && activeAcct.showPersonalInfoOnTop);   // 預設 false（不在頂端顯示，避免請款單太長）
   const hasPersonalInfo = showPersonal && (aPersonal.name || aPersonal.phone || aPersonal.email);
   const hasPayInfo = !!(activeAcct && (activeAcct.bank || activeAcct.account));
   const hasInvoiceInfo = !!(aPersonal.invoiceTitle || aPersonal.taxId || aPersonal.address || aPersonal.invoiceNote);
 
-  v.innerHTML = `<div class="invoice" id="invoice-print">
-    ${hasPersonalInfo ? `<div class="invoice-from">
-      <div>
-        <div class="from-name">${escapeHtml(aPersonal.invoiceTitle || aPersonal.name)}</div>
-        ${aPersonal.name && aPersonal.invoiceTitle ? `<div>${escapeHtml(aPersonal.name)}</div>` : ''}
-        ${aPersonal.phone ? `<div>📞 ${escapeHtml(aPersonal.phone)}</div>` : ''}
-        ${aPersonal.email ? `<div>✉️ ${escapeHtml(aPersonal.email)}</div>` : ''}
-      </div>
-      <div style="text-align: right; color: var(--muted); font-size: 12px;">致</div>
-    </div>` : ''}
+  // 頂端精簡個人資訊（1 行 inline 形式，可選）
+  const topPersonalParts = [];
+  if (showPersonalOnTop && aPersonal.name) topPersonalParts.push(escapeHtml(aPersonal.name));
+  if (showPersonalOnTop && aPersonal.phone) topPersonalParts.push('📞 ' + escapeHtml(aPersonal.phone));
+  if (showPersonalOnTop && aPersonal.email) topPersonalParts.push('✉️ ' + escapeHtml(aPersonal.email));
+  const topPersonalLine = topPersonalParts.length > 0
+    ? `<div style="text-align: right; color: var(--muted); font-size: 12px; margin-bottom: 4px;">請款方：${topPersonalParts.join(' · ')}</div>`
+    : '';
 
+  v.innerHTML = `<div class="invoice" id="invoice-print">
+    ${topPersonalLine}
     <div class="invoice-header">
       <div>
         <h2>${periodLabel} 工作明細</h2>
@@ -6833,22 +6836,28 @@ function drawInvoice() {
       </div>` : ''}
     </div>
 
-    <!-- v3.2.0：匯款資訊 + 發票資訊 並排，沒填發票就只顯示匯款 -->
-    ${(hasPayInfo || hasInvoiceInfo) ? `<div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-top: 16px;">
-      ${hasPayInfo ? `<div class="invoice-payment" style="flex: 1; min-width: 280px;">
-        <div class="invoice-payment-title">Payment Information 匯款資訊</div>
+    <!-- v3.2.0：底部 3 欄並排（個人 / 匯款 / 發票）；任何一欄沒料則該欄隱藏，自動 wrap -->
+    ${(hasPersonalInfo || hasPayInfo || hasInvoiceInfo) ? `<div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-top: 16px;">
+      ${hasPersonalInfo ? `<div class="invoice-payment" style="flex: 1; min-width: 220px;">
+        <div class="invoice-payment-title">Contact 我的資訊</div>
+        ${aPersonal.name ? `<div class="invoice-payment-row"><span class="lbl">姓名</span><span class="val">${escapeHtml(aPersonal.name)}</span></div>` : ''}
+        ${aPersonal.phone ? `<div class="invoice-payment-row"><span class="lbl">電話</span><span class="val">${escapeHtml(aPersonal.phone)}</span></div>` : ''}
+        ${aPersonal.email ? `<div class="invoice-payment-row"><span class="lbl">Email</span><span class="val" style="word-break: break-all;">${escapeHtml(aPersonal.email)}</span></div>` : ''}
+      </div>` : ''}
+      ${hasPayInfo ? `<div class="invoice-payment" style="flex: 1; min-width: 240px;">
+        <div class="invoice-payment-title">Payment 匯款資訊</div>
         ${activeAcct.bank ? `<div class="invoice-payment-row"><span class="lbl">銀行</span><span class="val">${escapeHtml(activeAcct.bank)}</span></div>` : ''}
         ${activeAcct.account ? `<div class="invoice-payment-row"><span class="lbl">帳號</span><span class="val" style="font-family: monospace;">${escapeHtml(activeAcct.account)}</span></div>` : ''}
         ${(activeAcct.holderName || aPersonal.name) ? `<div class="invoice-payment-row"><span class="lbl">戶名</span><span class="val">${escapeHtml(activeAcct.holderName || aPersonal.name)}</span></div>` : ''}
         ${activeAcct.note ? `<div class="invoice-payment-row" style="font-size: 12px; color: var(--muted);"><span class="lbl">備註</span><span class="val">${escapeHtml(activeAcct.note)}</span></div>` : ''}
         ${activeAcct.bankbookImage
-          ? `<div style="margin-top: 12px;"><img src="${activeAcct.bankbookImage}" alt="存摺" style="max-width: 320px; max-height: 200px; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border);"></div>`
+          ? `<div style="margin-top: 12px;"><img src="${activeAcct.bankbookImage}" alt="存摺" style="max-width: 100%; max-height: 160px; border-radius: 6px; border: 1px solid var(--border);"></div>`
           : (activeAcct.bankbookImageFileId
             ? `<div style="margin-top: 12px;color:var(--muted);font-size:13px;" data-bankbook-loading="${escapeHtml(activeAcct.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
             : '')}
       </div>` : ''}
-      ${hasInvoiceInfo ? `<div class="invoice-payment" style="flex: 1; min-width: 280px;">
-        <div class="invoice-payment-title">Tax Invoice Info 發票資訊</div>
+      ${hasInvoiceInfo ? `<div class="invoice-payment" style="flex: 1; min-width: 220px;">
+        <div class="invoice-payment-title">Invoice 發票資訊</div>
         ${aPersonal.invoiceTitle ? `<div class="invoice-payment-row"><span class="lbl">抬頭</span><span class="val">${escapeHtml(aPersonal.invoiceTitle)}</span></div>` : ''}
         ${aPersonal.taxId ? `<div class="invoice-payment-row"><span class="lbl">統編</span><span class="val" style="font-family: monospace;">${escapeHtml(aPersonal.taxId)}</span></div>` : ''}
         ${aPersonal.address ? `<div class="invoice-payment-row"><span class="lbl">寄送地址</span><span class="val">${escapeHtml(aPersonal.address)}</span></div>` : ''}
@@ -7775,6 +7784,8 @@ function ensurePaymentAccounts() {
     if (a.address == null)      a.address = '';
     if (a.invoiceNote == null)  a.invoiceNote = '';
     if (a.showPersonalInfo == null) a.showPersonalInfo = true;
+    // v3.2.0-fix：新增「也在頂端精簡顯示」flag，預設 false（避免請款單變太長）
+    if (a.showPersonalInfoOnTop == null) a.showPersonalInfoOnTop = false;
     // 既有 a.note 是「帳號備註」（請款單顯示在匯款資訊那一塊），維持不變
     // a.holderName 既有，維持不變
   });

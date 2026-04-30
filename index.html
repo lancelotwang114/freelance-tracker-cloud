@@ -835,15 +835,21 @@
 
     <!-- ── 個人資訊 ── -->
     <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-top: 12px; margin-bottom: 12px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <strong style="font-size: 14px;">👤 個人資訊（出現在請款單頂端）</strong>
-        <label class="checkbox-row" style="margin: 0; font-size: 13px;">
+      <strong style="font-size: 14px; display: block; margin-bottom: 8px;">👤 個人資訊</strong>
+      <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 13px;">
+        <label class="checkbox-row" style="margin: 0;">
           <input type="checkbox" id="pae-show-personal" checked>
-          <span>顯示</span>
+          <span>在請款單<b>底部</b>顯示（跟匯款 / 發票並排成 3 欄）</span>
+        </label>
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="checkbox" id="pae-show-personal-top">
+          <span>在請款單<b>頂端</b>多顯示一行精簡聯絡資訊</span>
         </label>
       </div>
       <p style="font-size: 11px; color: var(--muted); margin: 0 0 8px 0;">
-        關掉「顯示」→ 請款單只會出現匯款 + 發票資訊，不顯示姓名 / 電話 / Email。
+        💡 兩個都不勾 → 請款單完全不顯示個人資訊（業主拿到只看到匯款 + 發票）。<br>
+        💡 只勾「底部」→ 預設選擇，請款單最簡短。<br>
+        💡 「頂端」加勾 → 請款單上方多一行「請款方：王小明 · 0912... · xxx@...」（有些業主習慣這樣看）。
       </p>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
         <div>
