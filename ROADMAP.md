@@ -2,6 +2,16 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.5.0 ✅ Revenue 子分頁 + 月度趨勢調整（2026-04-30）
+- [x] Revenue 拆「總覽 / 趨勢 / 分析」3 子分頁
+- [x] 月度業主彙整搬到總覽
+- [x] 月度收益趨勢預設 6 個月（從 12 改）
+- [x] 月度模式反轉順序（最近月在最左）
+- [x] X 軸顯示 YYYY-MM 全文
+- [x] 累計線 + 累計總額 label 配合反轉重新計算
+- [x] 切子分頁時自動重繪該組圖表
+- [x] bump 三處版本號 → `2026-04-30-v3.5.0` / `ftracker-cloud-v3.5.0`
+
 ## v3.4.0 ✅ UI 簡化（Top bar / 描述瘦身 / Settings collapsed）（2026-04-30）
 - [x] Top bar 三按鈕精簡：刷新頁面 / 日誌 改 icon-only、主題改 「icon + 主題」
 - [x] 設定頁全部 collapsed by default（card-myinfo 從 always-open 改成 collapsible）

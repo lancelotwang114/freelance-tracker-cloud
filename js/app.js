@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-30-v3.4.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-30-v3.5.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -4504,6 +4504,25 @@ function setRevenueMode(mode) {
   renderRevenue();
 }
 
+// v3.5.0：Revenue 子分頁切換（總覽 / 趨勢 / 分析）
+function switchRevenueSubtab(key) {
+  document.querySelectorAll('.rev-subtabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.subtab === key);
+  });
+  document.querySelectorAll('.rev-subtab-pane').forEach(p => {
+    p.classList.toggle('hidden', p.dataset.subtab !== key);
+  });
+  // 切到趨勢/分析時，重繪該分頁的圖表（避免之前在 hidden 狀態時 SVG 寬度為 0）
+  if (key === 'trend') {
+    if (typeof renderPaymentTimeline === 'function') renderPaymentTimeline();
+    if (typeof renderHeatmap === 'function') renderHeatmap();
+    if (typeof renderBusyCycle === 'function') renderBusyCycle();
+  } else if (key === 'analysis') {
+    if (typeof renderTagPie === 'function') renderTagPie();
+    if (typeof renderHourlyTrend === 'function') renderHourlyTrend();
+  }
+}
+
 // 動態產生範圍選單
 function buildRangeOptions() {
   const rangeSel = document.getElementById('rev-range');
@@ -4524,13 +4543,13 @@ function buildRangeOptions() {
     revenueState.range = '5';
   } else {
     html += '<option value="3">最近 3 個月</option>';
-    html += '<option value="6">最近 6 個月</option>';
-    html += '<option value="12" selected>最近 12 個月</option>';
+    html += '<option value="6" selected>最近 6 個月</option>';
+    html += '<option value="12">最近 12 個月</option>';
     html += '<option value="24">最近 24 個月</option>';
     html += '<option value="all">全部</option>';
     html += '<option disabled>──────────</option>';
-    html += '<option value="custom">📌 自訂月份範圍</option>';
-    revenueState.range = '12';
+    html += '<option value="custom">自訂月份範圍</option>';
+    revenueState.range = '6';
   }
   rangeSel.innerHTML = html;
   document.getElementById('rev-custom-month')?.classList.add('hidden');
@@ -4814,10 +4833,20 @@ function drawRevChart(data) {
     return;
   }
 
-  const max = Math.max(...data.map(d => d.paid + d.unpaid + d.pending), 1);
+  // v3.5.0：月度模式 → 反轉順序（最近月在最左），年度模式維持舊→新
+  const isMonthReversed = revenueState.mode === 'month';
+  const displayData = isMonthReversed ? [...data].slice().reverse() : data;
+
+  // v3.5.0：先以時間順序（舊→新）算 cumulative，之後依顯示位置 mapping
+  // chronoCum[i] = data[0..i] 的累計 paid+unpaid（i 用原 data 索引）
+  const chronoCum = [];
+  let acc = 0;
+  data.forEach(d => { acc += d.paid + d.unpaid; chronoCum.push(acc); });
+
+  const max = Math.max(...displayData.map(d => d.paid + d.unpaid + d.pending), 1);
   // 取整到漂亮的刻度
   const niceMax = niceScale(max);
-  const n = data.length;
+  const n = displayData.length;
   const barGroupW = chartW / n;
   const barW = Math.min(barGroupW * 0.6, 50);
 
@@ -4834,7 +4863,7 @@ function drawRevChart(data) {
 
   // 柱 + 趨勢線點
   const linePoints = [];
-  data.forEach((d, i) => {
+  displayData.forEach((d, i) => {
     const cx = margin.left + i * barGroupW + barGroupW/2;
     const bx = cx - barW/2;
 
@@ -4864,19 +4893,20 @@ function drawRevChart(data) {
     const ly = margin.top + chartH - (total / niceMax * chartH);
     linePoints.push({ x: cx, y: ly, label: d.label, total });
 
-    // X 軸標籤
-    const xLabel = data.length > 12 ? (i % 2 === 0 ? d.label : '') : d.label;
-    const shortLabel = revenueState.mode === 'year' ? xLabel : xLabel.slice(5);
-    parts.push(`<text x="${cx}" y="${H-margin.bottom+16}" text-anchor="middle" fill="#8a8f98" font-size="10">${shortLabel}</text>`);
+    // v3.5.0：X 軸標籤改顯示 YYYY-MM 全文（不再 slice(5)）
+    // 數量多時隔項顯示，避免擠在一起
+    const showLabel = displayData.length > 12 ? (i % 2 === 0) : true;
+    if (showLabel) {
+      parts.push(`<text x="${cx}" y="${H-margin.bottom+16}" text-anchor="middle" fill="#8a8f98" font-size="10">${d.label}</text>`);
+    }
   });
 
-  // 累計線（從第一期到當期，顯示成長曲線）
-  let cumTotal = 0;
-  const cumPoints = [];
-  data.forEach((d, i) => {
-    cumTotal += d.paid + d.unpaid;  // 不算進行中的
+  // 累計線：用 displayData 順序映射 chronoCum
+  // displayData[i] 對應 data[origIdx]，origIdx = isMonthReversed ? data.length-1-i : i
+  const cumPoints = displayData.map((d, i) => {
+    const origIdx = isMonthReversed ? data.length - 1 - i : i;
     const cx = margin.left + i * barGroupW + barGroupW/2;
-    cumPoints.push({ x: cx, value: cumTotal });
+    return { x: cx, value: chronoCum[origIdx] };
   });
   const cumMax = Math.max(...cumPoints.map(p => p.value), 1);
   cumPoints.forEach(p => {
@@ -4887,11 +4917,11 @@ function drawRevChart(data) {
   if (cumPoints.length > 1) {
     const cumPath = 'M ' + cumPoints.map(p => `${p.x} ${p.y}`).join(' L ');
     parts.push(`<path d="${cumPath}" stroke="#a855f7" stroke-width="2" fill="none" stroke-dasharray="5,3" opacity="0.55"/>`);
-    // 起點和終點 label
-    if (cumPoints.length > 0) {
-      const last = cumPoints[cumPoints.length-1];
-      parts.push(`<text x="${last.x - 4}" y="${last.y - 6}" text-anchor="end" fill="#a855f7" font-size="10" font-weight="600">累計 ${fmtShort(last.value)}</text>`);
-    }
+    // v3.5.0：累計總額 label 永遠標在「累計值最大」的點（也就是最新月）
+    const peak = cumPoints.reduce((a, b) => b.value > a.value ? b : a, cumPoints[0]);
+    const anchor = peak.x > (W / 2) ? 'end' : 'start';
+    const dx = anchor === 'end' ? -4 : 4;
+    parts.push(`<text x="${peak.x + dx}" y="${peak.y - 6}" text-anchor="${anchor}" fill="#a855f7" font-size="10" font-weight="600">累計 ${fmtShort(peak.value)}</text>`);
   }
 
   // 當期趨勢線（藍色實線，顯示在上層）

@@ -1136,6 +1136,38 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ==================== Revenue Charts ==================== */
+/* ==================== Revenue 子分頁 nav（v3.5.0）==================== */
+.rev-subtabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+.rev-subtabs button {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  transition: all .15s;
+}
+.rev-subtabs button:hover:not(.active) {
+  background: var(--bg);
+  color: var(--text);
+}
+.rev-subtabs button.active {
+  background: var(--primary);
+  color: #fff;
+}
+
 .revenue-controls {
   display: flex; gap: 8px; flex-wrap: wrap;
   align-items: center;

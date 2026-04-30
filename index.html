@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-04-30-v3.4.0">
+<meta name="app-version" content="2026-04-30-v3.5.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -170,92 +170,110 @@
     </div>
   </section>
 
-  <!-- Revenue / Stats -->
+  <!-- Revenue / Stats（v3.5.0：拆 3 子分頁） -->
   <section id="tab-revenue" class="hidden">
-    <div class="card">
-      <div class="revenue-controls">
-        <div class="revenue-toggle">
-          <button id="rev-mode-month" class="active" onclick="setRevenueMode('month')">📅 月度</button>
-          <button id="rev-mode-year" onclick="setRevenueMode('year')">📊 年度</button>
+
+    <!-- 子分頁切換列 -->
+    <div class="rev-subtabs">
+      <button class="active" data-subtab="overview" onclick="switchRevenueSubtab('overview')">總覽</button>
+      <button data-subtab="trend" onclick="switchRevenueSubtab('trend')">趨勢</button>
+      <button data-subtab="analysis" onclick="switchRevenueSubtab('analysis')">分析</button>
+    </div>
+
+    <!-- ===== 總覽子分頁：控制 + summary + 月度趨勢圖 + 業主排行 + 月度業主彙整 ===== -->
+    <div class="rev-subtab-pane" data-subtab="overview">
+      <div class="card">
+        <div class="revenue-controls">
+          <div class="revenue-toggle">
+            <button id="rev-mode-month" class="active" onclick="setRevenueMode('month')">月度</button>
+            <button id="rev-mode-year" onclick="setRevenueMode('year')">年度</button>
+          </div>
+          <span class="rev-control-label">範圍</span>
+          <select class="revenue-select" id="rev-range" onchange="onRangeChange()"></select>
+          <span class="rev-control-label">業主</span>
+          <select class="revenue-select" id="rev-client" onchange="renderRevenue()"></select>
         </div>
-        <span class="rev-control-label">範圍</span>
-        <select class="revenue-select" id="rev-range" onchange="onRangeChange()"></select>
-        <span class="rev-control-label">業主</span>
-        <select class="revenue-select" id="rev-client" onchange="renderRevenue()"></select>
+
+        <!-- 自訂範圍（月度模式）-->
+        <div id="rev-custom-month" class="hidden" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+          <span style="font-size: 13px; color: var(--muted);">月份範圍：</span>
+          <input type="month" id="rev-from-month" onchange="renderRevenue()" style="max-width: 140px;">
+          <span style="color: var(--muted);">~</span>
+          <input type="month" id="rev-to-month" onchange="renderRevenue()" style="max-width: 140px;">
+        </div>
+
+        <!-- 自訂範圍（年度模式）-->
+        <div id="rev-custom-year" class="hidden" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+          <span style="font-size: 13px; color: var(--muted);">年份範圍：</span>
+          <input type="number" id="rev-from-year" min="2000" max="2099" placeholder="2024" onchange="renderRevenue()" style="max-width: 100px;">
+          <span style="color: var(--muted);">~</span>
+          <input type="number" id="rev-to-year" min="2000" max="2099" placeholder="2026" onchange="renderRevenue()" style="max-width: 100px;">
+        </div>
+
+        <div class="summary-grid" id="rev-summary"></div>
       </div>
 
-      <!-- 自訂範圍（月度模式）-->
-      <div id="rev-custom-month" class="hidden" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
-        <span style="font-size: 13px; color: var(--muted);">月份範圍：</span>
-        <input type="month" id="rev-from-month" onchange="renderRevenue()" style="max-width: 140px;">
-        <span style="color: var(--muted);">~</span>
-        <input type="month" id="rev-to-month" onchange="renderRevenue()" style="max-width: 140px;">
+      <div class="card">
+        <h3 id="rev-chart-title">月度收益趨勢</h3>
+        <div class="chart-container">
+          <svg class="chart-svg" id="rev-chart" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <div class="chart-legend">
+          <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--success)"></div>已收款</div>
+          <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--warning)"></div>待收款</div>
+          <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--muted); opacity:.5"></div>進行中</div>
+          <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--primary)"></div>當期趨勢</div>
+          <div class="chart-legend-item"><div class="chart-legend-dot" style="background: #a855f7;"></div>累計收入</div>
+        </div>
       </div>
 
-      <!-- 自訂範圍（年度模式）-->
-      <div id="rev-custom-year" class="hidden" style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
-        <span style="font-size: 13px; color: var(--muted);">年份範圍：</span>
-        <input type="number" id="rev-from-year" min="2000" max="2099" placeholder="2024" onchange="renderRevenue()" style="max-width: 100px;">
-        <span style="color: var(--muted);">~</span>
-        <input type="number" id="rev-to-year" min="2000" max="2099" placeholder="2026" onchange="renderRevenue()" style="max-width: 100px;">
+      <div class="card">
+        <h3>業主貢獻排行</h3>
+        <div id="rev-client-rank"></div>
       </div>
 
-      <div class="summary-grid" id="rev-summary"></div>
-    </div>
-
-    <div class="card">
-      <h3 id="rev-chart-title">月度收益趨勢</h3>
-      <div class="chart-container">
-        <svg class="chart-svg" id="rev-chart" xmlns="http://www.w3.org/2000/svg"></svg>
-      </div>
-      <div class="chart-legend">
-        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--success)"></div>已收款</div>
-        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--warning)"></div>待收款</div>
-        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--muted); opacity:.5"></div>進行中</div>
-        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: var(--primary)"></div>當期趨勢</div>
-        <div class="chart-legend-item"><div class="chart-legend-dot" style="background: #a855f7;"></div>累計收入</div>
+      <div class="card">
+        <h3>月度業主彙整</h3>
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+          <label style="margin: 0;">月份：</label>
+          <select id="report-month" onchange="renderMonthlyReport()" class="revenue-select"></select>
+          <button class="btn btn-outline btn-sm" onclick="exportMonthlyReportCSV()">匯出 CSV</button>
+        </div>
+        <div id="rev-monthly-report"></div>
       </div>
     </div>
 
-    <div class="card">
-      <h3>業主貢獻排行</h3>
-      <div id="rev-client-rank"></div>
-    </div>
-
-    <div class="card">
-      <h3>案件類型分佈</h3>
-      <div id="rev-tag-pie"></div>
-    </div>
-
-    <div class="card">
-      <h3>工作熱圖（最近 365 天）</h3>
-      <div id="rev-heatmap"></div>
-    </div>
-
-    <div class="card">
-      <h3>收款時間軸（最近 12 個月）</h3>
-      <div id="rev-payment-timeline"></div>
-    </div>
-
-    <div class="card">
-      <h3>忙閒週期分析</h3>
-      <div id="rev-busy-cycle"></div>
-    </div>
-
-    <div class="card">
-      <h3>時薪趨勢</h3>
-      <div id="rev-hourly-trend"></div>
-    </div>
-
-    <div class="card">
-      <h3>📋 月度業主彙整</h3>
-      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
-        <label style="margin: 0;">月份：</label>
-        <select id="report-month" onchange="renderMonthlyReport()" class="revenue-select"></select>
-        <button class="btn btn-outline btn-sm" onclick="exportMonthlyReportCSV()">📊 匯出 CSV</button>
+    <!-- ===== 趨勢子分頁：時間 / 熱圖 / 週期維度 ===== -->
+    <div class="rev-subtab-pane hidden" data-subtab="trend">
+      <div class="card">
+        <h3>收款時間軸（最近 12 個月）</h3>
+        <div id="rev-payment-timeline"></div>
       </div>
-      <div id="rev-monthly-report"></div>
+
+      <div class="card">
+        <h3>工作熱圖（最近 365 天）</h3>
+        <div id="rev-heatmap"></div>
+      </div>
+
+      <div class="card">
+        <h3>忙閒週期分析</h3>
+        <div id="rev-busy-cycle"></div>
+      </div>
     </div>
+
+    <!-- ===== 分析子分頁：類型 / 時薪維度 ===== -->
+    <div class="rev-subtab-pane hidden" data-subtab="analysis">
+      <div class="card">
+        <h3>案件類型分佈</h3>
+        <div id="rev-tag-pie"></div>
+      </div>
+
+      <div class="card">
+        <h3>時薪趨勢</h3>
+        <div id="rev-hourly-trend"></div>
+      </div>
+    </div>
+
   </section>
 
   <!-- Clients -->
