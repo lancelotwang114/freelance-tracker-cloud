@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.6.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.6.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -7071,7 +7071,44 @@ function openJobModal() {
   refreshTagSuggestions();
   onJobClientChange();
   updateJobHourlyHint();
+  setJobDetailsOpenState(null);  // v3.6.4：新增模式 details 全收摺
   document.getElementById('job-modal').classList.add('open');
+}
+
+// ============== v3.6.4：估價單 toggle 改放標題列 ==============
+function onJobEstimateToggle() {
+  const isEstimate = !!document.getElementById('job-estimate').checked;
+  const titleEl = document.getElementById('job-modal-title');
+  if (!titleEl) return;
+  // 在「新增」「編輯」「估價單」「估價單編輯」之間切
+  const cur = titleEl.textContent || '';
+  if (isEstimate) {
+    if (cur.includes('編輯')) titleEl.textContent = '編輯估價單';
+    else if (cur.includes('複製')) titleEl.textContent = '新增估價單（複製自現有）';
+    else titleEl.textContent = '新增估價單';
+  } else {
+    if (cur.includes('編輯')) titleEl.textContent = '編輯案件';
+    else if (cur.includes('複製')) titleEl.textContent = '新增案件（複製自現有案件）';
+    else titleEl.textContent = '新增案件';
+  }
+}
+
+// v3.6.4：依案件資料決定 collapsible details 預設展開/收摺
+// j = null 表示新增模式（全部收摺），j = job 物件表示編輯模式（有資料的展開）
+function setJobDetailsOpenState(j) {
+  const discount = document.getElementById('job-discount-details');
+  const subtasks = document.getElementById('job-subtasks-details');
+  const payments = document.getElementById('job-payments-details');
+  if (j) {
+    if (discount) discount.open = (j.discountType && j.discountType !== 'none') || (+j.discountValue > 0);
+    if (subtasks) subtasks.open = (j.subtasks || []).length > 0;
+    if (payments) payments.open = (j.payments || []).length > 0 || (+j.writeOff > 0);
+  } else {
+    // 新增模式：全部收摺
+    if (discount) discount.open = false;
+    if (subtasks) subtasks.open = false;
+    if (payments) payments.open = false;
+  }
 }
 
 // ============== Modal 內折扣與收款狀況（v2.8.0）==============
@@ -7333,6 +7370,7 @@ function editJob(id) {
   refreshTagSuggestions();
   onJobClientChange();
   updateJobHourlyHint();
+  setJobDetailsOpenState(j);  // v3.6.4：依案件資料決定 details 展開（折扣/子任務/收款有資料才展開）
   document.getElementById('job-modal').classList.add('open');
 }
 

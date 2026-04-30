@@ -1158,6 +1158,108 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--primary);
 }
 
+/* ==================== Job modal v2 分區重排（v3.6.4）==================== */
+/* 標題列 + 估價單 toggle */
+.job-modal-v2 .job-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.job-modal-v2 .job-modal-header h2 {
+  margin: 0;
+}
+.job-modal-v2 .estimate-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+.job-modal-v2 .estimate-toggle input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+}
+.job-modal-v2 .estimate-toggle:has(input:checked) {
+  background: var(--warning-light);
+  color: var(--warning);
+  font-weight: 600;
+}
+
+/* 區塊容器 */
+.job-modal-v2 .job-section {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border);
+}
+.job-modal-v2 .job-section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 8px;
+}
+.job-modal-v2 .job-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  text-transform: none;
+}
+
+/* 折扣 / 子任務 / 收款 collapsible */
+.job-modal-v2 .job-details-block {
+  background: var(--bg);
+  border-radius: 8px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.job-modal-v2 .job-details-block > summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.job-modal-v2 .job-details-block > summary::-webkit-details-marker {
+  display: none;
+}
+.job-modal-v2 .job-details-block > summary::before {
+  content: '▶';
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform .15s;
+}
+.job-modal-v2 .job-details-block[open] > summary::before {
+  transform: rotate(90deg);
+}
+.job-modal-v2 .job-detail-hint {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: auto;
+}
+.job-modal-v2 .job-details-content {
+  padding: 4px 12px 12px 12px;
+}
+
+/* 已取消 row：低調灰底 */
+.job-modal-v2 .job-cancelled-row {
+  background: var(--bg);
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
 /* ==================== 工時 + 計時器合併（v3.6.3）==================== */
 .job-hours-section {
   margin-bottom: 8px;
@@ -1216,17 +1318,28 @@ input:focus, select:focus, textarea:focus {
   font-size: 12px;
   color: var(--muted);
 }
+/* v3.6.4：grid auto-fit 在寬螢幕會把每格拉太寬讓 checkbox+label 中間出現空隙；
+   改 flex-wrap，每個 label 只占內容寬度，自然換行 */
 .cal-compact .cal-sync-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 4px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
   margin-top: 4px;
   font-size: 13px;
 }
 .cal-compact .cal-sync-grid label {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* 蓋掉全域 input { width: 100% }，否則 checkbox 會被拉寬撐爆排版 */
+.cal-compact .cal-sync-grid input[type="checkbox"],
+.cal-compact label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
 }
 
 /* ==================== Reminder 卡片 compact（v3.6.2 二次調整）==================== */
@@ -1245,10 +1358,16 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: 8px;
 }
 /* v3.6.2：grid 自適應分欄，min 220px → 寬螢幕 2-3 欄，窄螢幕自動 1 欄 */
+/* v3.6.4：補 checkbox 寬度 override（蓋掉全域 input { width: 100% }） */
 .reminder-compact .reminder-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 6px;
+}
+.reminder-compact input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
 }
 .reminder-compact .reminder-inline {
   display: flex;

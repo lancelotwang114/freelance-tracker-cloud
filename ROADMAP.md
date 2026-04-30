@@ -2,6 +2,15 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.6.4 ✅ 修行事曆 grid + 案件 modal 大改（2026-05-01）
+- [x] 修行事曆 grid 排版（flex-wrap 取代 grid auto-fit、checkbox 寬度 override）
+- [x] 案件 modal 拆 3 區（基本/金額/進度收款）
+- [x] 折扣 / 子任務 / 收款狀況改 collapsible details（按案件資料自動展開）
+- [x] 估價單從黃色 checkbox 搬到標題列 chip toggle
+- [x] 已取消改低調灰底
+- [x] modal 高度減約 30-40%
+- [x] bump 三處版本號 → `2026-05-01-v3.6.4` / `ftracker-cloud-v3.6.4`
+
 ## v3.6.3 ✅ 行事曆縮小 + 工時計時器合併（2026-05-01）
 - [x] 行事曆同步卡 cal-compact CSS（grid 分欄 + 4 step 縮 padding）
 - [x] 行事曆建議區改 `<details>` 預設收摺

@@ -1,5 +1,58 @@
 ﻿# 版本更新歷史
 
+## v3.6.4 — 修行事曆 grid + 案件 modal 大改（2026-05-01）
+
+### Bug 修：行事曆同步卡 grid 排版（v3.6.3 引入）
+- v3.6.3 用 `grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))` 在寬螢幕會把每格拉到 200px 寬，但 label 內容只占 ~50px，導致 checkbox 跟文字之間出現巨大空隙
+- 改用 `display: flex; flex-wrap: wrap` + `inline-flex` 的 label，每個 label 只占自己的內容寬度，自然換行
+- 順手補 `input[type="checkbox"] { width: auto }` override 全域 `input { width: 100% }` 規則（reminder card 也補）
+- 「啟用自動同步」checkbox 同樣的問題也一併修
+
+### 案件 modal 全面分區重排（C）
+- 拆成 3 個邏輯區塊（虛線分隔）：
+  - 區 1 **基本資訊**：業主、開始日+截止日、案件名稱、類型/標籤
+  - 區 2 **內容 與 金額**：細項說明+範本、單價×數量×總金額、工時+計時器、折扣（收摺）、金額計算結果
+  - 區 3 **進度 與 收款**：完成+完成日、子任務（收摺）、收款狀況（收摺）、已取消
+- 區塊標題用 11px 灰色 letter-spacing 0.5px 的 hint label，視覺輕、不打擾
+- 區塊間用 dashed border-bottom 1px 分隔
+
+### 折扣 / 子任務 / 收款狀況改 collapsible（B）
+- 三個區塊都改成 `<details>` 樣式（自訂 ▶ 箭頭、hover 高亮）
+- **折扣**：新增模式收摺；編輯模式有折扣才展開
+- **子任務**：新增模式收摺；編輯模式有子任務才展開
+- **收款狀況**：新增模式收摺（看到 status badge 跟「+ 新增收款」按鈕）；編輯模式有 payment 或 writeOff 才展開
+- 新增 helper `setJobDetailsOpenState(j)` 在 openJobModal / editJob / duplicateJob 結尾統一呼叫
+
+### 估價單模式從黃色 checkbox 搬到標題列（B）
+- 原本是 modal 底部黃色背景大 checkbox，視覺很搶眼但使用率最低
+- 改成標題列右側 chip 樣式 toggle：「📄 估價單」
+- 勾起來時 chip 變黃色背景 + 加粗
+- 加 `onJobEstimateToggle()` 自動更新 modal title：「新增案件」⇆「新增估價單」、「編輯案件」⇆「編輯估價單」
+- 用 `:has(input:checked)` CSS pseudo-class 做純 CSS 樣式切換（無需 JS 加 class）
+
+### 已取消 從紅色強調改成灰底
+- 原本用 `.danger-checkbox` 紅色背景，跟 v3.6.0 簡潔風格不一致
+- 改用 `.job-cancelled-row` 低調灰底 + 圖示 emoji 自帶語意
+
+### 整體效果
+- modal 高度約減 30-40%（折扣 / 子任務 / 收款都摺起來時）
+- 第一次新增案件的人只看到 3 個必填區塊（基本/金額/狀態），不會被收款/折扣大 box 嚇到
+- 編輯既有案件時自動展開有資料的區塊
+
+### 順便砍掉的冗餘
+- 「💡 單價 × 數量 會自動算總金額」提示文字（v3.6.3 已砍但 PR 沒分清楚）
+- 範本按鈕的 📋💾 emoji
+- 標籤 input 旁邊的「　例：廣告、設計、動畫」hint span（已併進 placeholder）
+- 估價單按鈕的 📄 emoji
+- 「✓ 一次收齊餘額」前面的 ✓
+- 收款狀況「不計入收益統計但保留紀錄」→「保留紀錄但不計入統計」（更短）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.6.4`
+- SW CACHE_VERSION → `ftracker-cloud-v3.6.4`
+
+---
+
 ## v3.6.3 — 行事曆縮小 + 工時計時器合併（2026-05-01）
 
 ### 行事曆同步卡縮小
