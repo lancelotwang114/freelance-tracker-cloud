@@ -286,31 +286,32 @@
   <section id="tab-invoice" class="hidden">
     <div class="card no-print" style="padding: 12px;">
 
-      <!-- v3.2.0-ui：第 1 列 — 業主 + 請款範圍（兩欄並排，請款範圍給夠寬度容納區間 picker） -->
-      <div style="display: grid; grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.6fr); gap: 8px; align-items: end;">
-        <div>
+      <!-- v3.2.0-ui：第 1 列 — 業主 + 請款範圍（兩欄並排，請款範圍 wrap 到第二行避免擠壓） -->
+      <!-- 修：select 全域 width:100% 在 flex 內會 overflow，用 flex-wrap + explicit min-width 解決 -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end;">
+        <div style="min-width: 0;">
           <span style="font-size: 11px; color: var(--muted);">業主</span>
-          <select id="inv-client" style="margin-top: 2px;"></select>
+          <select id="inv-client" style="margin-top: 2px; width: 100%;"></select>
         </div>
-        <div>
+        <div style="min-width: 0;">
           <span style="font-size: 11px; color: var(--muted);">請款範圍</span>
-          <div style="display: flex; gap: 4px; margin-top: 2px; flex-wrap: nowrap; align-items: center;">
-            <select id="inv-mode" onchange="onInvModeChange()" style="flex: 0 0 auto; min-width: 70px;">
+          <div style="display: flex; gap: 4px; margin-top: 2px; flex-wrap: wrap; align-items: center;">
+            <select id="inv-mode" onchange="onInvModeChange()" style="width: 80px; flex: 0 0 80px;">
               <option value="single">單月</option>
               <option value="range">區間</option>
             </select>
-            <select id="inv-month" style="flex: 1; min-width: 0;"></select>
+            <select id="inv-month" style="width: auto; flex: 1 1 100px; min-width: 100px;"></select>
             <span id="inv-range-sep" class="hidden" style="color: var(--muted); flex: 0 0 auto;">~</span>
-            <select id="inv-month-end" class="hidden" style="flex: 1; min-width: 0;"></select>
+            <select id="inv-month-end" class="hidden" style="width: auto; flex: 1 1 100px; min-width: 100px;"></select>
           </div>
         </div>
       </div>
 
       <!-- v3.2.0-ui：第 2 列 — 收款帳號（獨立一排，含 CRUD 按鈕） -->
-      <div style="margin-top: 8px;">
+      <div style="margin-top: 8px; min-width: 0;">
         <span style="font-size: 11px; color: var(--muted);">收款帳號（含個人 / 發票資訊）</span>
         <div style="display: flex; gap: 4px; margin-top: 2px; align-items: center; flex-wrap: wrap;">
-          <select id="inv-pay-account" onchange="onInvPayAccountChange()" style="flex: 1; min-width: 200px;"></select>
+          <select id="inv-pay-account" onchange="onInvPayAccountChange()" style="width: auto; flex: 1 1 200px; min-width: 200px;"></select>
           <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId())" title="編輯目前選定的收款帳號">📝</button>
           <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(null)" title="新增一筆收款帳號身分">➕</button>
           <button type="button" class="btn btn-outline btn-sm" onclick="deleteSelectedPaymentAccount()" title="刪除目前選定的收款帳號" style="color: var(--danger);">🗑️</button>
