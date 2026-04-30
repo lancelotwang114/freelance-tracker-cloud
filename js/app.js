@@ -2980,6 +2980,15 @@ function save() {
   }
 }
 
+// v3.1.0-fix：統一的「config 寫 localStorage + 觸發雲端同步」入口
+// 只動 config 的函式（saveUserInfo / saveConfig 等）都該走這個，避免漏推 Drive
+function saveConfigOnly() {
+  config.lastModifiedAt = new Date().toISOString();  // 給 mergeStates 比對用
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  if (typeof cloudSchedulePush === 'function') cloudSchedulePush();
+  if (typeof cloudScheduleCalendarSync === 'function') cloudScheduleCalendarSync();
+}
+
 function saveConfig() {
   const g = (id) => document.getElementById(id);
   config.unpaidRemindDays = Math.max(1, Math.min(120, +g('cfg-unpaid-days-input').value || 7));
@@ -2992,7 +3001,7 @@ function saveConfig() {
   config.enableMonthEndAlert = g('cfg-alert-month-end')?.checked !== false;
   config.enableBillingDayAlert = g('cfg-alert-billing-day')?.checked !== false;
   config.enableSlowPayAlert = g('cfg-alert-slow-pay')?.checked !== false;
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  saveConfigOnly();  // v3.1.0-fix：之前直接寫 localStorage 沒推 Drive
   render();
   // Calendar 提醒提示文字（如果是 follow 模式，會跟著 dueSoonDays 變動）
   if (typeof updateCalendarReminderHint === 'function') updateCalendarReminderHint();
@@ -7783,7 +7792,7 @@ function saveUserInfo() {
     // bank / account 舊欄位不再寫入；paymentAccounts 由上面 collectPaymentAccountsFromUI 維護
   };
   ensurePaymentAccounts();
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  saveConfigOnly();  // v3.1.0-fix：之前直接寫 localStorage 沒推 Drive，paymentAccounts 永遠不會同步
   render();
   toast('✓ 已儲存收款資訊，請款單會自動帶入');
 }
