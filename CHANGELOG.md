@@ -1,5 +1,47 @@
 ﻿# 版本更新歷史
 
+## v3.2.0 — 請款單重構（2026-04-29）
+
+> 案件加數量、請款單版面重做、收款帳號合併個人資訊、CRUD 從設定頁搬到請款單分頁。
+
+### Schema 升 v8 → v10
+- **v9**：每筆 job 加 `quantity`（預設 1），給請款單顯示「單價 × 數量」用；amount 維持是「總金額」（不變）
+- **v10**：每筆 paymentAccount 加 7 個欄位 — `name / phone / email / invoiceTitle / taxId / address / invoiceNote / showPersonalInfo`
+- 升級時 `ensurePaymentAccounts()` 從 top-level userInfo 一次性 backfill 既有 paymentAccount 的 name / phone / email / invoiceTitle，舊資料無痛升級
+
+### 案件編輯表單
+- 新增「單價」「數量」「總金額」三欄並排
+- 改任一個自動算另一個（單價 × 數量 = 總金額；改總金額會反算單價）
+- 數量預設 1，最少 1（整數）
+
+### 請款單版面重構
+- **狀態欄整欄移除**：給業主看的單據不需要顯示「進行中 / 待收款 / 已收款」狀態
+- **「原價」改為「單價 × 數量」兩欄**：報帳/抓出錯時可看到細項
+- **匯款資訊 + 發票資訊 並排**：左邊匯款（既有），右邊發票（新增），沒填發票就不顯示右欄
+- **發票資訊新欄位**：`invoiceTitle` / `taxId` / `address` / `invoiceNote`
+- **顯示個人資訊 toggle**：每筆 paymentAccount 各自帶 `showPersonalInfo` flag，關掉就不顯示姓名 / 電話 / Email
+
+### 收款帳號 CRUD 搬到請款單分頁
+- 設定頁「我的收款資訊」card 簡化成導引按鈕「📋 前往請款單分頁編輯」
+- 請款單分頁的下拉選擇器旁邊加「📝 編輯 / ➕ 新增 / 🗑️ 刪除」三按鈕
+- 點 📝 / ➕ 開啟新的編輯 modal `#payment-account-editor`：
+  - 標籤、個人資訊（含 showPersonalInfo toggle）、發票資訊、匯款資訊、存摺照片，4 段獨立區塊
+  - 存摺照片支援上傳 Drive（同 alpha.3 邏輯）
+- 刪除時自動清掉對應的 Drive 存摺照片孤兒檔
+
+### 修正
+- `onInvPayAccountChange` 改用 `saveConfigOnly()` 統一推 Drive
+
+### ACTION_LABELS
+- 沿用 cloud-image-upload / cloud-image-delete（CRUD modal 內的存摺上傳走相同邏輯）
+
+### 版本 bump 三處
+- `js/app.js` `APP_VERSION` → `2026-04-29-v3.2.0`
+- `index.html` meta → 同上
+- `service-worker.js` `CACHE_VERSION` → `ftracker-cloud-v3.2.0`
+
+---
+
 ## v3.1.0 — Google Calendar 整合（2026-04-29）
 
 > v3.0.0 stable 之後第一個功能擴充。重做 v2 的 Google 行事曆同步——這次直接打 Calendar API、不再經過 Apps Script。

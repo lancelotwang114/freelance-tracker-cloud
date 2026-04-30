@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-04-29-v3.1.0">
+<meta name="app-version" content="2026-04-29-v3.2.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -299,9 +299,18 @@
         <select id="inv-month-end" class="hidden" style="flex: 1; min-width: 120px;"></select>
       </div>
 
-      <!-- v2.10.13：選擇收款帳號（多筆收款資訊時用） -->
-      <label style="margin-top: 12px;">收款帳號</label>
-      <select id="inv-pay-account" onchange="onInvPayAccountChange()"></select>
+      <!-- v2.10.13：選擇收款帳號（多筆收款資訊時用）-->
+      <!-- v3.2.0：每筆帳號自帶完整身分（含個人資訊+發票資訊）；CRUD 從設定頁搬到這裡 -->
+      <label style="margin-top: 12px;">收款帳號（含個人 / 發票資訊）</label>
+      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+        <select id="inv-pay-account" onchange="onInvPayAccountChange()" style="flex: 1; min-width: 200px;"></select>
+        <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId())" title="編輯目前選定的收款帳號">📝 編輯</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(null)" title="新增一筆收款帳號身分">➕ 新增</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="deleteSelectedPaymentAccount()" title="刪除目前選定的收款帳號" style="color: var(--danger);">🗑️ 刪除</button>
+      </div>
+      <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+        💡 每筆收款帳號獨立包含個人資訊 + 發票資訊。例如：個人案 vs 工作室案分兩筆，請款單會自動帶對應內容。
+      </p>
 
       <!-- v2.10.5：請款單狀態篩選 — preset 按鈕 + 常駐 checkbox -->
       <label style="margin-top: 12px;">顯示狀態</label>
@@ -435,45 +444,16 @@
     <div class="settings-section-title">🌟 常用設定</div>
 
     <!-- 我的收款資訊（v2.10.13：bank/account 改成多筆收款帳號） -->
-    <div class="card collapsible" id="card-myinfo">
-      <div class="card-head" onclick="toggleCard('card-myinfo')">
-        <h3>👤 我的收款資訊</h3>
-        <span class="card-status">會顯示在請款單</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">填寫後，產生的請款單會自動帶入，業主拿到就知道怎麼付款。可以新增多組收款帳號，請款時再選擇要用哪一組。</p>
-        <div class="my-info-grid">
-          <div>
-            <label>姓名</label>
-            <input type="text" id="me-name" placeholder="王小明">
-          </div>
-          <div>
-            <label>電話</label>
-            <input type="text" id="me-phone" placeholder="0912-345-678">
-          </div>
-          <div>
-            <label>Email</label>
-            <input type="email" id="me-email" placeholder="you@example.com">
-          </div>
-          <div>
-            <label>發票抬頭（若有）</label>
-            <input type="text" id="me-title" placeholder="工作室名稱">
-          </div>
-        </div>
-
-        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border);">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <strong style="font-size: 14px;">💳 收款帳號</strong>
-            <button type="button" class="btn btn-outline btn-sm" onclick="addPaymentAccount()">+ 新增帳號</button>
-          </div>
-          <div id="payment-accounts-list"></div>
-        </div>
-
-        <label style="margin-top: 12px;">備註（列在請款單底部）</label>
-        <textarea id="me-note" placeholder="例：匯款後請告知末五碼..."></textarea>
-        <button class="btn btn-primary btn-sm" style="margin-top: 12px;" onclick="saveUserInfo()">儲存</button>
-      </div>
+    <!-- v3.2.0：個人 + 收款帳號管理整套搬到請款單分頁，這裡只留導引 -->
+    <div class="card" id="card-myinfo">
+      <h3>👤 我的收款資訊</h3>
+      <p style="font-size: 13px; color: var(--muted); margin: 8px 0 12px 0;">
+        每筆收款帳號自帶完整身分（個人資訊 + 發票資訊 + 匯款資訊），編輯介面已搬到「請款單」分頁。
+      </p>
+      <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('invoice')">📋 前往請款單分頁編輯</button>
+      <p style="font-size: 11px; color: var(--muted); margin-top: 12px;">
+        💡 例如：可建一筆「個人」、一筆「工作室」，產生請款單時自動切換顯示對應的姓名、抬頭、匯款帳號。
+      </p>
     </div>
 
     <!-- 通知與提醒（合併「桌面通知 + 提醒設定」）-->
@@ -844,6 +824,109 @@
 
 <button class="fab" id="fab-add" onclick="openJobModal()">＋ 新增案件</button>
 
+<!-- v3.2.0：Modal — 編輯/新增 收款帳號（含個人 + 發票 + 匯款資訊） -->
+<div class="modal-bg" id="payment-account-editor">
+  <div class="modal" style="max-width: 600px;">
+    <h2 id="payment-account-editor-title">編輯收款帳號</h2>
+    <input type="hidden" id="pae-id">
+
+    <label>標籤（自己看的，例：個人 / 工作室）</label>
+    <input type="text" id="pae-label" placeholder="例：個人">
+
+    <!-- ── 個人資訊 ── -->
+    <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-top: 12px; margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <strong style="font-size: 14px;">👤 個人資訊（出現在請款單頂端）</strong>
+        <label class="checkbox-row" style="margin: 0; font-size: 13px;">
+          <input type="checkbox" id="pae-show-personal" checked>
+          <span>顯示</span>
+        </label>
+      </div>
+      <p style="font-size: 11px; color: var(--muted); margin: 0 0 8px 0;">
+        關掉「顯示」→ 請款單只會出現匯款 + 發票資訊，不顯示姓名 / 電話 / Email。
+      </p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div>
+          <label>姓名</label>
+          <input type="text" id="pae-name" placeholder="王小明">
+        </div>
+        <div>
+          <label>電話</label>
+          <input type="text" id="pae-phone" placeholder="0912-345-678">
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label>Email</label>
+          <input type="email" id="pae-email" placeholder="you@example.com">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 發票資訊 ── -->
+    <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
+      <strong style="font-size: 14px; display: block; margin-bottom: 8px;">🧾 發票 / 抬頭資訊（不填則請款單不會顯示這塊）</strong>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div>
+          <label>發票抬頭</label>
+          <input type="text" id="pae-invoice-title" placeholder="例：XX 工作室">
+        </div>
+        <div>
+          <label>統一編號</label>
+          <input type="text" id="pae-tax-id" placeholder="8 位數字（個人空白）">
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label>寄送地址</label>
+          <input type="text" id="pae-address" placeholder="例：台北市..">
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label>發票備註</label>
+          <input type="text" id="pae-invoice-note" placeholder="例：請註明案件編號">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 匯款資訊 ── -->
+    <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px;">
+      <strong style="font-size: 14px; display: block; margin-bottom: 8px;">💳 匯款資訊</strong>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div>
+          <label>戶名（請款單顯示）</label>
+          <input type="text" id="pae-holder-name" placeholder="留空則用上面姓名">
+        </div>
+        <div>
+          <label>匯款銀行</label>
+          <input type="text" id="pae-bank" placeholder="例：玉山銀行 (808)">
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label>匯款帳號</label>
+          <input type="text" id="pae-account" placeholder="0000-000-000000">
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label>帳號備註</label>
+          <input type="text" id="pae-account-note" placeholder="例：跨行匯款請扣手續費">
+        </div>
+      </div>
+
+      <!-- 存摺照片 -->
+      <div style="margin-top: 10px;">
+        <label>存摺照片（請款單會附上）</label>
+        <input type="hidden" id="pae-bankbook-image" value="">
+        <input type="hidden" id="pae-bankbook-fileid" value="">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <input type="file" accept="image/*" id="pae-bankbook-upload" onchange="paeOnBankbookFileChange(this)" style="display: none;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('pae-bankbook-upload').click()">📷 <span id="pae-bankbook-upload-label">上傳照片</span></button>
+          <button type="button" class="btn btn-ghost btn-sm" id="pae-bankbook-remove-btn" onclick="paeClearBankbook()" style="color: var(--danger); display: none;">移除</button>
+        </div>
+        <div id="pae-bankbook-preview"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="savePaymentAccountEditor()">儲存</button>
+      <button class="btn" onclick="closePaymentAccountEditor()">取消</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Add/Edit Job -->
 <div class="modal-bg" id="job-modal">
   <div class="modal">
@@ -879,15 +962,27 @@
     </div>
     <textarea id="job-details" placeholder="例：1280x400 banner x 2 張，含兩次修改"></textarea>
     <div id="template-picker" class="hidden" style="background: var(--bg); border-radius: 8px; padding: 8px; margin-top: -4px; margin-bottom: 8px; max-height: 200px; overflow-y: auto;"></div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+    <!-- v3.2.0：金額拆成 單價 × 數量；amount 仍是「總金額」自動算 -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
       <div>
-        <label>金額（原價）</label>
-        <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary()">
+        <label>單價</label>
+        <input type="number" id="job-unit-price" placeholder="0" oninput="onJobUnitOrQtyChange()">
       </div>
       <div>
-        <label>工時（小時，選填）</label>
-        <input type="number" id="job-hours" placeholder="0" step="0.5" oninput="updateJobHourlyHint()">
+        <label>數量</label>
+        <input type="number" id="job-quantity" placeholder="1" min="1" step="1" value="1" oninput="onJobUnitOrQtyChange()">
       </div>
+      <div>
+        <label>總金額</label>
+        <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">
+      </div>
+    </div>
+    <p style="font-size: 11px; color: var(--muted); margin-top: -2px; margin-bottom: 8px;">
+      💡 單價 × 數量 會自動算總金額；想直接改總金額也可以（會反算單價）。
+    </p>
+    <div>
+      <label>工時（小時，選填）</label>
+      <input type="number" id="job-hours" placeholder="0" step="0.5" oninput="updateJobHourlyHint()">
     </div>
 
     <!-- v2.8.0: 折扣 -->

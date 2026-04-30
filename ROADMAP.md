@@ -2,6 +2,14 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.2.0 ✅ 請款單重構（2026-04-29）
+- [x] Schema v8 → v10：jobs 加 quantity；paymentAccount 合併個人 + 發票資訊
+- [x] 案件表單：單價 × 數量 × 總金額 三欄聯動
+- [x] 請款單版面：狀態欄移除、原價換成單價×數量、匯款+發票並排
+- [x] paymentAccount.showPersonalInfo flag：可決定是否顯示個人資訊
+- [x] 收款帳號 CRUD 從設定頁搬到請款單分頁（含完整 modal）
+- [x] 設定頁「我的收款資訊」card 簡化成導引按鈕
+
 ## v3.1.0 ✅ Google Calendar 整合（2026-04-29）
 - [x] AUTH_SCOPES 加 `calendar.events` + `calendar.readonly`
 - [x] Calendar API Client 5 函式（list calendars / list events / create / update / delete）

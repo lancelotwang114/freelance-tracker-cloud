@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-29-v3.1.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-29-v3.2.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2814,7 +2814,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 8;  // v3.0.0-alpha.3：存摺照片改成 Drive 個別檔，paymentAccount 加 bankbookImageFileId 欄位
+const CURRENT_SCHEMA_VERSION = 10;  // v3.2.0：v9 案件加 quantity；v10 paymentAccount 合併個人資訊（name/phone/email/invoiceTitle/taxId/address/invoiceNote/showPersonalInfo）
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -2896,6 +2896,20 @@ const SCHEMA_MIGRATIONS = {
   // 由 cloudMigrateBankbookImages() async helper 在登入後背景跑，每張圖逐一上傳到 Drive 換 fileId
   7: function(state) {
     // state-level 沒東西要動；這個 migration 純粹是版本標記
+  },
+  // v8 → v9：每筆 job 加 quantity 欄位（預設 1）（v3.2.0 新增）
+  // 給請款單顯示「單價 × 數量」用；amount 維持是「總金額」、unitPrice 顯示時計算 = amount / quantity
+  8: function(state) {
+    state.jobs = (state.jobs || []).map(j => ({
+      ...j,
+      quantity: j.quantity != null ? j.quantity : 1
+    }));
+  },
+  // v9 → v10：paymentAccount 合併個人資訊（v3.2.0 新增）
+  // 每筆 paymentAccount 自帶完整身分（name/phone/email/invoiceTitle/taxId/address/invoiceNote/showPersonalInfo）
+  // state-level 無事（paymentAccounts 在 config）；由 ensurePaymentAccounts 補欄位 + 從 top-level userInfo 一次性 backfill
+  9: function(state) {
+    // 純版本標記
   }
 };
 
@@ -6358,7 +6372,7 @@ function renderInvoicePayAccountSelect() {
   const u = config.userInfo || {};
   const list = u.paymentAccounts || [];
   if (!list.length) {
-    sel.innerHTML = `<option value="">（尚未設定收款帳號，請到設定 → 我的收款資訊新增）</option>`;
+    sel.innerHTML = `<option value="">（尚未設定收款帳號，按右側「➕ 新增」開始）</option>`;
     sel.disabled = true;
     return;
   }
@@ -6375,8 +6389,196 @@ function onInvPayAccountChange() {
   const sel = document.getElementById('inv-pay-account');
   if (!sel || !sel.value) return;
   config.userInfo.selectedPaymentAccountId = sel.value;
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  saveConfigOnly();  // v3.1.0-fix：同步推 Drive
   drawInvoice();
+}
+
+// v3.2.0：拿目前在請款單下拉選的收款帳號 id
+function getInvSelectedAcctId() {
+  const sel = document.getElementById('inv-pay-account');
+  return sel ? sel.value : '';
+}
+
+// v3.2.0：CRUD modal — 開啟（id 為 null 表示新增）
+function openPaymentAccountEditor(id) {
+  ensurePaymentAccounts();
+  const list = (config.userInfo && config.userInfo.paymentAccounts) || [];
+  const acct = id ? list.find(a => a.id === id) : null;
+  document.getElementById('payment-account-editor-title').textContent = acct ? '編輯收款帳號' : '新增收款帳號';
+  document.getElementById('pae-id').value = acct ? acct.id : '';
+  document.getElementById('pae-label').value = acct ? (acct.label || '') : '';
+  document.getElementById('pae-show-personal').checked = acct ? (acct.showPersonalInfo !== false) : true;
+  document.getElementById('pae-name').value = acct ? (acct.name || '') : '';
+  document.getElementById('pae-phone').value = acct ? (acct.phone || '') : '';
+  document.getElementById('pae-email').value = acct ? (acct.email || '') : '';
+  document.getElementById('pae-invoice-title').value = acct ? (acct.invoiceTitle || '') : '';
+  document.getElementById('pae-tax-id').value = acct ? (acct.taxId || '') : '';
+  document.getElementById('pae-address').value = acct ? (acct.address || '') : '';
+  document.getElementById('pae-invoice-note').value = acct ? (acct.invoiceNote || '') : '';
+  document.getElementById('pae-holder-name').value = acct ? (acct.holderName || '') : '';
+  document.getElementById('pae-bank').value = acct ? (acct.bank || '') : '';
+  document.getElementById('pae-account').value = acct ? (acct.account || '') : '';
+  document.getElementById('pae-account-note').value = acct ? (acct.note || '') : '';
+  document.getElementById('pae-bankbook-image').value = acct ? (acct.bankbookImage || '') : '';
+  document.getElementById('pae-bankbook-fileid').value = acct ? (acct.bankbookImageFileId || '') : '';
+  // 渲染 bankbook preview
+  paeRenderBankbookPreview();
+  document.getElementById('payment-account-editor').classList.add('open');
+}
+
+function closePaymentAccountEditor() {
+  document.getElementById('payment-account-editor').classList.remove('open');
+}
+
+function savePaymentAccountEditor() {
+  ensurePaymentAccounts();
+  const id = document.getElementById('pae-id').value;
+  const data = {
+    label: document.getElementById('pae-label').value.trim(),
+    showPersonalInfo: document.getElementById('pae-show-personal').checked,
+    name: document.getElementById('pae-name').value.trim(),
+    phone: document.getElementById('pae-phone').value.trim(),
+    email: document.getElementById('pae-email').value.trim(),
+    invoiceTitle: document.getElementById('pae-invoice-title').value.trim(),
+    taxId: document.getElementById('pae-tax-id').value.trim(),
+    address: document.getElementById('pae-address').value.trim(),
+    invoiceNote: document.getElementById('pae-invoice-note').value.trim(),
+    holderName: document.getElementById('pae-holder-name').value.trim(),
+    bank: document.getElementById('pae-bank').value.trim(),
+    account: document.getElementById('pae-account').value.trim(),
+    note: document.getElementById('pae-account-note').value.trim(),
+    bankbookImage: document.getElementById('pae-bankbook-image').value,
+    bankbookImageFileId: document.getElementById('pae-bankbook-fileid').value
+  };
+
+  const list = config.userInfo.paymentAccounts;
+  if (id) {
+    const idx = list.findIndex(a => a.id === id);
+    if (idx >= 0) list[idx] = { ...list[idx], ...data };
+  } else {
+    const newAcct = { id: uid(), ...data };
+    list.push(newAcct);
+    config.userInfo.selectedPaymentAccountId = newAcct.id;
+  }
+  saveConfigOnly();
+  closePaymentAccountEditor();
+  renderInvoicePayAccountSelect();
+  drawInvoice();
+  toast('✓ 已儲存收款帳號');
+}
+
+function deleteSelectedPaymentAccount() {
+  const id = getInvSelectedAcctId();
+  if (!id) { toast('沒有選中的收款帳號可刪'); return; }
+  ensurePaymentAccounts();
+  const list = config.userInfo.paymentAccounts;
+  const acct = list.find(a => a.id === id);
+  if (!acct) return;
+  if (!confirm(`確定要刪除收款帳號「${acct.label || acct.bank || '未命名'}」？\n\n（這不會影響任何案件，但下拉選單會少一個選項）`)) return;
+
+  // 若有 Drive 存摺照片，順手刪
+  if (acct.bankbookImageFileId && typeof driveDeleteFile === 'function') {
+    driveDeleteFile(acct.bankbookImageFileId).catch(e => console.warn('[bankbook] 清除孤兒失敗:', e));
+  }
+
+  config.userInfo.paymentAccounts = list.filter(a => a.id !== id);
+  if (config.userInfo.selectedPaymentAccountId === id) {
+    config.userInfo.selectedPaymentAccountId = (config.userInfo.paymentAccounts[0] && config.userInfo.paymentAccounts[0].id) || '';
+  }
+  saveConfigOnly();
+  renderInvoicePayAccountSelect();
+  drawInvoice();
+  toast('✓ 已刪除');
+}
+
+// 編輯 modal 內存摺照片：壓縮 → 上傳 Drive → 寫 hidden fields
+async function paeOnBankbookFileChange(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('請選擇圖片檔'); input.value = ''; return; }
+
+  toastProgress('🖼️ 壓縮圖片中…');
+  let dataUrl;
+  try {
+    dataUrl = await resizeImageToDataUrl(file, 800, 0.7);
+  } catch (err) {
+    toastDismiss();
+    toast('圖片處理失敗：' + (err.message || err));
+    input.value = '';
+    return;
+  }
+
+  // 立刻顯示 preview
+  document.getElementById('pae-bankbook-image').value = dataUrl;
+  paeRenderBankbookPreview();
+
+  // 嘗試上傳 Drive
+  if (isCloudSignedIn() && cloudGetMeta().trackerFileId) {
+    toastProgress('☁️ 上傳到 Drive…');
+    try {
+      const oldFileId = document.getElementById('pae-bankbook-fileid').value;
+      const filename = `bankbook-pae-${Date.now()}.jpg`;
+      const uploaded = await driveUploadImage(dataUrl, filename);
+      document.getElementById('pae-bankbook-fileid').value = uploaded.id;
+      document.getElementById('pae-bankbook-image').value = '';  // 清掉 base64
+      paeRenderBankbookPreview();
+      // 刪舊孤兒
+      if (oldFileId && oldFileId !== uploaded.id) {
+        driveDeleteFile(oldFileId).catch(() => {});
+      }
+      toastDismiss();
+      toast('✓ 已上傳到 Drive，記得按儲存', 3000);
+      if (typeof logAction === 'function') {
+        logAction('cloud-image-upload', { fileId: uploaded.id, source: 'pae' });
+      }
+    } catch (e) {
+      console.warn('[bankbook] Drive 上傳失敗，fallback 寫 base64:', e);
+      toastDismiss();
+      toast('⚠️ Drive 上傳失敗，圖片暫存本機', 4000);
+    }
+  } else {
+    toastDismiss();
+    toast('⚠️ 未登入 Drive，圖片暫存本機；登入後自動遷移', 4000);
+  }
+  input.value = '';
+}
+
+function paeClearBankbook() {
+  const oldFileId = document.getElementById('pae-bankbook-fileid').value;
+  document.getElementById('pae-bankbook-image').value = '';
+  document.getElementById('pae-bankbook-fileid').value = '';
+  paeRenderBankbookPreview();
+  if (oldFileId && typeof driveDeleteFile === 'function') {
+    driveDeleteFile(oldFileId).catch(() => {});
+  }
+  toast('✓ 已清除存摺照片，記得按儲存');
+}
+
+function paeRenderBankbookPreview() {
+  const base64 = document.getElementById('pae-bankbook-image').value;
+  const fileId = document.getElementById('pae-bankbook-fileid').value;
+  const preview = document.getElementById('pae-bankbook-preview');
+  const label = document.getElementById('pae-bankbook-upload-label');
+  const removeBtn = document.getElementById('pae-bankbook-remove-btn');
+  if (!preview) return;
+
+  if (base64) {
+    preview.innerHTML = `<img src="${base64}" alt="存摺" style="max-width: 200px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); margin-top: 6px;">`;
+    if (label) label.textContent = '更換照片';
+    if (removeBtn) removeBtn.style.display = '';
+  } else if (fileId) {
+    preview.innerHTML = `<div style="color:var(--muted);font-size:13px;margin-top:6px;" data-bankbook-loading="${escapeHtml(fileId)}">⏳ 載入存摺照片中…</div>`;
+    if (label) label.textContent = '更換照片';
+    if (removeBtn) removeBtn.style.display = '';
+    // hydrate
+    if (typeof cloudHydrateBankbookImages === 'function') {
+      cloudHydrateBankbookImages().catch(() => {});
+    }
+  } else {
+    preview.innerHTML = '';
+    if (label) label.textContent = '上傳照片';
+    if (removeBtn) removeBtn.style.display = 'none';
+  }
 }
 
 function onInvModeChange() {
@@ -6544,18 +6746,29 @@ function drawInvoice() {
   const showDiscount = discountTotal > 0;  // v2.9.8: 沒有折扣 → 隱藏整欄
 
   const u = config.userInfo || {};
-  const hasMyInfo = u.name || u.email || u.phone;
-  // v2.10.13: 改用 active payment account
+  // v3.2.0：個人資訊優先用 active paymentAccount 的（per-account），fallback 到 top-level userInfo
   const activeAcct = getActivePaymentAccount();
+  const aPersonal = {
+    name:         (activeAcct && activeAcct.name)         || u.name || '',
+    phone:        (activeAcct && activeAcct.phone)        || u.phone || '',
+    email:        (activeAcct && activeAcct.email)        || u.email || '',
+    invoiceTitle: (activeAcct && activeAcct.invoiceTitle) || u.invoiceTitle || '',
+    taxId:        (activeAcct && activeAcct.taxId)        || '',
+    address:      (activeAcct && activeAcct.address)      || '',
+    invoiceNote:  (activeAcct && activeAcct.invoiceNote)  || ''
+  };
+  const showPersonal = !activeAcct || activeAcct.showPersonalInfo !== false;  // 預設 true
+  const hasPersonalInfo = showPersonal && (aPersonal.name || aPersonal.phone || aPersonal.email);
   const hasPayInfo = !!(activeAcct && (activeAcct.bank || activeAcct.account));
+  const hasInvoiceInfo = !!(aPersonal.invoiceTitle || aPersonal.taxId || aPersonal.address || aPersonal.invoiceNote);
 
   v.innerHTML = `<div class="invoice" id="invoice-print">
-    ${hasMyInfo ? `<div class="invoice-from">
+    ${hasPersonalInfo ? `<div class="invoice-from">
       <div>
-        <div class="from-name">${escapeHtml(u.invoiceTitle || u.name || '')}</div>
-        ${u.name && u.invoiceTitle ? `<div>${escapeHtml(u.name)}</div>` : ''}
-        ${u.phone ? `<div>📞 ${escapeHtml(u.phone)}</div>` : ''}
-        ${u.email ? `<div>✉️ ${escapeHtml(u.email)}</div>` : ''}
+        <div class="from-name">${escapeHtml(aPersonal.invoiceTitle || aPersonal.name)}</div>
+        ${aPersonal.name && aPersonal.invoiceTitle ? `<div>${escapeHtml(aPersonal.name)}</div>` : ''}
+        ${aPersonal.phone ? `<div>📞 ${escapeHtml(aPersonal.phone)}</div>` : ''}
+        ${aPersonal.email ? `<div>✉️ ${escapeHtml(aPersonal.email)}</div>` : ''}
       </div>
       <div style="text-align: right; color: var(--muted); font-size: 12px;">致</div>
     </div>` : ''}
@@ -6571,47 +6784,33 @@ function drawInvoice() {
       </div>
     </div>
     ${jobs.length ? `<table>
-      <thead><tr><th>日期</th><th>項目</th><th>說明</th><th class="num">原價</th>${showDiscount ? '<th class="num">折扣</th>' : ''}<th class="num">應收</th><th class="num">已收</th><th>狀態</th></tr></thead>
+      <thead><tr><th>日期</th><th>項目</th><th>說明</th><th class="num">單價</th><th class="num">數量</th>${showDiscount ? '<th class="num">折扣</th>' : ''}<th class="num">應收</th><th class="num">已收</th></tr></thead>
       <tbody>
         ${jobs.map(j => {
           const final = jobFinalAmount(j);
           const disc = jobDiscountAmount(j);
           const gross = +j.amount || 0;
+          const qty = (j.quantity != null && j.quantity > 0) ? j.quantity : 1;
+          const unit = qty > 0 ? Math.round(gross / qty) : gross;
           const paid = jobPaidTotal(j);
-          const unpaid = jobUnpaidAmount(j);
-          const wo = +j.writeOff || 0;
-          let stLabel;
-          if (jobIsFullyPaid(j)) {
-            stLabel = wo > 0
-              ? '<span class="badge-status paid" title="部分認列呆帳">✓ 結清</span>'
-              : '<span class="badge-status paid">✓ 已收款</span>';
-          } else if (paid > 0) {
-            stLabel = `<span class="badge-status done-unpaid">部分收款 · 還欠 ${fmt(unpaid).replace('NT$','').trim()}</span>`;
-          } else if (j.done) {
-            stLabel = '<span class="badge-status done-unpaid">$ 待收款</span>';
-          } else {
-            stLabel = '<span class="badge-status pending">進行中</span>';
-          }
           return `<tr>
             <td>${j.date||'-'}</td>
             <td>${escapeHtml(j.title||'-')}</td>
             <td style="color:var(--muted); font-size: 13px;">${escapeHtml(j.details||'')}</td>
-            <td class="num">${fmt(gross)}</td>
+            <td class="num">${fmt(unit)}</td>
+            <td class="num">${qty}</td>
             ${showDiscount ? `<td class="num" style="color: ${disc>0?'var(--warning)':'var(--muted)'};">${disc>0 ? '−' + fmt(disc).replace('NT$','').trim() : '—'}</td>` : ''}
             <td class="num"><b>${fmt(final)}</b></td>
             <td class="num" style="color: ${paid>=final?'var(--success)':'var(--muted)'};">${paid>0 ? fmt(paid) : '—'}</td>
-            <td>${stLabel}</td>
           </tr>`;
         }).join('')}
       </tbody>
       <tfoot>
         <tr style="border-top: 2px solid var(--text); font-weight: 600;">
-          <td colspan="3" style="text-align: right;">合計</td>
-          <td class="num">${fmt(grossTotal)}</td>
+          <td colspan="5" style="text-align: right;">合計</td>
           ${showDiscount ? `<td class="num" style="color: var(--warning);">−${fmt(discountTotal).replace('NT$','').trim()}</td>` : ''}
           <td class="num">${fmt(finalTotal)}</td>
           <td class="num" style="color: var(--success);">${fmt(paidTotal)}</td>
-          <td></td>
         </tr>
       </tfoot>
     </table>
@@ -6634,17 +6833,27 @@ function drawInvoice() {
       </div>` : ''}
     </div>
 
-    ${hasPayInfo ? `<div class="invoice-payment">
-      <div class="invoice-payment-title">Payment Information 匯款資訊</div>
-      ${activeAcct.bank ? `<div class="invoice-payment-row"><span class="lbl">銀行</span><span class="val">${escapeHtml(activeAcct.bank)}</span></div>` : ''}
-      ${activeAcct.account ? `<div class="invoice-payment-row"><span class="lbl">帳號</span><span class="val" style="font-family: monospace;">${escapeHtml(activeAcct.account)}</span></div>` : ''}
-      ${(activeAcct.holderName || u.name) ? `<div class="invoice-payment-row"><span class="lbl">戶名</span><span class="val">${escapeHtml(activeAcct.holderName || u.name)}</span></div>` : ''}
-      ${activeAcct.note ? `<div class="invoice-payment-row" style="font-size: 12px; color: var(--muted);"><span class="lbl">備註</span><span class="val">${escapeHtml(activeAcct.note)}</span></div>` : ''}
-      ${activeAcct.bankbookImage
-        ? `<div style="margin-top: 12px;"><img src="${activeAcct.bankbookImage}" alt="存摺" style="max-width: 320px; max-height: 200px; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border);"></div>`
-        : (activeAcct.bankbookImageFileId
-          ? `<div style="margin-top: 12px;color:var(--muted);font-size:13px;" data-bankbook-loading="${escapeHtml(activeAcct.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
-          : '')}
+    <!-- v3.2.0：匯款資訊 + 發票資訊 並排，沒填發票就只顯示匯款 -->
+    ${(hasPayInfo || hasInvoiceInfo) ? `<div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-top: 16px;">
+      ${hasPayInfo ? `<div class="invoice-payment" style="flex: 1; min-width: 280px;">
+        <div class="invoice-payment-title">Payment Information 匯款資訊</div>
+        ${activeAcct.bank ? `<div class="invoice-payment-row"><span class="lbl">銀行</span><span class="val">${escapeHtml(activeAcct.bank)}</span></div>` : ''}
+        ${activeAcct.account ? `<div class="invoice-payment-row"><span class="lbl">帳號</span><span class="val" style="font-family: monospace;">${escapeHtml(activeAcct.account)}</span></div>` : ''}
+        ${(activeAcct.holderName || aPersonal.name) ? `<div class="invoice-payment-row"><span class="lbl">戶名</span><span class="val">${escapeHtml(activeAcct.holderName || aPersonal.name)}</span></div>` : ''}
+        ${activeAcct.note ? `<div class="invoice-payment-row" style="font-size: 12px; color: var(--muted);"><span class="lbl">備註</span><span class="val">${escapeHtml(activeAcct.note)}</span></div>` : ''}
+        ${activeAcct.bankbookImage
+          ? `<div style="margin-top: 12px;"><img src="${activeAcct.bankbookImage}" alt="存摺" style="max-width: 320px; max-height: 200px; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border);"></div>`
+          : (activeAcct.bankbookImageFileId
+            ? `<div style="margin-top: 12px;color:var(--muted);font-size:13px;" data-bankbook-loading="${escapeHtml(activeAcct.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
+            : '')}
+      </div>` : ''}
+      ${hasInvoiceInfo ? `<div class="invoice-payment" style="flex: 1; min-width: 280px;">
+        <div class="invoice-payment-title">Tax Invoice Info 發票資訊</div>
+        ${aPersonal.invoiceTitle ? `<div class="invoice-payment-row"><span class="lbl">抬頭</span><span class="val">${escapeHtml(aPersonal.invoiceTitle)}</span></div>` : ''}
+        ${aPersonal.taxId ? `<div class="invoice-payment-row"><span class="lbl">統編</span><span class="val" style="font-family: monospace;">${escapeHtml(aPersonal.taxId)}</span></div>` : ''}
+        ${aPersonal.address ? `<div class="invoice-payment-row"><span class="lbl">寄送地址</span><span class="val">${escapeHtml(aPersonal.address)}</span></div>` : ''}
+        ${aPersonal.invoiceNote ? `<div class="invoice-payment-row" style="font-size: 12px; color: var(--muted);"><span class="lbl">備註</span><span class="val">${escapeHtml(aPersonal.invoiceNote)}</span></div>` : ''}
+      </div>` : ''}
     </div>` : ''}
 
     ${u.note ? `<div style="margin-top: 14px; padding: 10px; font-size: 12px; color: var(--muted); border-top: 1px dashed var(--border);">
@@ -6831,6 +7040,9 @@ function openJobModal() {
   document.getElementById('job-tag').value = '';
   document.getElementById('job-details').value = '';
   document.getElementById('job-amount').value = '';
+  // v3.2.0：重設單價 + 數量
+  if (document.getElementById('job-unit-price')) document.getElementById('job-unit-price').value = '';
+  if (document.getElementById('job-quantity')) document.getElementById('job-quantity').value = 1;
   document.getElementById('job-hours').value = '';
   document.getElementById('job-done').checked = false;
   document.getElementById('job-cancelled').checked = false;
@@ -6877,6 +7089,29 @@ function setDiscountUI(type, value) {
   document.querySelectorAll('input[name="job-discount-type"]').forEach(r => r.checked = (r.value === (type || 'none')));
   document.getElementById('job-discount-value').value = value || '';
   document.getElementById('job-discount-value').disabled = (!type || type === 'none');
+}
+
+// v3.2.0：使用者改單價或數量 → 自動算總金額
+let _jobAmountManuallyEdited = false;
+function onJobUnitOrQtyChange() {
+  const unit = +document.getElementById('job-unit-price').value || 0;
+  const qty = Math.max(1, parseInt(document.getElementById('job-quantity').value || '1', 10) || 1);
+  const total = unit * qty;
+  if (!_jobAmountManuallyEdited) {
+    document.getElementById('job-amount').value = total;
+    updateJobAmountSummary();
+  }
+}
+// 使用者直接改總金額 → 標記成「手動模式」、反算單價
+function onJobAmountManualEdit() {
+  _jobAmountManuallyEdited = true;
+  const total = +document.getElementById('job-amount').value || 0;
+  const qty = Math.max(1, parseInt(document.getElementById('job-quantity').value || '1', 10) || 1);
+  if (qty > 0) {
+    document.getElementById('job-unit-price').value = Math.round(total / qty);
+  }
+  // 下次 onJobUnitOrQtyChange 時又恢復自動計算
+  setTimeout(() => { _jobAmountManuallyEdited = false; }, 50);
 }
 
 // 即時更新「原價 - 折扣 = 應收 / 已收 / 待收」摘要
@@ -7064,6 +7299,11 @@ function editJob(id) {
   document.getElementById('job-tag').value = j.tag || '';
   document.getElementById('job-details').value = j.details || '';
   document.getElementById('job-amount').value = j.amount || '';
+  // v3.2.0：填入單價 + 數量
+  const qty = j.quantity != null ? j.quantity : 1;
+  document.getElementById('job-quantity').value = qty;
+  const unit = qty > 0 ? Math.round((+j.amount || 0) / qty) : (+j.amount || 0);
+  document.getElementById('job-unit-price').value = unit;
   document.getElementById('job-hours').value = j.hoursWorked || '';
   document.getElementById('job-done').checked = !!j.done;
   document.getElementById('job-cancelled').checked = !!j.cancelled;
@@ -7153,6 +7393,8 @@ function saveJob() {
     tag: document.getElementById('job-tag').value.trim(),
     details: document.getElementById('job-details').value.trim(),
     amount: +document.getElementById('job-amount').value || 0,
+    // v3.2.0：數量（單價只是顯示用，不存）
+    quantity: Math.max(1, parseInt(document.getElementById('job-quantity')?.value || '1', 10) || 1),
     hoursWorked: hoursVal ? +hoursVal : null,
     done: isDone,
     cancelled: isCancelled,
@@ -7520,8 +7762,21 @@ function ensurePaymentAccounts() {
   }
   // v3.0.0-alpha.3：每筆 paymentAccount 補 bankbookImageFileId 預設欄位（idempotent）
   // 同時保留舊 bankbookImage（base64 dataURL）作為遷移期間的 fallback；遷移完成後該欄位會被清空
+  // v3.2.0：合併個人資訊到 paymentAccount（schema v10）
+  // 每筆 paymentAccount 自帶完整身分；首次升級從 top-level userInfo 一次性 backfill
   u.paymentAccounts.forEach(a => {
     if (!('bankbookImageFileId' in a)) a.bankbookImageFileId = '';
+    // v10 個人資訊欄位
+    if (a.name == null)         a.name = u.name || '';
+    if (a.phone == null)        a.phone = u.phone || '';
+    if (a.email == null)        a.email = u.email || '';
+    if (a.invoiceTitle == null) a.invoiceTitle = u.invoiceTitle || '';
+    if (a.taxId == null)        a.taxId = '';
+    if (a.address == null)      a.address = '';
+    if (a.invoiceNote == null)  a.invoiceNote = '';
+    if (a.showPersonalInfo == null) a.showPersonalInfo = true;
+    // 既有 a.note 是「帳號備註」（請款單顯示在匯款資訊那一塊），維持不變
+    // a.holderName 既有，維持不變
   });
 }
 
