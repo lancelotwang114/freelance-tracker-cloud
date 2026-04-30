@@ -2,6 +2,17 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.2.1 ✅ 請款單 UI 調整（2026-04-29）
+- [x] 個人資訊從頂端搬到底部 3 欄並排（個人 / 匯款 / 發票）
+- [x] 加 `showPersonalInfoOnTop` flag（頂端可選顯示精簡聯絡資訊）
+- [x] 顯示 toggle 從 modal 搬到請款單外層快速控制
+- [x] 加 `showInvoiceInfo` flag、隨後整批暫時隱藏（feature flag）
+- [x] 上方欄位緊湊化（業主 + 範圍 第 1 列、收款帳號 第 2 列）
+- [x] 修 select width:100% 跟 flex 衝突的擠出卡框問題
+- [x] 請款範圍區間從月份 select 升級成日期 picker
+- [x] 顯示狀態 preset 按鈕加 active 底色提示
+- [x] 對帳模式才顯示狀態欄
+
 ## v3.2.0 ✅ 請款單重構（2026-04-29）
 - [x] Schema v8 → v10：jobs 加 quantity；paymentAccount 合併個人 + 發票資訊
 - [x] 案件表單：單價 × 數量 × 總金額 三欄聯動
