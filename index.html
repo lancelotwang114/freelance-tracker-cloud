@@ -300,9 +300,14 @@
               <option value="single">單月</option>
               <option value="range">區間</option>
             </select>
+            <!-- 單月模式 -->
             <select id="inv-month" style="width: auto; flex: 1 1 100px; min-width: 100px;"></select>
+            <!-- 區間模式（日期 picker，v3.2.0-ui：從月份 select 改成日期 input） -->
+            <input type="date" id="inv-date-start" class="hidden" onchange="drawInvoice()" style="width: auto; flex: 1 1 130px; min-width: 130px;">
             <span id="inv-range-sep" class="hidden" style="color: var(--muted); flex: 0 0 auto;">~</span>
-            <select id="inv-month-end" class="hidden" style="width: auto; flex: 1 1 100px; min-width: 100px;"></select>
+            <input type="date" id="inv-date-end" class="hidden" onchange="drawInvoice()" style="width: auto; flex: 1 1 130px; min-width: 130px;">
+            <!-- 舊 inv-month-end 保留 hidden，避免其他既有 code 引用時 ReferenceError -->
+            <select id="inv-month-end" class="hidden" style="display: none;"></select>
           </div>
         </div>
       </div>
@@ -337,13 +342,13 @@
         <span style="color: var(--muted); font-size: 11px;">（套用到目前選的收款帳號，自動儲存）</span>
       </div>
 
-      <!-- 顯示狀態 preset + 詳細 checkbox 合併成緊湊一排 -->
+      <!-- 顯示狀態 preset + 詳細 checkbox（preset 按鈕現在會以底色標示「目前模式」） -->
       <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
         <span style="color: var(--muted); font-size: 12px;">顯示狀態：</span>
-        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('pending')" title="只顯示已完成待收 + 部分收款">📋 請款</button>
-        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('reconcile')" title="所有已完成（含已收款）">✅ 對帳</button>
-        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('progress')" title="只顯示進行中">🔄 進度</button>
-        <button class="btn btn-outline btn-sm" type="button" onclick="applyInvoicePreset('all')" title="所有狀態">📦 全部</button>
+        <button class="btn btn-outline btn-sm" type="button" data-preset="pending" onclick="applyInvoicePreset('pending')" title="只顯示已完成待收 + 部分收款">📋 請款</button>
+        <button class="btn btn-outline btn-sm" type="button" data-preset="reconcile" onclick="applyInvoicePreset('reconcile')" title="所有已完成（含已收款）；會顯示狀態欄方便對帳">✅ 對帳</button>
+        <button class="btn btn-outline btn-sm" type="button" data-preset="progress" onclick="applyInvoicePreset('progress')" title="只顯示進行中">🔄 進度</button>
+        <button class="btn btn-outline btn-sm" type="button" data-preset="all" onclick="applyInvoicePreset('all')" title="所有狀態">📦 全部</button>
         <span id="inv-status-hint" style="font-size: 12px; color: var(--muted); margin-left: 4px;"></span>
       </div>
       <div style="margin-top: 6px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">

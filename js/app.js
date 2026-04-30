@@ -6634,14 +6634,31 @@ function paeRenderBankbookPreview() {
 
 function onInvModeChange() {
   const mode = document.getElementById('inv-mode').value;
+  const monthSel = document.getElementById('inv-month');
   const sep = document.getElementById('inv-range-sep');
-  const endSel = document.getElementById('inv-month-end');
+  const dateStart = document.getElementById('inv-date-start');
+  const dateEnd = document.getElementById('inv-date-end');
   if (mode === 'range') {
-    sep.classList.remove('hidden');
-    endSel.classList.remove('hidden');
+    // 區間：藏單月 select、顯示日期 input + ~
+    if (monthSel) monthSel.classList.add('hidden');
+    if (sep) sep.classList.remove('hidden');
+    if (dateStart) dateStart.classList.remove('hidden');
+    if (dateEnd) dateEnd.classList.remove('hidden');
+    // v3.2.0-ui：第一次切到區間 → 自動填入「本月初 ~ 今天」
+    if (dateStart && !dateStart.value) {
+      const now = new Date();
+      const firstDay = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      dateStart.value = firstDay;
+    }
+    if (dateEnd && !dateEnd.value) {
+      dateEnd.value = todayStr();
+    }
   } else {
-    sep.classList.add('hidden');
-    endSel.classList.add('hidden');
+    // 單月：顯示 month select、藏日期
+    if (monthSel) monthSel.classList.remove('hidden');
+    if (sep) sep.classList.add('hidden');
+    if (dateStart) dateStart.classList.add('hidden');
+    if (dateEnd) dateEnd.classList.add('hidden');
   }
   drawInvoice();
 }
@@ -6721,8 +6738,24 @@ function onInvoiceStatusChange() {
   config.invCustomStatuses = checked;
   // 同時記下「上次符合哪個 preset」（給 hint 用）；若是自訂組合則設為 'custom'
   config.invStatusMode = detectInvoicePreset(checked);
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  saveConfigOnly();  // v3.1.0-fix：同步推 Drive
+  syncInvPresetButtons();  // v3.2.0-ui：高亮目前對應的 preset 按鈕
   drawInvoice();
+}
+
+// v3.2.0-ui：更新 preset 按鈕視覺 — 目前模式變實心 btn-primary、其他維持 btn-outline
+function syncInvPresetButtons() {
+  const cur = detectInvoicePreset(getInvoiceCheckedStatuses());  // 'pending' / 'reconcile' / 'progress' / 'all' / 'custom'
+  document.querySelectorAll('[data-preset]').forEach(btn => {
+    const isActive = (btn.dataset.preset === cur);
+    if (isActive) {
+      btn.classList.remove('btn-outline');
+      btn.classList.add('btn-primary');
+    } else {
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-outline');
+    }
+  });
 }
 
 // 給 drawInvoice 用：取得目前要顯示的狀態 set
@@ -6741,31 +6774,48 @@ function loadInvoiceStatusUI() {
     const el = document.getElementById(INVOICE_STATUS_IDS[k]);
     if (el) el.checked = cs.includes(k);
   });
+  // v3.2.0-ui：init / 載入完成後 → 高亮目前 preset
+  if (typeof syncInvPresetButtons === 'function') syncInvPresetButtons();
 }
 
 function drawInvoice() {
   const cid = document.getElementById('inv-client').value;
   const mode = document.getElementById('inv-mode')?.value || 'single';
-  const mm = document.getElementById('inv-month').value;
-  const mmEnd = document.getElementById('inv-month-end')?.value || mm;
   const c = getClient(cid);
   const v = document.getElementById('invoice-view');
   if (!c) { v.innerHTML = '<div class="card empty">請先新增業主</div>'; return; }
 
-  // 計算範圍
-  let rangeStart = mm, rangeEnd = mm;
+  // v3.2.0-ui：範圍計算 — 單月用 select、區間用 type=date input
+  let rangeStart, rangeEnd, periodLabel;
   if (mode === 'range') {
-    if (mmEnd < mm) { rangeStart = mmEnd; rangeEnd = mm; }
-    else { rangeStart = mm; rangeEnd = mmEnd; }
+    let s = document.getElementById('inv-date-start')?.value || '';
+    let e = document.getElementById('inv-date-end')?.value || '';
+    if (!s || !e) {
+      // fallback：本月初 ~ 今天
+      const now = new Date();
+      s = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      e = todayStr();
+    }
+    if (e < s) { const tmp = s; s = e; e = tmp; }
+    rangeStart = s;
+    rangeEnd = e;
+    periodLabel = `${s} ~ ${e}`;
+  } else {
+    const mm = document.getElementById('inv-month').value;
+    rangeStart = mm + '-01';
+    // 該月最後一天
+    const [yy, mmNum] = mm.split('-').map(Number);
+    const lastDay = new Date(yy, mmNum, 0).getDate();
+    rangeEnd = mm + '-' + String(lastDay).padStart(2, '0');
+    periodLabel = mm;
   }
-  const periodLabel = rangeStart === rangeEnd ? rangeStart : `${rangeStart} ~ ${rangeEnd}`;
 
-  // v2.10.4：套用狀態篩選
-  // 注意：這裡改用 state.jobs（不再 activeJobs() 預先排除取消），因為「自訂」可能想包含取消的
+  // 套用日期過濾（已從 per-month 改成 per-day，兩種模式都統一）
+  // 注意：這裡用 state.jobs（不 activeJobs，因為「自訂」可能想包含取消的）
   const allJobs = state.jobs.filter(j => {
     if (j.clientId !== cid) return false;
-    const m = getMonth(j.date);
-    return m >= rangeStart && m <= rangeEnd;
+    const d = j.date || '';
+    return d >= rangeStart && d <= rangeEnd;
   });
   const statusFilter = getInvoiceStatusFilter();
   const jobs = allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j)))
@@ -6813,6 +6863,9 @@ function drawInvoice() {
   // v3.2.0-ui：發票功能暫時隱藏（feature flag）；資料 / migration / input 保留，未來解 hidden 即可恢復
   const FEATURE_INVOICE_INFO = false;
   const showInvoice = FEATURE_INVOICE_INFO && !!(activeAcct && activeAcct.showInvoiceInfo);
+  // v3.2.0-ui：對帳模式才顯示「狀態」欄（給業主看的請款不需要狀態，自己對帳要看）
+  const presetKeyForCol = detectInvoicePreset(getInvoiceCheckedStatuses());
+  const showStatusCol = (presetKeyForCol === 'reconcile');
   const hasPersonalInfo = showPersonal && (aPersonal.name || aPersonal.phone || aPersonal.email);
   const hasPayInfo = !!(activeAcct && (activeAcct.bank || activeAcct.account));
   const hasInvoiceInfo = showInvoice && (aPersonal.invoiceTitle || aPersonal.taxId || aPersonal.address || aPersonal.invoiceNote);
@@ -6839,7 +6892,7 @@ function drawInvoice() {
       </div>
     </div>
     ${jobs.length ? `<table>
-      <thead><tr><th>日期</th><th>項目</th><th>說明</th><th class="num">單價</th><th class="num">數量</th>${showDiscount ? '<th class="num">折扣</th>' : ''}<th class="num">應收</th><th class="num">已收</th></tr></thead>
+      <thead><tr><th>日期</th><th>項目</th><th>說明</th><th class="num">單價</th><th class="num">數量</th>${showDiscount ? '<th class="num">折扣</th>' : ''}<th class="num">應收</th><th class="num">已收</th>${showStatusCol ? '<th>狀態</th>' : ''}</tr></thead>
       <tbody>
         ${jobs.map(j => {
           const final = jobFinalAmount(j);
@@ -6848,6 +6901,17 @@ function drawInvoice() {
           const qty = (j.quantity != null && j.quantity > 0) ? j.quantity : 1;
           const unit = qty > 0 ? Math.round(gross / qty) : gross;
           const paid = jobPaidTotal(j);
+          const unpaid = jobUnpaidAmount(j);
+          const wo = +j.writeOff || 0;
+          // v3.2.0-ui：狀態欄文字（只在對帳模式顯示）
+          let stLabel = '';
+          if (showStatusCol) {
+            if (j.cancelled) stLabel = '<span class="badge-status" style="color:var(--muted);">⚫ 已取消</span>';
+            else if (jobIsFullyPaid(j)) stLabel = wo > 0 ? '<span class="badge-status paid" title="部分認列呆帳">✓ 結清</span>' : '<span class="badge-status paid">✓ 已收款</span>';
+            else if (paid > 0) stLabel = `<span class="badge-status done-unpaid">部分收款 · 還欠 ${fmt(unpaid).replace('NT$','').trim()}</span>`;
+            else if (j.done) stLabel = '<span class="badge-status done-unpaid">$ 待收款</span>';
+            else stLabel = '<span class="badge-status pending">進行中</span>';
+          }
           return `<tr>
             <td>${j.date||'-'}</td>
             <td>${escapeHtml(j.title||'-')}</td>
@@ -6857,6 +6921,7 @@ function drawInvoice() {
             ${showDiscount ? `<td class="num" style="color: ${disc>0?'var(--warning)':'var(--muted)'};">${disc>0 ? '−' + fmt(disc).replace('NT$','').trim() : '—'}</td>` : ''}
             <td class="num"><b>${fmt(final)}</b></td>
             <td class="num" style="color: ${paid>=final?'var(--success)':'var(--muted)'};">${paid>0 ? fmt(paid) : '—'}</td>
+            ${showStatusCol ? `<td>${stLabel}</td>` : ''}
           </tr>`;
         }).join('')}
       </tbody>
@@ -6866,6 +6931,7 @@ function drawInvoice() {
           ${showDiscount ? `<td class="num" style="color: var(--warning);">−${fmt(discountTotal).replace('NT$','').trim()}</td>` : ''}
           <td class="num">${fmt(finalTotal)}</td>
           <td class="num" style="color: var(--success);">${fmt(paidTotal)}</td>
+          ${showStatusCol ? '<td></td>' : ''}
         </tr>
       </tfoot>
     </table>
