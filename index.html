@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-04-29-v3.2.1">
+<meta name="app-version" content="2026-04-30-v3.3.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -615,109 +615,9 @@
     <!-- ============== 進階設定 ============== -->
     <div class="settings-section-title">🔧 進階設定</div>
 
-    <!-- v3.0.0-alpha.2 起隱藏：v2 Apps Script 雲端同步整塊（含 sheet URL、API token、每日凌晨強制 snapshot 設定） -->
-    <!-- v3 用 Drive API 直接同步，不再透過 Apps Script，整個區塊在 beta.1 會徹底移除（含對應 JS 邏輯） -->
-    <div class="card collapsible collapsed hidden" id="card-cloud">
-      <div class="card-head" onclick="toggleCard('card-cloud')">
-        <h3>☁️ 雲端同步</h3>
-        <span class="card-status" id="sheet-sync-status">未連接</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          連到雲端後，多台裝置自動同步資料。每次改動 2 秒內自動上傳。
-        </p>
-
-        <label>雲端 API 連結</label>
-        <input type="text" id="sheet-api" placeholder="https://script.google.com/macros/s/.../exec">
-        <label>Google Sheet 連結（選填，僅記錄用）</label>
-        <input type="text" id="sheet-url" placeholder="https://docs.google.com/spreadsheets/d/...">
-        <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
-          <button class="btn btn-outline btn-sm" onclick="saveSheetConfig()">儲存</button>
-          <button class="btn btn-outline btn-sm" onclick="testSheetConnection()">測試連線</button>
-        </div>
-
-        <div class="section-divider"></div>
-
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-primary btn-sm" onclick="enableSheetSync()">🚀 開啟自動同步</button>
-          <button class="btn btn-outline btn-sm" onclick="disableSheetSync()">關閉自動同步</button>
-        </div>
-
-        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
-          <button class="btn btn-outline btn-sm" onclick="pullFromSheet(false)">⬇️ 從雲端下載</button>
-          <button class="btn btn-outline btn-sm" onclick="pushToSheet(false)">⬆️ 上傳到雲端</button>
-          <button class="btn btn-outline btn-sm" onclick="showSnapshotList()">🗂️ 備份歷史</button>
-          <button class="btn btn-outline btn-sm" onclick="showHealthCheckModal()">🩺 資料健檢</button>
-          <button class="btn btn-outline btn-sm" onclick="showCloudCapacity()">📊 容量監控</button>
-        </div>
-
-        <div class="section-divider"></div>
-
-        <!-- 手動 Snapshot -->
-        <div style="margin-bottom: 12px;">
-          <label style="font-size: 13px;">手動建立備份（永久保留，不會被自動清理）</label>
-          <p style="font-size: 11px; color: var(--muted); margin: 2px 0 6px;">
-            重要時間點建議手動建一次（例：月底結算前、大量編輯前）
-          </p>
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="manual-snapshot-note" placeholder="備註（例：4月結算前）" style="flex: 1;">
-            <button class="btn btn-primary btn-sm" onclick="manualSnapshot()">📸 建立備份</button>
-          </div>
-        </div>
-
-        <!-- 每日強制 Snapshot Trigger -->
-        <div style="margin-bottom: 4px;">
-          <button class="btn btn-outline btn-sm" onclick="setupDailyForceTrigger()">⏰ 啟用每日強制備份（凌晨 03:00）</button>
-          <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
-            每天凌晨 3 點 Apps Script 自動跑一次強制 snapshot，永久保留。即使所有 PC 都關機也會跑（雲端排程）。首次設定時 Google 會要求授權。
-          </p>
-        </div>
-
-        <div class="section-divider"></div>
-
-        <!-- 裝置名稱（只存本機） -->
-        <div style="margin-bottom: 12px;">
-          <label style="font-size: 13px;">裝置名稱（顯示在備份歷史，方便辨識是哪台 PC 上傳）</label>
-          <p style="font-size: 11px; color: var(--muted); margin: 2px 0 6px;">
-            ⚠️ 瀏覽器無法讀取 Windows 的電腦名稱（沙盒安全限制），所以系統會自動給你一個 <code>OS-隨機4碼</code> 的識別（例：<code>Windows-A7F3</code>）。建議改成自己看得懂的名字。<br>
-            這個欄位只存在這台電腦本機，不會同步到雲端。
-          </p>
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="cfg-device-name" placeholder="例：工作室 Win" style="flex: 1;">
-            <button class="btn btn-primary btn-sm" onclick="setDeviceName(document.getElementById('cfg-device-name').value)">儲存</button>
-          </div>
-          <div id="cfg-device-name-current" style="font-size: 12px; color: var(--muted); margin-top: 6px; padding: 6px 8px; background: var(--bg); border-radius: 6px;"></div>
-          <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
-            <button class="btn btn-outline btn-sm" onclick="requestPreciseLocation()">🎯 啟用精確位置（GPS，可看到「區」）</button>
-            <button class="btn btn-ghost btn-sm" onclick="clearPreciseLocation()">清除</button>
-          </div>
-          <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
-            預設只用 IP 抓到城市（例：Taipei）。<br>
-            點上方按鈕會請求 GPS 權限，反向解析後可拿到「區」（例：台北市 信義區）。<br>
-            位置資訊只用於備份歷史的辨識，不會傳給其他第三方。
-          </p>
-        </div>
-
-        <div style="background: var(--success-light); padding: 10px; border-radius: 8px; font-size: 12px; color: var(--success); margin-top: 4px;">
-          ☁️ <b>雲端優先</b> 與 <b>每 30 秒自動偵測</b> 已永久啟用，確保多裝置同步、不會被舊資料覆蓋。
-        </div>
-
-        <div class="section-divider"></div>
-
-        <!-- Lab / 開發模式 -->
-        <div style="margin-top: 8px;">
-          <label class="checkbox-row" style="margin: 0;">
-            <input type="checkbox" id="cfg-lab-mode" onchange="toggleLabMode()">
-            <span>🧪 開發模式 — 暫停所有 push（pull 仍正常）</span>
-          </label>
-          <p style="font-size: 11px; color: var(--muted); margin-top: 4px;">
-            當你要測試新功能、或不確定某次操作是否安全時開啟。所有編輯只存本地、不會推到雲端，異地裝置不受影響。<br>
-            測試完記得關閉，並用「⬆️ 上傳到雲端」按鈕手動推一次（如果想保留變更）。
-          </p>
-        </div>
-      </div>
-    </div>
+    <!-- v3.3.0：刪除 #card-cloud（v2 Apps Script 雲端同步 + 裝置名稱 + GPS + lab mode 整塊） -->
+    <!-- 該卡片自 alpha.2 就已 hidden、所有按鈕都呼叫 v3 stub，內含 cfg-device-name / GPS / lab-mode -->
+    <!-- 都僅在那張隱藏卡片內可達，使用者根本看不到，整塊一併刪除 -->
 
     <!-- 📅 Google Calendar 同步（v3.1.0 重做：直接打 Calendar API、不再經過 Apps Script） -->
     <div class="card collapsible collapsed" id="card-calendar">
@@ -795,26 +695,7 @@
       </div>
     </div>
 
-    <!-- v3.0.0-alpha.2 起隱藏：跨裝置設定檔（含 Apps Script URL + token），v3 登入即同步不需要這個 -->
-    <!-- 整個區塊在 beta.1 會徹底移除（含 exportSettings / importSettings JS 邏輯） -->
-    <div class="card collapsible collapsed hidden" id="card-portable">
-      <div class="card-head" onclick="toggleCard('card-portable')">
-        <h3>📦 跨裝置設定檔</h3>
-        <span class="card-status">換裝置免重填</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          把目前所有設定打包成檔案，新裝置匯入就不用再填一次。<br>
-          <span style="color: var(--warning);">⚠️ 此檔案含連線密碼，請放隨身碟或密碼管理器，勿傳到 Email、聊天群組。</span>
-        </p>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-primary btn-sm" onclick="exportSettings()">📤 匯出</button>
-          <button class="btn btn-outline btn-sm" onclick="document.getElementById('settings-import-file').click()">📥 匯入</button>
-          <input type="file" id="settings-import-file" accept=".json" style="display:none" onchange="importSettings(event)">
-        </div>
-      </div>
-    </div>
+    <!-- v3.3.0：刪除 #card-portable（v2 跨裝置設定檔，純 stub） -->
 
     <!-- 顯示主題（v2.10.3 從常用搬到進階；右上有快捷按鈕）-->
     <div class="card collapsible collapsed" id="card-theme">
@@ -1257,17 +1138,7 @@
   </div>
 </div>
 
-<!-- v2.9.5: Snapshot Diff Modal（z-index 高一級，疊在備份歷史 modal 之上）-->
-<div class="modal-bg" id="snapshot-diff-modal" style="z-index: 30;">
-  <div class="modal" style="max-width: 640px;">
-    <h2>📂 還原預覽</h2>
-    <div id="snapshot-diff-content" style="max-height: 60vh; overflow-y: auto;"></div>
-    <div class="modal-actions">
-      <button class="btn btn-outline" onclick="document.getElementById('snapshot-diff-modal').classList.remove('open')">取消</button>
-      <button class="btn btn-primary" id="snapshot-diff-confirm-btn">⏮️ 確認還原</button>
-    </div>
-  </div>
-</div>
+<!-- v3.3.0：刪除 snapshot-diff-modal（v2 sheet snapshot diff，v3 用 cloudShowRestorePreviewModal 取代） -->
 
 <!-- v2.9.4: 批次設定折扣 Modal -->
 <div class="modal-bg" id="bulk-discount-modal">
@@ -1315,55 +1186,9 @@
   </div>
 </div>
 
-<!-- 裝置名稱提醒 Modal -->
-<div class="modal-bg" id="device-name-prompt-modal">
-  <div class="modal" style="max-width: 460px;">
-    <h2>📛 為這台裝置取個名字</h2>
-    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-      你還沒幫這台裝置設定名稱。設定後，雲端備份歷史會記錄是哪一台 PC 上傳的，方便在多台電腦之間追蹤資料變化。
-    </p>
-    <p style="font-size: 12px; color: var(--muted); margin-bottom: 12px; padding: 8px; background: var(--bg); border-radius: 6px;">
-      ⚠️ 瀏覽器無法讀取作業系統的真實電腦名稱（這是安全限制），所以系統會自動給你一個 <code>OS-隨機4碼</code>（例：<code>Windows-A7F3</code>）。建議改成自己看得懂的名字。
-    </p>
-    <label style="font-size: 13px;">這台裝置叫什麼？</label>
-    <input type="text" id="device-name-prompt-input" placeholder="例：工作室 Win、家裡 MacBook" style="margin: 6px 0 4px;">
-    <div id="device-name-prompt-current" style="font-size: 12px; color: var(--muted); margin-bottom: 12px;"></div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="skipDeviceNamePrompt()">先跳過</button>
-      <button class="btn btn-primary" onclick="saveDeviceNameFromPrompt()">儲存名稱</button>
-    </div>
-  </div>
-</div>
+<!-- v3.3.0：刪除 device-name-prompt-modal（v2 sheetSyncEnabled gate 已永遠 false，永不觸發） -->
 
-<!-- 資料健檢 Modal -->
-<div class="modal-bg" id="health-modal">
-  <div class="modal" style="max-width: 600px;">
-    <h2>🩺 資料健檢</h2>
-    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-      掃描所有資料找出潛在問題（孤兒、重複、異常金額、缺欄位等）。點按鈕可直接查看那些案件。
-    </p>
-    <div id="health-check-result"></div>
-    <div class="modal-actions">
-      <button class="btn btn-outline" onclick="document.getElementById('health-modal').classList.remove('open')">關閉</button>
-      <button class="btn btn-outline" onclick="showHealthCheckModal()">🔄 重新掃描</button>
-    </div>
-  </div>
-</div>
-
-<!-- 備份歷史 Modal -->
-<div class="modal-bg" id="snapshot-modal">
-  <div class="modal" style="max-width: 700px;">
-    <h2>🗂️ 雲端備份歷史</h2>
-    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-      每次推送到雲端前自動備份，保留最近 20 筆。可以查看內容、還原。
-    </p>
-    <div id="snapshot-list-modal"></div>
-    <div class="modal-actions">
-      <button class="btn btn-outline" onclick="document.getElementById('snapshot-modal').classList.remove('open')">關閉</button>
-      <button class="btn btn-outline" onclick="showSnapshotList()">🔄 重新整理</button>
-    </div>
-  </div>
-</div>
+<!-- v3.3.0：刪除 health-modal / snapshot-modal（v2 Apps Script Sheet 工具，v3 用 Drive snapshot UI 取代） -->
 
 <!-- 初次使用引導 -->
 <div class="modal-bg" id="onboarding-modal">

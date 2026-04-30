@@ -2,6 +2,16 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## v3.3.0 ✅ Dead code 二輪清 + 單筆 PDF 修圖（2026-04-30）
+- [x] 修：`exportSingleJobPDF` 預先 await `cloudGetBankbookDataUrl` 拿 dataUrl，PDF 不再印 placeholder 文字
+- [x] 修：`captureInvoiceCanvas` 改為 html2canvas 前 await `cloudHydrateBankbookImages()`
+- [x] 單筆 PDF「原價」改成跟整單一致「單價 × 數量」
+- [x] 刪 HTML：`#card-cloud` / `#card-portable` / `#health-modal` / `#snapshot-modal` / `#snapshot-diff-modal` / `#device-name-prompt-modal`
+- [x] 包 DEAD_BLOCK 註解：資料健檢、Sheet 容量、settings 收款帳號 v2 UI、Lab mode、裝置名稱輸入 UI、GPS、裝置名稱提醒 modal、9 個 v2 deprecated stub
+- [x] init 啟動腳本拿掉 `updateLabModeUI` / `maybeShowDeviceNamePrompt`
+- [x] applyTrackerData 拿掉 `loadDeviceNameUI`（留 noop stub）
+- [x] bump 三處版本號 → `2026-04-30-v3.3.0` / `ftracker-cloud-v3.3.0`
+
 ## v3.2.1 ✅ 請款單 UI 調整（2026-04-29）
 - [x] 個人資訊從頂端搬到底部 3 欄並排（個人 / 匯款 / 發票）
 - [x] 加 `showPersonalInfoOnTop` flag（頂端可選顯示精簡聯絡資訊）

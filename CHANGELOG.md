@@ -1,5 +1,55 @@
 ﻿# 版本更新歷史
 
+## v3.3.0 — Dead code cleanup + 單筆請款 PDF 修圖片（2026-04-30）
+
+> v3.0.0 stable 之後留下的 v2 Apps Script dead code 第二輪清理；同時修單筆請款 PDF 出存摺照片變 placeholder 文字的 bug。
+
+### Bug 修：單筆請款 PDF 存摺照片
+- v3.0.0-alpha.3 把存摺從 base64 → Drive fileId 後，`exportSingleJobPDF` 直接讀 `account.bankbookImageFileId` 但沒先 hydrate
+- 結果 PDF 裡只看到「⏳ 載入存摺照片中…」placeholder 文字
+- 改：PDF build 前 await `cloudGetBankbookDataUrl(fileId)` 取得 dataUrl 再塞 `<img>`
+- 整單請款圖片版的 `captureInvoiceCanvas` 也補 await `cloudHydrateBankbookImages()`
+- 順便把單筆 PDF 的「原價」改成跟整單一致的「單價 × 數量」顯示
+
+### HTML 死卡片 / Modal 整批刪
+- `#card-cloud`（v2 ☁️ 雲端同步整塊：sheet URL / token / pull-push / snapshot / 容量 / 裝置名稱 / GPS / lab mode）→ 約 100 行
+- `#card-portable`（v2 跨裝置設定檔：exportSettings / importSettings 純 stub）→ 約 18 行
+- `#health-modal`（v2 資料健檢 modal）
+- `#snapshot-modal`（v2 sheet snapshot 列表 modal）
+- `#snapshot-diff-modal`（v2 sheet snapshot diff modal，v3 用 cloudShowRestorePreviewModal 取代）
+- `#device-name-prompt-modal`（gate 在 `config.sheetSyncEnabled` 永遠 false，永不觸發）
+
+### JS 整批包進 DEAD_BLOCK 註解
+- `runDataHealthCheck` / `showHealthCheckModal` / `runHealthAction`（資料健檢整套）
+- `showCloudCapacity`（Sheet 容量計算）
+- 收款帳號 v2 settings UI 6 個函式（`loadUserInfoUI` / `renderPaymentAccountsUI` / `addPaymentAccount` / `removePaymentAccount` / `collectPaymentAccountsFromUI` / `saveUserInfo`）
+- Lab mode 整套（`isLabMode` / `toggleLabMode` / `showLabModeBanner` / `updateLabModeUI` + `LAB_MODE_KEY`）
+- 裝置名稱輸入 UI（`setDeviceName` / `loadDeviceNameUI`）
+- GPS 精確位置（`requestPreciseLocation` / `clearPreciseLocation`）
+- 裝置名稱提醒 modal（`maybeShowDeviceNamePrompt` / `saveDeviceNameFromPrompt` / `skipDeviceNamePrompt` + `DEVICE_PROMPT_DISMISSED_KEY`）
+- 各種 deprecated stub：`enableSheetSync` / `disableSheetSync` / `pullFromSheet` / `pushToSheet` / `exportSettings` / `importSettings` / `restoreSnapshot` / `saveCalendarConfig` / `testCalendarConnection` / `syncCalendarNow`
+
+### init 啟動腳本清理
+- 拿掉 `updateLabModeUI()`（cfg-lab-mode UI 已刪）
+- 拿掉 `setTimeout(maybeShowDeviceNamePrompt, 1500)`（modal 已刪）
+- 保留 `fetchDeviceLocation()`（getDeviceLabel / snapshot metadata 仍會用到）
+
+### applyTrackerData 清理
+- 移除 `loadDeviceNameUI()` 呼叫（UI 已刪）
+- 留 `loadDeviceNameUI` noop stub（避免有遺漏 caller 出錯）
+
+### 保留
+- `getDeviceLabel` / `getOrGenerateAutoId` / `getOsLabel` / `fetchDeviceLocation` / `cachedDeviceLocation` / `DEVICE_NAME_KEY` / `DEVICE_AUTO_KEY` / `DEVICE_LOCATION_KEY`
+  - 仍被 snapshot metadata（line 702、1375）使用，未來想恢復裝置名稱顯示也用得上
+- `toggleCard`（卡片摺疊；#card-calendar / #card-theme 等仍在用）
+
+### 統計
+- 刪除約 5 段 HTML（card + modal）合計 200+ 行
+- JS 註解化約 350 行 dead code
+- 升 APP_VERSION 至 `2026-04-30-v3.3.0`、SW CACHE_VERSION 至 `ftracker-cloud-v3.3.0`
+
+---
+
 ## v3.2.1 — 請款單 UI 調整（2026-04-29）
 
 > v3.2.0 主結構發出後依使用者實測逐步調整：版面緊湊化、區間改日期 picker、新增多個 toggle、preset 視覺提示、發票功能暫時隱藏。

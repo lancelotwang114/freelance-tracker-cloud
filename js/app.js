@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-04-29-v3.2.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-04-30-v3.3.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -754,10 +754,11 @@ function applyTrackerData(data) {
   if (typeof save === 'function') save();
   // 重繪 UI（v3.1.0-fix：除了 renderAll，也要重灌 settings 頁所有 input
   // 因為 settings 不在 renderAll 範圍，pull/merge 進來新 config 後 input 不會自動更新）
-  if (typeof loadUserInfoUI === 'function') loadUserInfoUI();          // 我的收款資訊 + paymentAccounts
+  // v3.3.0：loadUserInfoUI 已刪（settings 「我的收款資訊」card 已搬到請款單分頁）；改成 renderInvoicePayAccountSelect
+  if (typeof renderInvoicePayAccountSelect === 'function') renderInvoicePayAccountSelect();
   if (typeof loadReminderConfigUI === 'function') loadReminderConfigUI();
   if (typeof loadInvoiceStatusUI === 'function') loadInvoiceStatusUI();
-  if (typeof loadDeviceNameUI === 'function') loadDeviceNameUI();
+  // v3.3.0：loadDeviceNameUI 已 dead（裝置名稱輸入 UI 已刪）
   if (typeof renderAll === 'function') renderAll();
 }
 
@@ -5440,11 +5441,32 @@ async function exportSingleJobPDF() {
   const j = state.jobs.find(x => x.id === editingJobId);
   if (!j) return;
   const c = getClient(j.clientId);
+  const a = getActivePaymentAccount();
+
+  // v3.2.1：PDF 匯出前 pre-fetch 存摺照片 dataUrl，避免 html2canvas 截到 placeholder「⏳ 載入中」
+  let bankbookDataUrl = '';
+  if (a) {
+    if (a.bankbookImage) {
+      bankbookDataUrl = a.bankbookImage;
+    } else if (a.bankbookImageFileId) {
+      toastProgress('📷 載入存摺照片…');
+      try {
+        bankbookDataUrl = await cloudGetBankbookDataUrl(a.bankbookImageFileId);
+      } catch (e) {
+        console.warn('[pdf-export] 載入存摺照片失敗，繼續匯出（PDF 內無照片）:', e);
+      }
+    }
+  }
+
   // 用 invoice-view 同樣的 HTML 結構臨時生成
   const tempBox = document.createElement('div');
   tempBox.style.cssText = 'position: fixed; left: -10000px; top: 0; width: 700px; padding: 30px; background: white; color: black; font-family: -apple-system, "PingFang TC", sans-serif;';
   const userName = config.userInfo?.name || '';
   const tag = j.isEstimate ? '估價單' : '請款單（單筆）';
+  // 單價 × 數量
+  const qty = (j.quantity != null && j.quantity > 0) ? j.quantity : 1;
+  const unit = qty > 0 ? Math.round((+j.amount || 0) / qty) : (+j.amount || 0);
+
   tempBox.innerHTML = `
     <h1 style="font-size: 24px; margin-bottom: 8px; color: black;">${tag}</h1>
     <div style="font-size: 13px; color: #666; margin-bottom: 16px;">
@@ -5456,6 +5478,7 @@ async function exportSingleJobPDF() {
       <div style="margin-bottom: 8px;"><b>案件名稱：</b>${escapeHtml(j.title || '')}</div>
       ${j.tag ? `<div style="margin-bottom: 8px;"><b>類型：</b>${escapeHtml(j.tag)}</div>` : ''}
       ${j.details ? `<div style="margin-bottom: 8px;"><b>說明：</b><br><span style="white-space: pre-wrap;">${escapeHtml(j.details)}</span></div>` : ''}
+      ${qty > 1 ? `<div style="margin-bottom: 8px;"><b>單價 × 數量：</b>NT$ ${unit.toLocaleString()} × ${qty}</div>` : ''}
     </div>
     <div style="background: #f7f7f7; padding: 12px; border-radius: 8px; text-align: right; color: black;">
       <div style="font-size: 13px; color: #666;">${j.isEstimate ? '估價金額' : '應收金額'}</div>
@@ -5464,21 +5487,16 @@ async function exportSingleJobPDF() {
     ${userName ? `<div style="margin-top: 24px; font-size: 12px; color: #666; border-top: 1px solid #ddd; padding-top: 12px; color: black;">
       <b>承製方：</b>${escapeHtml(userName)}
       ${(() => {
-        // v2.10.13: 用選中的收款帳號取代舊 bankInfo
-        // v2.10.15: 戶名 + 存摺照片
-        const a = getActivePaymentAccount();
         if (!a) return '';
         const parts = [];
         if (a.bank) parts.push(a.bank);
         if (a.account) parts.push(a.account);
         if (a.holderName) parts.push('戶名 ' + a.holderName);
         const text = parts.length ? `<br>${escapeHtml(parts.join(' / '))}` : '';
-        // v3.0.0-alpha.3：base64 直接用、fileId 放 placeholder 等 cloudHydrateBankbookImages() 套
-        const img = a.bankbookImage
-          ? `<div style="margin-top: 8px;"><img src="${a.bankbookImage}" alt="存摺" style="max-width: 240px; max-height: 140px; border-radius: 4px; border: 1px solid #ddd;"></div>`
-          : (a.bankbookImageFileId
-            ? `<div style="margin-top: 8px;color:#888;font-size:12px;" data-bankbook-loading="${escapeHtml(a.bankbookImageFileId)}">⏳ 載入存摺照片中…</div>`
-            : '');
+        // v3.2.1：dataUrl 已 pre-fetch，直接 inline 不再用 placeholder
+        const img = bankbookDataUrl
+          ? `<div style="margin-top: 8px;"><img src="${bankbookDataUrl}" alt="存摺" style="max-width: 240px; max-height: 140px; border-radius: 4px; border: 1px solid #ddd;"></div>`
+          : '';
         return text + img;
       })()}
     </div>` : ''}
@@ -5497,8 +5515,10 @@ async function exportSingleJobPDF() {
     const imgH = (canvas.height * imgW) / canvas.width;
     pdf.addImage(canvas.toDataURL('image/png'), 'PNG', margin, margin, imgW, imgH);
     pdf.save(`${tag}_${c?.name || '案件'}_${todayStr()}.pdf`);
+    toastDismiss();
     toast('✓ 已下載 PDF');
   } catch (err) {
+    toastDismiss();
     toast('匯出失敗：' + err.message);
   } finally {
     tempBox.remove();
@@ -5658,57 +5678,14 @@ function updateNotifUI() {
   }
 }
 
-// ============== 雲端容量監控 ==============
+// v3.3.0：showCloudCapacity dead（v2 Sheet 容量監控；v3 Drive 容量另用 cloudShowSnapshotModal 顯示）
+/* DEAD_BLOCK_BEGIN_v2_sheet_capacity
 async function showCloudCapacity() {
   const cfg = config.sheetConfig;
   if (!cfg?.apiUrl || !cfg?.apiToken) { toast('請先設定雲端同步'); return; }
-  toastProgress('📊 計算容量中...');
-  try {
-    const url = cfg.apiUrl + '?action=listSnapshots&token=' + encodeURIComponent(cfg.apiToken);
-    const resp = await fetch(url);
-    const data = await resp.json();
-    toastDismiss();
-    if (!data.ok) { toast('讀取失敗'); return; }
-    const snaps = data.snapshots || [];
-    const totalBytes = snaps.reduce((s, x) => s + (x.dataSize || 0), 0);
-    const totalKB = Math.round(totalBytes / 1024);
-    const totalMB = (totalBytes / 1024 / 1024).toFixed(2);
-    // 估算當前資料 size
-    const currentJson = JSON.stringify({ clients: state.clients, jobs: state.jobs });
-    const currentKB = Math.round(currentJson.length / 1024);
-
-    // 分層統計
-    const byTier = {};
-    snaps.forEach(s => { byTier[s.tier] = (byTier[s.tier] || 0) + 1; });
-    const tierLabels = { force: '🔒 每日強制', manual: '✋ 手動', restore: '↩️ 還原前', auto: '⚙️ 自動', legacy: '📦 舊版' };
-    const tierLines = Object.entries(byTier).map(([k, v]) => `  ${tierLabels[k] || k}: ${v} 份`).join('\n');
-
-    // Sheet 限制：單儲存格 50K 字元，整 sheet 1000 萬儲存格（基本不會撞到）
-    const maxSnapshotSize = 4 * 45000;  // 4 columns * 45K
-    const usagePct = Math.round(currentJson.length / maxSnapshotSize * 100);
-
-    const msg = [
-      `📊 雲端 Sheet 容量現況`,
-      ``,
-      `本地資料大小：約 ${currentKB} KB`,
-      `每筆 snapshot 上限：180 KB（4 欄拆分）`,
-      `當前資料佔上限 ${usagePct}% ${usagePct > 80 ? '⚠️ 接近上限' : '✓'}`,
-      ``,
-      `Snapshot 總數：${snaps.length} 份`,
-      `Snapshot 總大小：${totalKB} KB（${totalMB} MB）`,
-      ``,
-      `分層分佈：`,
-      tierLines,
-      ``,
-      `Google Sheet 整體上限：1000 萬儲存格（基本不會用到 1%）`
-    ].join('\n');
-    toastDismiss();
-    alert(msg);
-  } catch (err) {
-    toastDismiss();
-    toast('錯誤：' + err.message);
-  }
+  // ... v2 Apps Script 容量計算邏輯（細節已刪）
 }
+DEAD_BLOCK_END_v2_sheet_capacity */
 
 // ============== 模糊比對（v2.7）==============
 // Levenshtein 距離（標準化到 0-1，1 = 完全一樣）
@@ -5778,7 +5755,8 @@ function findFuzzyDupJobs(threshold = 0.85) {
   return dupes.sort((x, y) => y.similarity - x.similarity);
 }
 
-// ============== 資料健檢 ==============
+// ============== 資料健檢（v3.3.0：HTML modal 已刪、整塊死碼） ==============
+/* DEAD_BLOCK_BEGIN_v2_health_check
 function runDataHealthCheck() {
   const results = [];
   const clientIds = new Set(state.clients.map(c => c.id));
@@ -5919,6 +5897,7 @@ function runHealthAction(i) {
     document.getElementById('health-modal').classList.remove('open');
   }
 }
+DEAD_BLOCK_END_v2_health_check */
 
 // ============== 範本系統（案件描述常用片語）==============
 const TEMPLATES_KEY = 'cloud-ftJobTemplates_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
@@ -6006,6 +5985,12 @@ async function captureInvoiceCanvas() {
   if (!view || !view.innerHTML.trim()) {
     toast('請先選擇業主與月份');
     return null;
+  }
+  // v3.2.1：截圖前先等存摺照片 hydrate 完，避免截到「⏳ 載入中」placeholder
+  if (typeof cloudHydrateBankbookImages === 'function') {
+    toastProgress('📷 載入存摺照片…');
+    try { await cloudHydrateBankbookImages(); }
+    catch (e) { console.warn('[invoice-export] hydrate 失敗，繼續截圖（PDF 內可能無存摺）:', e); }
   }
   toastProgress('🎨 渲染中...');
   await loadScript(HTML2CANVAS_CDN);
@@ -8050,17 +8035,10 @@ function getActivePaymentAccount() {
   return list.find(a => a.id === u.selectedPaymentAccountId) || list[0];
 }
 
-function loadUserInfoUI() {
-  ensurePaymentAccounts();
-  const u = config.userInfo || {};
-  const g = (id) => document.getElementById(id);
-  if (g('me-name')) g('me-name').value = u.name || '';
-  if (g('me-phone')) g('me-phone').value = u.phone || '';
-  if (g('me-email')) g('me-email').value = u.email || '';
-  if (g('me-title')) g('me-title').value = u.invoiceTitle || '';
-  if (g('me-note')) g('me-note').value = u.note || '';
-  renderPaymentAccountsUI();
-}
+// v3.3.0：以下整段 settings 頁「我的收款資訊」相關邏輯已移除
+// 收款帳號 CRUD 全部走請款單分頁的 modal（openPaymentAccountEditor / savePaymentAccountEditor / deleteSelectedPaymentAccount）
+// 移除函式：loadUserInfoUI / renderPaymentAccountsUI / addPaymentAccount / removePaymentAccount / collectPaymentAccountsFromUI / saveUserInfo
+/* DEAD_BLOCK_BEGIN_v2_settings_payment_ui
 
 // 渲染收款帳號列表（設定頁）
 function renderPaymentAccountsUI() {
@@ -8187,6 +8165,7 @@ function saveUserInfo() {
   render();
   toast('✓ 已儲存收款資訊，請款單會自動帶入');
 }
+DEAD_BLOCK_END_v2_settings_payment_ui */
 
 function renderBackupStatus() {
   // 順便調整範例按鈕的安全提示
@@ -8409,39 +8388,12 @@ document.getElementById('inv-month-end')?.addEventListener('change', drawInvoice
 // 案件金額變動時更新儲值提示
 document.getElementById('job-amount')?.addEventListener('input', onJobClientChange);
 
-// ============== 跨裝置設定檔（v3.0.0-beta.1 已移除）==============
-// 原本用來打包 Apps Script API URL + Token 換裝置；v3 登入即同步不再需要
-// HTML 對應的 #card-portable 卡片在 alpha.2 已加 hidden，這裡的 stub 是為了 onclick 不報錯
-function exportSettings() { console.warn('[deprecated] exportSettings：v3.0.0-beta.1 已移除，登入即同步不需要設定檔'); }
-function importSettings(e) {
-  console.warn('[deprecated] importSettings：v3.0.0-beta.1 已移除');
-  if (e && e.target) e.target.value = '';
-}
-
-// v3.0.0：v2 Sheet 雙向同步整套已移除（setSyncStatus / syncTimer / syncStatus / syncError）
-// indicator 全部交給 cloudUpdateSyncIndicator（在 ☁️ Cloud Auth Layer）
-
-// 切換摺疊卡片
+// v3.3.0：v2 Apps Script stubs 整批刪除（HTML onclick caller 已隨 #card-cloud / #card-portable 一起刪）
+// 留切換摺疊卡片的 toggleCard 即可（仍有 caller：#card-calendar / #card-theme / #card-search 等）
 function toggleCard(cardId) {
   const card = document.getElementById(cardId);
   if (card) card.classList.toggle('collapsed');
 }
-
-// v3.0.0-beta.1：原 v2 Apps Script pullFromSheet 已移除；v3 改用 cloudPullNow（從 Drive 拉 tracker.json）
-async function pullFromSheet(silent = false) {
-  console.warn('[deprecated] pullFromSheet：v3 已改用 Drive 同步，請呼叫 cloudPullNow()');
-  return false;
-}
-
-// v3.0.0-beta.1：原 v2 Apps Script pushToSheet 已移除；v3 改用 cloudPushNow（推 Drive tracker.json）
-async function pushToSheet(silent = false, force = false) {
-  console.warn('[deprecated] pushToSheet：v3 已改用 Drive 同步，請呼叫 cloudPushNow()');
-  return false;
-}
-
-// v3.0.0：以下 v2 Apps Script 邏輯整批移除（idle 偵測 / 編輯鎖 / manualSnapshot / setupDailyForceTrigger / schedulePush）
-// v3 不需要 idle 偵測（push 是 event-driven）、不需要編輯鎖（單人多裝置場景靠 mergeStates 三方合併處理衝突）
-// snapshot 全部由 cloudCreateSnapshot / cloudPruneSnapshots（在 ☁️ Drive Sync Layer）處理
 
 // ============== 暗色模式 ==============
 const THEME_KEY = 'cloud-ftTheme_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
@@ -8594,8 +8546,9 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ============== Lab / 開發模式（暫停同步）==============
-const LAB_MODE_KEY = 'cloud-ftLabMode_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
+// ============== Lab / 開發模式（v3.3.0：UI 卡片已刪、整塊 dead code）==============
+/* DEAD_BLOCK_BEGIN_v2_lab_mode
+const LAB_MODE_KEY = 'cloud-ftLabMode_v1';
 function isLabMode() { return localStorage.getItem(LAB_MODE_KEY) === '1'; }
 function toggleLabMode() {
   const next = !isLabMode();
@@ -8607,7 +8560,6 @@ function toggleLabMode() {
   } else {
     toast('✓ 開發模式已關閉，恢復雲端同步', 4000);
   }
-  // v3.0.0：移除 setSyncStatus 呼叫（v2 sync indicator 已砍）；indicator 由 cloudUpdateSyncIndicator 接管
   if (typeof cloudUpdateSyncIndicator === 'function') cloudUpdateSyncIndicator();
   updateLabModeUI();
 }
@@ -8626,6 +8578,9 @@ function updateLabModeUI() {
   if (isLabMode()) showLabModeBanner();
   else document.getElementById('lab-mode-banner')?.remove();
 }
+DEAD_BLOCK_END_v2_lab_mode */
+// v3.3.0：保留 stub 給 init script 不會出錯
+function isLabMode() { return false; }
 
 // ============== 過時客戶端橫幅（schema/version 不匹配時）==============
 // v3.0.0：showStaleClientBanner（v2 sheet schema 衝突警告橫幅）已移除
@@ -8666,6 +8621,8 @@ function getDeviceLabel() {
   return getOrGenerateAutoId();
 }
 
+// v3.3.0：setDeviceName / loadDeviceNameUI dead（裝置名稱輸入 UI 已刪）
+/* DEAD_BLOCK_BEGIN_v2_device_name_ui
 function setDeviceName(name) {
   if (!name || !name.trim()) {
     localStorage.removeItem(DEVICE_NAME_KEY);
@@ -8675,13 +8632,11 @@ function setDeviceName(name) {
     toast(`✓ 裝置名稱：${name.trim()}`);
   }
   loadDeviceNameUI();
-  // v3.0.0：移除 updateSheetSyncBadge（v2 sync indicator 已砍）
 }
 
 function loadDeviceNameUI() {
   const input = document.getElementById('cfg-device-name');
   if (input) input.value = localStorage.getItem(DEVICE_NAME_KEY) || '';
-  // 顯示目前生效的識別 + 位置資訊
   const hint = document.getElementById('cfg-device-name-current');
   if (hint) {
     const loc = cachedDeviceLocation || {};
@@ -8697,6 +8652,9 @@ function loadDeviceNameUI() {
       (loc.ip ? ` · IP ${loc.ip}` : '');
   }
 }
+DEAD_BLOCK_END_v2_device_name_ui */
+// v3.3.0：保留 noop stub，避免 applyTrackerData 等舊呼叫路徑出錯
+function loadDeviceNameUI() {}
 
 // ============== IP + 地理位置（24 小時快取）==============
 const DEVICE_LOCATION_KEY = 'cloud-ftDeviceLocation_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
@@ -8738,7 +8696,8 @@ async function fetchDeviceLocation() {
 
 // v3.0.0：getDeviceLabelForUpload（v2 上傳時帶地理位置）已移除；v3 用 getDeviceLabel 即可
 
-// 使用 HTML5 Geolocation 取得精確位置 + BigDataCloud 反向地理編碼
+// v3.3.0：requestPreciseLocation / clearPreciseLocation dead（GPS 按鈕已隨 #card-cloud 一起刪）
+/* DEAD_BLOCK_BEGIN_v2_precise_location
 async function requestPreciseLocation() {
   if (!navigator.geolocation) {
     toast('這個瀏覽器不支援精確定位');
@@ -8749,13 +8708,11 @@ async function requestPreciseLocation() {
     const lat = pos.coords.latitude;
     const lng = pos.coords.longitude;
     try {
-      // BigDataCloud 免金鑰、HTTPS、支援繁中
       const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=zh-TW`;
       const resp = await fetch(url);
       const data = await resp.json();
       const district = data.locality || (data.localityInfo?.administrative || []).slice(-1)[0]?.name || '';
       const city = data.city || data.principalSubdivision || '';
-
       const loc = cachedDeviceLocation || {};
       loc.preciseCity = city;
       loc.preciseDistrict = district;
@@ -8764,9 +8721,7 @@ async function requestPreciseLocation() {
       loc.preciseFetchedAt = Date.now();
       cachedDeviceLocation = loc;
       localStorage.setItem(DEVICE_LOCATION_KEY, JSON.stringify(loc));
-
       toast(`✓ 精確位置：${city} ${district}`, 4000);
-      // v3.0.0：移除 updateSheetSyncBadge
       loadDeviceNameUI();
     } catch (err) {
       toast('反向地理編碼失敗：' + err.message);
@@ -8779,8 +8734,6 @@ async function requestPreciseLocation() {
     toast('❌ ' + msg, 4000);
   }, { timeout: 15000, maximumAge: 60 * 60 * 1000, enableHighAccuracy: false });
 }
-
-// 清除精確位置（之後又會退回 IP 城市）
 function clearPreciseLocation() {
   if (cachedDeviceLocation) {
     delete cachedDeviceLocation.preciseCity;
@@ -8793,18 +8746,15 @@ function clearPreciseLocation() {
   toast('已清除精確位置（改用 IP 城市）');
   loadDeviceNameUI();
 }
+DEAD_BLOCK_END_v2_precise_location */
 
-// ============== 裝置名稱提醒 modal ==============
-const DEVICE_PROMPT_DISMISSED_KEY = 'cloud-ftDeviceNamePromptDismissed_v1';  // v3.0.0-alpha.1：cloud- 前綴隔離 v2
-
+// v3.3.0：device-name-prompt-modal 已刪、且 config.sheetSyncEnabled 永遠 false，整塊 dead
+/* DEAD_BLOCK_BEGIN_v2_device_name_prompt
+const DEVICE_PROMPT_DISMISSED_KEY = 'cloud-ftDeviceNamePromptDismissed_v1';
 function maybeShowDeviceNamePrompt() {
-  // 已設過名稱 → 不顯示
   if (localStorage.getItem(DEVICE_NAME_KEY)) return;
-  // 已經跳過 → 不再煩
   if (localStorage.getItem(DEVICE_PROMPT_DISMISSED_KEY) === 'true') return;
-  // 還沒啟用同步 → 不需要顯示（沒設備衝突）
   if (!config.sheetSyncEnabled) return;
-  // 顯示
   const modal = document.getElementById('device-name-prompt-modal');
   if (!modal) return;
   const hint = document.getElementById('device-name-prompt-current');
@@ -8812,26 +8762,24 @@ function maybeShowDeviceNamePrompt() {
   document.getElementById('device-name-prompt-input').value = '';
   modal.classList.add('open');
 }
-
 function saveDeviceNameFromPrompt() {
   const val = document.getElementById('device-name-prompt-input').value.trim();
-  if (!val) {
-    toast('請輸入裝置名稱，或選「先跳過」');
-    return;
-  }
+  if (!val) { toast('請輸入裝置名稱，或選「先跳過」'); return; }
   setDeviceName(val);
   document.getElementById('device-name-prompt-modal').classList.remove('open');
 }
-
 function skipDeviceNamePrompt() {
   localStorage.setItem(DEVICE_PROMPT_DISMISSED_KEY, 'true');
   document.getElementById('device-name-prompt-modal').classList.remove('open');
   toast('已跳過。設定頁可隨時更改裝置名稱。', 4000);
 }
+DEAD_BLOCK_END_v2_device_name_prompt */
 
-// v3.0.0-beta.1：v2 Apps Script 同步開關已移除，v3 登入即同步
+// v3.3.0：v2 Apps Script 同步開關 stub 也徹底移除
+/* DEAD_BLOCK_BEGIN_v2_sheet_sync_toggle_stubs
 async function enableSheetSync() { console.warn('[deprecated] enableSheetSync：v3 登入即同步，無需手動啟用'); }
 function disableSheetSync() { console.warn('[deprecated] disableSheetSync：v3 登入即同步，請從 🔐 Google Drive 同步 卡片登出'); }
+DEAD_BLOCK_END_v2_sheet_sync_toggle_stubs */
 
 // v3.0.0：updateSheetSyncBadge（更新 #sheet-sync-status 文字）已移除；對應 hidden 卡片不再顯示
 
@@ -8995,40 +8943,10 @@ const SNAPSHOT_FIELD_LABELS = {
 const CLIENT_FIELDS = ['name','color','note','commissionRate','commissionTo','prepaidMode','prepayments','billingDay','billingRemindDays','unpaidRemindDaysOverride'];
 const JOB_FIELDS    = ['title','clientId','date','endDate','details','amount','tag','done','doneAt','paid','paidAt','cancelled','isEstimate','hoursWorked','timeSpentMs','discountType','discountValue','payments','writeOff','subtasks'];
 
-// v3.0.0：以下整套 v2 sheet snapshot diff modal 邏輯已移除
-// （diffFields_ / computeSnapshotDiff / formatDiffValue_ / renderFieldDiffHtml / previewSnapshot / showSnapshotDiffModal）
+// v3.3.0：以下整套 v2 sheet snapshot diff modal 邏輯已徹底移除
+// 原本是 diffFields_ / computeSnapshotDiff / formatDiffValue_ / renderFieldDiffHtml / previewSnapshot / showSnapshotDiffModal
 // v3 用 cloudShowRestorePreviewModal（在 ☁️ Drive Sync Layer，含「目前 vs 還原後」對比表格）取代
-/*
-function computeSnapshotDiff(currentClients, currentJobs, snapClients, snapJobs) {
-  const result = {
-    clients: { added: [], removed: [], changed: [] },
-    jobs:    { added: [], removed: [], changed: [] }
-  };
-  const curC = new Map((currentClients || []).map(c => [c.id, c]));
-  const snapC = new Map((snapClients || []).map(c => [c.id, c]));
-  const curJ = new Map((currentJobs || []).map(j => [j.id, j]));
-  const snapJ = new Map((snapJobs || []).map(j => [j.id, j]));
-
-  (snapClients || []).forEach(c => {
-    if (!curC.has(c.id)) result.clients.added.push(c);
-    else {
-      const fd = diffFields_(curC.get(c.id), c, CLIENT_FIELDS);
-      if (Object.keys(fd).length) result.clients.changed.push({ id: c.id, before: curC.get(c.id), after: c, fieldDiff: fd });
-    }
-  });
-  (currentClients || []).forEach(c => { if (!snapC.has(c.id)) result.clients.removed.push(c); });
-
-  (snapJobs || []).forEach(j => {
-    if (!curJ.has(j.id)) result.jobs.added.push(j);
-    else {
-      const fd = diffFields_(curJ.get(j.id), j, JOB_FIELDS);
-      if (Object.keys(fd).length) result.jobs.changed.push({ id: j.id, before: curJ.get(j.id), after: j, fieldDiff: fd });
-    }
-  });
-  (currentJobs || []).forEach(j => { if (!snapJ.has(j.id)) result.jobs.removed.push(j); });
-
-  return result;
-}
+/* DEAD_BLOCK_BEGIN_v2_snapshot_diff_modal
 
 function formatDiffValue_(field, value, snapClients) {
   if (value === undefined || value === null || value === '') return '<i style="color:var(--muted);">(空)</i>';
@@ -9206,8 +9124,7 @@ function showSnapshotDiffModal(snap, snapClients, snapJobs, diff, snapshotId) {
 }
 */
 
-// v3.0.0：v2 sheet-based restoreSnapshot 已移除；v3 用 cloudRestoreSnapshot（從 Drive 還原）
-async function restoreSnapshot(id) { console.warn('[deprecated] restoreSnapshot：v3 已改用 cloudRestoreSnapshot 從 Drive 還原'); }
+// v3.3.0：restoreSnapshot stub 已刪（caller 已隨 snapshot-modal 一起刪）
 
 // ============== 網頁版本偵測 ==============
 // APP_VERSION 已在檔案頂端宣告（v2.2 新增）；此處不再重複宣告
@@ -9371,9 +9288,7 @@ async function pollAppVersion() {
 //     updateCalendarReminderHint / updateCalendarStatusBadge / renderCalendarSyncStatus）
 // v3 同步全部交給 ☁️ Cloud Auth Layer / Drive Sync Layer
 
-// v3.0.0：Google 行事曆 Apps Script 中介同步已移除；之後若要重做要走 GIS OAuth
-function saveCalendarConfig() { console.warn('[deprecated] saveCalendarConfig：v3 已停用 Apps Script 中介行事曆同步'); }
-async function testCalendarConnection() { console.warn('[deprecated] testCalendarConnection：v3 已停用 Apps Script 中介行事曆同步'); }
+// v3.3.0：saveCalendarConfig / testCalendarConnection stub 已刪（v2 #card-calendar 用法、v3 用 cloudRenderCalendarUI 取代）
 
 /**
  * v2.10.2：建立「提醒事件」清單
@@ -9474,7 +9389,7 @@ function toDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
-async function syncCalendarNow() { console.warn('[deprecated] syncCalendarNow：v3 已停用 Apps Script 中介行事曆同步'); }
+// v3.3.0：syncCalendarNow stub 已刪（v3 用 cloudSyncCalendar 取代）
 
 // ============== 初次使用引導 ==============
 function maybeShowOnboarding() {
@@ -9546,7 +9461,7 @@ function setupAutoSave() {
 load();
 loadActionLog();   // v2.9.5
 loadReminderConfigUI();   // v2.7.9: 提醒設定（取代舊的單欄）
-loadUserInfoUI();
+// v3.3.0：移除 loadUserInfoUI（settings 「我的收款資訊」card 已搬到請款單分頁；renderInvoice 會處理收款帳號 picker）
 // v3.0.0-beta.1：移除 loadSheetConfigUI / loadCalendarConfigUI / updateSheetSyncBadge（對應 hidden 卡片，不再需要 init UI）
 loadInvoiceStatusUI();   // v2.10.4: 請款單狀態篩選
 buildRangeOptions();
@@ -9562,18 +9477,15 @@ fetchDeviceLocation();
 
 // v3.0.0：maybeGenerateMonthlySnapshot（v2 月報自動 snapshot）已移除；v3 不再依靠 Apps Script 月報
 
-// v2.2: 啟動時套用主題 + Lab Mode UI
+// v3.3.0：啟動時套用主題（updateLabModeUI / maybeShowDeviceNamePrompt 已隨 #card-cloud 一起 dead）
 loadThemeUI();
 updateThemeToggleIcon();
-updateLabModeUI();
 updateNotifUI();
 // v2.5: 開頁掃一次推通知（一天一次）
 setTimeout(maybeFireNotifications, 4000);
 
 // v3.0.0-beta.1：移除 v2 Apps Script 啟動同步邏輯（pullFromSheet / setupAutoPoll / maybeGenerateMonthlySnapshot）
 // v3 同步由 cloudInitGoogleAuth → cloudInitTrackerFile 觸發；setSyncStatus 全交給 cloudUpdateSyncIndicator
-// 啟動時提醒設裝置名稱（v2 既有 UX，跟同步無關，保留）
-setTimeout(maybeShowDeviceNamePrompt, 1500);
 setTimeout(maybeShowOnboarding, 300);
 
 // v3.0.0-beta.1：移除 v2 online listener（網路恢復補推 Apps Script）；v3 由 cloudPushNow 失敗 + 下次 save() 重試處理
