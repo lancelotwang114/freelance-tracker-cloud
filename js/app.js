@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.11.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.12.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -749,6 +749,7 @@ function buildTrackerWrapper(prevVersion = 0) {
     data: {
       clients: state.clients || [],
       jobs: state.jobs || [],
+      invoiceHistory: state.invoiceHistory || [],  // v3.12.0
       config: config || {}
     }
   };
@@ -786,6 +787,7 @@ function unwrapTracker(jsonText) {
 function applyTrackerData(data) {
   if (Array.isArray(data.clients)) state.clients = data.clients;
   if (Array.isArray(data.jobs)) state.jobs = data.jobs;
+  if (Array.isArray(data.invoiceHistory)) state.invoiceHistory = data.invoiceHistory;  // v3.12.0
   if (data.config && typeof data.config === 'object') config = data.config;
   // 跑一次 migrations 以防雲端資料 schema 較舊
   if (typeof runMigrations === 'function') runMigrations(state);
@@ -929,6 +931,7 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
   const local = {
     clients: state.clients,
     jobs: state.jobs,
+    invoiceHistory: state.invoiceHistory,  // v3.12.0
     config: config
   };
   const result = mergeStates(base, local, remoteData);
@@ -1417,6 +1420,7 @@ async function cloudCreateSnapshot(type, label) {
     data: {
       clients: state.clients || [],
       jobs: state.jobs || [],
+      invoiceHistory: state.invoiceHistory || [],  // v3.12.0
       config: config || {}
     }
   };
@@ -2800,6 +2804,8 @@ const COLORS = ['#ef4444','#f59e0b','#10b981','#2563eb','#8b5cf6','#ec4899','#14
 let state = {
   clients: [],
   jobs: [],
+  // v3.12.0：請款單歷史（每次匯出留一筆 snapshot）
+  invoiceHistory: [],
   filters: { clientId: 'all', month: 'current', status: 'all', tag: 'all', expandedYear: null, jobIdsOnly: null, jobIdsOnlyLabel: '' }
 };
 
@@ -2894,7 +2900,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 11;  // v3.9.0：v11 業主加結構化通訊錄 contact{person,phone,email,address}
+const CURRENT_SCHEMA_VERSION = 12;  // v3.12.0：v12 加 state.invoiceHistory[]（請款單歷史紀錄）
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -3003,6 +3009,11 @@ const SCHEMA_MIGRATIONS = {
         address: ''
       }
     }));
+  },
+  // v11 → v12：加請款單歷史 invoiceHistory (v3.12.0 新增)
+  // 每次匯出 PDF / PNG / 複製 / 列印 都留一筆紀錄
+  11: function(state) {
+    if (!Array.isArray(state.invoiceHistory)) state.invoiceHistory = [];
   }
 };
 
@@ -3071,7 +3082,8 @@ function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     schemaVersion: CURRENT_SCHEMA_VERSION,
     clients: state.clients,
-    jobs: state.jobs
+    jobs: state.jobs,
+    invoiceHistory: state.invoiceHistory  // v3.12.0
   }));
   // 記錄最後變動時間（給匯入差異比對用）
   config.lastModifiedAt = new Date().toISOString();
@@ -6813,6 +6825,7 @@ async function exportInvoicePNG() {
     link.href = canvas.toDataURL('image/png');
     link.click();
     toast('✓ 已下載圖片');
+    recordInvoiceHistory('png');  // v3.12.0
   } catch (err) {
     toastDismiss();
     toast('匯出失敗：' + err.message);
@@ -6839,6 +6852,7 @@ async function copyInvoiceImage() {
         toastDismiss();
         toast('✓ 已複製，可直接貼到 LINE / Messenger / Email');
         logAction('invoice-copy', { summary: '複製請款單到剪貼簿' });
+        recordInvoiceHistory('image-copy');  // v3.12.0
       } catch (err) {
         toastDismiss();
         // 常見原因：頁面沒有 focus、HTTPS 限制等
@@ -6892,9 +6906,192 @@ async function exportInvoicePDF() {
     }
     pdf.save(getInvoiceFilename('pdf'));
     toast('✓ 已下載 PDF');
+    recordInvoiceHistory('pdf');  // v3.12.0
   } catch (err) {
     toast('匯出失敗：' + err.message);
   }
+}
+
+// v3.12.0：列印 wrapper（順手記錄到歷史）
+function printInvoice() {
+  recordInvoiceHistory('print');
+  window.print();
+}
+
+// ============== v3.12.0: 請款單歷史紀錄 ==============
+const INVOICE_STATUSES = [
+  { v: 'pending', label: '⚪ 待寄出', color: 'var(--muted)' },
+  { v: 'sent', label: '✉️ 已寄出', color: 'var(--primary)' },
+  { v: 'partial', label: '💰 部分收款', color: 'var(--warning)' },
+  { v: 'paid', label: '✅ 已收齊', color: 'var(--success)' },
+  { v: 'cancelled', label: '❌ 已取消', color: 'var(--muted)' }
+];
+const INVOICE_FORMAT_LABELS = {
+  pdf: '📄 PDF',
+  png: '🖼️ PNG',
+  'image-copy': '📋 複製圖',
+  'text-copy': '📋 複製字',
+  print: '🖨️ 列印'
+};
+
+// 計算當前請款單視圖對應的「將要記錄的內容」
+function getCurrentInvoiceSnapshot() {
+  const cid = document.getElementById('inv-client')?.value;
+  if (!cid) return null;
+  const c = getClient(cid);
+  if (!c) return null;
+  const mode = document.getElementById('inv-mode')?.value || 'single';
+  let rangeStart, rangeEnd, periodLabel;
+  if (mode === 'range') {
+    let s = document.getElementById('inv-date-start')?.value || '';
+    let e = document.getElementById('inv-date-end')?.value || '';
+    if (!s || !e) {
+      const now = new Date();
+      s = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      e = todayStr();
+    }
+    if (e < s) { const t = s; s = e; e = t; }
+    rangeStart = s; rangeEnd = e; periodLabel = `${s} ~ ${e}`;
+  } else {
+    const mm = document.getElementById('inv-month')?.value || thisMonth();
+    rangeStart = mm + '-01';
+    const [yy, mmNum] = mm.split('-').map(Number);
+    const lastDay = new Date(yy, mmNum, 0).getDate();
+    rangeEnd = mm + '-' + String(lastDay).padStart(2, '0');
+    periodLabel = mm;
+  }
+  const allJobs = state.jobs.filter(j => {
+    if (j.clientId !== cid) return false;
+    const d = j.date || '';
+    return d >= rangeStart && d <= rangeEnd;
+  });
+  const statusFilter = (typeof getInvoiceStatusFilter === 'function') ? getInvoiceStatusFilter() : null;
+  const jobs = statusFilter ? allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j))) : allJobs;
+  const acct = getActivePaymentAccount();
+  return {
+    client: c,
+    mode, rangeStart, rangeEnd, periodLabel,
+    jobs,
+    jobIds: jobs.map(j => j.id),
+    totalAmount: jobs.reduce((s, j) => s + jobFinalAmount(j), 0),
+    paymentAccount: acct
+  };
+}
+
+// 每次匯出 / 列印 / 複製 完成後呼叫，記一筆
+function recordInvoiceHistory(format) {
+  const snap = getCurrentInvoiceSnapshot();
+  if (!snap || !snap.jobs.length) return;
+  const entry = {
+    id: 'inv_' + Math.random().toString(36).slice(2, 12),
+    createdAt: new Date().toISOString(),
+    clientId: snap.client.id,
+    clientName: snap.client.name,
+    paymentAccountId: snap.paymentAccount ? snap.paymentAccount.id : '',
+    paymentAccountLabel: snap.paymentAccount ? snap.paymentAccount.label : '',
+    mode: snap.mode,
+    rangeStart: snap.rangeStart,
+    rangeEnd: snap.rangeEnd,
+    periodLabel: snap.periodLabel,
+    jobIds: snap.jobIds,
+    jobCount: snap.jobs.length,
+    totalAmount: snap.totalAmount,
+    status: 'pending',
+    statusUpdatedAt: new Date().toISOString(),
+    note: '',
+    exportFormat: format
+  };
+  state.invoiceHistory = state.invoiceHistory || [];
+  state.invoiceHistory.unshift(entry);
+  // 上限 200 筆，避免無限累積
+  if (state.invoiceHistory.length > 200) state.invoiceHistory = state.invoiceHistory.slice(0, 200);
+  save();
+  if (typeof logAction === 'function') {
+    logAction('invoice-export', { format, clientName: snap.client.name, jobCount: snap.jobs.length, totalAmount: snap.totalAmount });
+  }
+  renderInvoiceHistory();
+}
+
+function setInvoiceHistoryStatus(historyId, status) {
+  const e = (state.invoiceHistory || []).find(x => x.id === historyId);
+  if (!e) return;
+  e.status = status;
+  e.statusUpdatedAt = new Date().toISOString();
+  save();
+  renderInvoiceHistory();
+  if (typeof logAction === 'function') logAction('invoice-status-change', { historyId, status });
+  toast(`✓ 已更新狀態為「${(INVOICE_STATUSES.find(x => x.v === status) || {}).label || status}」`, 2500);
+}
+
+function deleteInvoiceHistory(historyId) {
+  if (!confirm('確定刪除這筆請款紀錄？案件本身不會被刪。')) return;
+  state.invoiceHistory = (state.invoiceHistory || []).filter(x => x.id !== historyId);
+  save();
+  renderInvoiceHistory();
+  toast('已刪除這筆紀錄');
+}
+
+// 一鍵重發：把 invoice 控制套到該紀錄的條件，使用者再按下方匯出按鈕即可
+function reissueInvoice(historyId) {
+  const e = (state.invoiceHistory || []).find(x => x.id === historyId);
+  if (!e) { toast('找不到此紀錄'); return; }
+  const cSel = document.getElementById('inv-client');
+  const mSel = document.getElementById('inv-mode');
+  const moInp = document.getElementById('inv-month');
+  const dsInp = document.getElementById('inv-date-start');
+  const deInp = document.getElementById('inv-date-end');
+  const paSel = document.getElementById('inv-pay-account');
+  if (cSel) cSel.value = e.clientId;
+  if (mSel) mSel.value = e.mode;
+  if (e.mode === 'range') {
+    if (dsInp) dsInp.value = e.rangeStart;
+    if (deInp) deInp.value = e.rangeEnd;
+  } else {
+    if (moInp) moInp.value = e.periodLabel;
+  }
+  if (paSel && e.paymentAccountId) paSel.value = e.paymentAccountId;
+  if (typeof onInvPayAccountChange === 'function') onInvPayAccountChange();
+  if (typeof onInvModeChange === 'function') onInvModeChange();
+  if (typeof drawInvoice === 'function') drawInvoice();
+  document.getElementById('invoice-view')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  toast('✓ 已套用該紀錄條件，按上方匯出按鈕即可重發', 4500);
+}
+
+function renderInvoiceHistory() {
+  const box = document.getElementById('invoice-history-list');
+  if (!box) return;
+  const list = state.invoiceHistory || [];
+  const cnt = document.getElementById('invoice-history-count');
+  if (cnt) cnt.textContent = list.length ? `(${list.length} 筆)` : '';
+  if (!list.length) {
+    box.innerHTML = '<div class="reminder-hint" style="text-align: center; padding: 20px;">還沒有任何請款紀錄。匯出第一張請款單後就會出現在這裡。</div>';
+    return;
+  }
+  const sorted = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  box.innerHTML = sorted.map(e => {
+    const dt = new Date(e.createdAt);
+    const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    const fmtMeta = INVOICE_FORMAT_LABELS[e.exportFormat] || (e.exportFormat || '');
+    const statusOptions = INVOICE_STATUSES.map(s => `<option value="${s.v}" ${s.v===e.status?'selected':''}>${s.label}</option>`).join('');
+    return `
+      <div class="invoice-history-row" data-status="${e.status}">
+        <div class="invoice-history-main">
+          <div class="invoice-history-line1">
+            <span class="invoice-history-date">${dtStr}</span>
+            <span class="invoice-history-client">${escapeHtml(e.clientName || '（無業主名）')}</span>
+            <span class="invoice-history-amount">${fmt(e.totalAmount)}</span>
+          </div>
+          <div class="invoice-history-line2">
+            ${e.jobCount} 筆案件 · ${escapeHtml(e.periodLabel || '')}${e.paymentAccountLabel ? ' · ' + escapeHtml(e.paymentAccountLabel) : ''} · ${fmtMeta}
+          </div>
+        </div>
+        <div class="invoice-history-actions">
+          <select class="invoice-history-status" onchange="setInvoiceHistoryStatus('${e.id}', this.value)" title="更新狀態">${statusOptions}</select>
+          <button class="btn btn-outline btn-sm" onclick="reissueInvoice('${e.id}')" title="套用相同條件重新編輯/匯出">📋 重發</button>
+          <button class="btn btn-ghost btn-sm" onclick="deleteInvoiceHistory('${e.id}')" title="刪除這筆紀錄" style="color: var(--danger);">🗑️</button>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 // ============== v2.9: 收款時間軸 ==============
@@ -8642,7 +8839,10 @@ function copyInvoiceText() {
     }).join('\n') +
     `\n\n本次請款（待收款）：${fmt(unpaid)}` +
     (paid ? `\n已收款：${fmt(paid)}` : '');
-  navigator.clipboard.writeText(txt).then(() => toast('✓ 已複製純文字版'));
+  navigator.clipboard.writeText(txt).then(() => {
+    toast('✓ 已複製純文字版');
+    recordInvoiceHistory('text-copy');  // v3.12.0
+  });
 }
 
 function enterClientMode(cid) {
@@ -8667,9 +8867,10 @@ function exportData() {
   const payload = {
     _exportedAt: new Date().toISOString(),
     _version: 'v1.0',
-    _counts: { clients: state.clients.length, jobs: state.jobs.length },
+    _counts: { clients: state.clients.length, jobs: state.jobs.length, invoices: (state.invoiceHistory || []).length },
     clients: state.clients,
     jobs: state.jobs,
+    invoiceHistory: state.invoiceHistory,
     config: {
       ...config,
       // 不要把連線密碼一起匯出（匯出資料備份時）

@@ -1,5 +1,70 @@
 ﻿# 版本更新歷史
 
+## v3.12.0 — 請款單歷史 + status 追蹤（2026-05-01）
+
+> 每次匯出 PDF / PNG / 複製圖 / 複製字 / 列印 都會自動留一筆紀錄。可標 5 種 status、一鍵重發、刪除舊紀錄。
+
+### Schema migration v11 → v12
+- 加 `state.invoiceHistory: []` 預設空陣列（migration 自動補）
+- save / applyTrackerData / cloudResolveAndMerge / buildTrackerWrapper / cloudCreateSnapshot / exportData 全部都要 push/pull invoiceHistory
+- Drive payload + 本機 backup JSON 都跟著走
+
+### invoiceHistory entry 結構
+```json
+{
+  "id": "inv_xxxxxxxx",
+  "createdAt": "2026-05-01T15:30:00.000Z",
+  "clientId": "ab12cd",
+  "clientName": "A 公司",       // snapshot，業主後改名不影響歷史
+  "paymentAccountId": "pa1",
+  "paymentAccountLabel": "個人",
+  "mode": "single",                // 'single' | 'range'
+  "rangeStart": "2026-04-01",
+  "rangeEnd": "2026-04-30",
+  "periodLabel": "2026-04",
+  "jobIds": ["xy34ef", "..."],   // 含哪幾筆案件 ID
+  "jobCount": 3,
+  "totalAmount": 87200,            // snapshot 金額
+  "status": "pending",             // pending | sent | partial | paid | cancelled
+  "statusUpdatedAt": "2026-05-01T15:30:00.000Z",
+  "exportFormat": "pdf"            // pdf | png | image-copy | text-copy | print
+}
+```
+
+### 5 個 export 函式 wrap 後加 recordInvoiceHistory
+- exportInvoicePDF / exportInvoicePNG → 成功後 record
+- copyInvoiceImage → 成功 await clipboard.write 後 record
+- copyInvoiceText → 成功 writeText 後 record
+- 列印按鈕從 `onclick="window.print()"` wrap 成 `onclick="printInvoice()"` → record + window.print()
+
+### 新 UI：請款單歷史卡（在請款單分頁底部）
+- collapsible card 預設收摺（避免占空間）
+- 展開時自動 render（renderInvoiceHistory）
+- 每筆紀錄顯示：日期時間 / 業主名 / 金額 / 案件數 / 期間 / 收款帳號 / 匯出格式
+- 右側 3 個操作：
+  - **status 下拉**（5 種）→ 切換立即存
+  - **📋 重發** → 套用該紀錄條件到上方控制（業主+期間+收款帳號），使用者再按匯出按鈕
+  - **🗑️ 刪除** → confirm 後刪這筆
+- 上限 200 筆（自動裁掉最舊的，避免無限累積）
+
+### 5 種 status + 視覺
+- `pending` 灰色 ⚪ 待寄出（預設新建狀態）
+- `sent` 藍色 ✉️ 已寄出
+- `partial` 黃色 💰 部分收款（背景 warning-light + 左邊條）
+- `paid` 綠色 ✅ 已收齊（背景 success-light + 左邊條）
+- `cancelled` 灰化 ❌ 已取消（opacity 0.5）
+
+### 操作日誌新增
+- `invoice-export`（每次匯出）
+- `invoice-status-change`（手動改 status）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.12.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.12.0`
+- CURRENT_SCHEMA_VERSION → 12
+
+---
+
 ## v3.11.0 — 達成率 + 預測 + 智慧分析（2026-05-01）
 
 > 收益分頁總覽多一張「🎯 達成目標」卡片：自設月/年目標、進度條、線性預測期末值、5 種智慧分析提示。

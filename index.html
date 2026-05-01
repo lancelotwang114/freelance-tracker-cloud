@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.11.0">
+<meta name="app-version" content="2026-05-01-v3.12.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -535,11 +535,26 @@
         <button class="btn btn-primary" onclick="exportInvoicePDF()">📄 下載 PDF</button>
         <button class="btn btn-primary" onclick="exportInvoicePNG()">🖼️ 下載圖片</button>
         <button class="btn btn-outline" onclick="copyInvoiceImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email">📋 複製圖片</button>
-        <button class="btn btn-outline" onclick="window.print()">🖨️ 列印</button>
+        <button class="btn btn-outline" onclick="printInvoice()">🖨️ 列印</button>
         <button class="btn btn-outline" onclick="copyInvoiceText()">📋 複製純文字</button>
       </div>
     </div>
     <div id="invoice-view"></div>
+
+    <!-- v3.12.0：請款單歷史（每次匯出留紀錄、可改 status / 重發 / 刪除） -->
+    <div class="card collapsible collapsed no-print" id="card-invoice-history">
+      <div class="card-head" onclick="toggleCard('card-invoice-history'); renderInvoiceHistory();">
+        <h3>📦 請款單歷史 <span id="invoice-history-count" class="reminder-hint" style="font-weight: 400;"></span></h3>
+        <span class="card-status">紀錄每次匯出的請款單</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+          每次匯出 PDF / 圖片 / 列印 / 複製文字 都會留一筆。可標 status、重發、或刪除舊紀錄。
+        </p>
+        <div id="invoice-history-list"></div>
+      </div>
+    </div>
   </section>
 
   <!-- Settings -->

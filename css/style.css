@@ -1432,6 +1432,71 @@ input:focus, select:focus, textarea:focus {
   flex: 0 0 auto;
 }
 
+/* ==================== 請款單歷史（v3.12.0）==================== */
+.invoice-history-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  margin-bottom: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.invoice-history-row[data-status="paid"] {
+  background: var(--success-light);
+  border-left: 3px solid var(--success);
+}
+.invoice-history-row[data-status="cancelled"] {
+  opacity: 0.5;
+}
+.invoice-history-row[data-status="partial"] {
+  background: var(--warning-light);
+  border-left: 3px solid var(--warning);
+}
+.invoice-history-main {
+  flex: 1;
+  min-width: 200px;
+}
+.invoice-history-line1 {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.invoice-history-date {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.invoice-history-client {
+  font-weight: 600;
+  font-size: 14px;
+}
+.invoice-history-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  font-size: 14px;
+}
+.invoice-history-line2 {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.invoice-history-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.invoice-history-status {
+  padding: 4px 8px;
+  font-size: 12px;
+  margin: 0;
+  max-width: 130px;
+}
+
 /* ==================== 達成率 + 智慧分析（v3.11.0）==================== */
 #rev-goals-card .goals-grid {
   display: grid;
