@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.8.1">
+<meta name="app-version" content="2026-05-01-v3.9.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -299,17 +299,107 @@
 
   <!-- Clients -->
   <section id="tab-clients" class="hidden">
-    <div class="card">
-      <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;">
-        <input type="search" id="client-search" placeholder="🔍 搜尋業主名稱..." style="flex: 1; min-width: 180px;" oninput="renderClients()">
-        <select id="client-sort" onchange="renderClients()" class="revenue-select" style="min-width: 130px;">
-          <option value="recent">依最近活動</option>
-          <option value="total">依累計金額</option>
-          <option value="unpaid">依待收款</option>
-          <option value="name">依名稱</option>
-        </select>
+    <!-- v3.9.0：業主分頁有兩種視圖：list / detail，互斥 hidden 切換 -->
+    <!-- 業主列表 -->
+    <div id="client-list-view">
+      <div class="card">
+        <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;">
+          <input type="search" id="client-search" placeholder="🔍 搜尋業主名稱..." style="flex: 1; min-width: 180px;" oninput="renderClients()">
+          <select id="client-sort" onchange="renderClients()" class="revenue-select" style="min-width: 130px;">
+            <option value="recent">依最近活動</option>
+            <option value="total">依累計金額</option>
+            <option value="unpaid">依待收款</option>
+            <option value="name">依名稱</option>
+          </select>
+        </div>
+        <div id="clients-list"></div>
       </div>
-      <div id="clients-list"></div>
+    </div>
+
+    <!-- 業主 detail 頁（CRM-lite）-->
+    <div id="client-detail-view" class="hidden">
+      <!-- Header：返回 + 業主名 + 快速動作 -->
+      <div class="card client-detail-header">
+        <button class="btn btn-ghost btn-sm" onclick="closeClientDetail()" aria-label="返回業主列表">← 返回列表</button>
+        <div class="client-detail-title">
+          <span id="client-detail-color-dot" class="client-color-dot"></span>
+          <h2 id="client-detail-name">—</h2>
+        </div>
+        <div class="client-detail-actions">
+          <button class="btn btn-outline btn-sm" id="client-detail-edit-btn" onclick="editCurrentDetailClient()">編輯</button>
+          <button class="btn btn-primary btn-sm" id="client-detail-add-job-btn" onclick="addJobForCurrentClient()">＋ 新增案件</button>
+        </div>
+      </div>
+
+      <!-- 4 個 stat card -->
+      <div class="stat-grid client-detail-stats">
+        <div class="stat">
+          <div class="label">累計收入</div>
+          <div class="value" id="client-detail-total">$0</div>
+          <div class="delta" id="client-detail-total-sub">含已收 + 待收</div>
+        </div>
+        <div class="stat">
+          <div class="label">案件數</div>
+          <div class="value" id="client-detail-jobcount">0</div>
+          <div class="delta" id="client-detail-jobcount-sub">活躍案件</div>
+        </div>
+        <div class="stat warning">
+          <div class="label">待收餘額</div>
+          <div class="value" id="client-detail-unpaid">$0</div>
+          <div class="delta" id="client-detail-unpaid-sub" style="color: var(--warning);">0 筆</div>
+        </div>
+        <div class="stat">
+          <div class="label">平均收款週期</div>
+          <div class="value" id="client-detail-paycycle">—</div>
+          <div class="delta" id="client-detail-paycycle-sub" style="color: var(--muted);">—</div>
+        </div>
+      </div>
+
+      <!-- Actionable 提示卡片（依條件動態顯示）-->
+      <div id="client-detail-insights"></div>
+
+      <!-- 過去 12 個月該業主貢獻 mini chart -->
+      <div class="card">
+        <h3 style="font-size: 14px; margin-bottom: 8px;">📊 過去 12 個月貢獻</h3>
+        <div class="chart-container" style="height: 120px;">
+          <svg class="chart-svg" id="client-detail-chart" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <div style="font-size: 11px; color: var(--muted); margin-top: 6px;">綠色 = 已收 / 黃色 = 待收</div>
+      </div>
+
+      <!-- 通訊錄（inline editable）-->
+      <div class="card">
+        <h3 style="font-size: 14px; margin-bottom: 10px;">📇 通訊錄</h3>
+        <div class="contact-grid">
+          <div>
+            <label>聯絡人</label>
+            <input type="text" id="client-contact-person" placeholder="例：王經理" oninput="onClientContactChange()">
+          </div>
+          <div>
+            <label>電話</label>
+            <input type="tel" id="client-contact-phone" placeholder="例：02-1234-5678" oninput="onClientContactChange()">
+          </div>
+          <div>
+            <label>Email</label>
+            <input type="email" id="client-contact-email" placeholder="例：contact@example.com" oninput="onClientContactChange()">
+          </div>
+          <div>
+            <label>地址</label>
+            <input type="text" id="client-contact-address" placeholder="例：台北市信義區..." oninput="onClientContactChange()">
+          </div>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>內部備註（業主看不到）</label>
+          <textarea id="client-contact-note" placeholder="例：對方喜歡簡潔風格、偏好 Email 溝通、月底結款" oninput="onClientContactChange()" style="min-height: 60px;"></textarea>
+        </div>
+        <div id="client-contact-saved-hint" class="reminder-hint" style="margin-top: 4px; opacity: 0; transition: opacity .2s;">✓ 已儲存</div>
+      </div>
+
+      <!-- 案件歷史時間軸 -->
+      <div class="card">
+        <h3 style="font-size: 14px; margin-bottom: 10px;">📋 案件歷史 <span id="client-detail-jobs-count" class="reminder-hint"></span></h3>
+        <div id="client-detail-jobs-timeline"></div>
+      </div>
     </div>
   </section>
 

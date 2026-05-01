@@ -1368,6 +1368,111 @@ input:focus, select:focus, textarea:focus {
   flex: 0 0 auto;
 }
 
+/* ==================== 業主 detail 頁（v3.9.0：CRM-lite）==================== */
+.client-name-link:hover {
+  color: var(--primary);
+}
+.client-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.client-detail-header > .client-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 200px;
+}
+.client-detail-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.client-color-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+}
+.client-detail-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.client-detail-stats {
+  margin-bottom: 16px;
+}
+.contact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 12px;
+}
+.contact-grid label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.contact-grid input {
+  width: 100%;
+  margin: 0;
+}
+
+/* Insight 卡 */
+.client-insights-card {
+  background: var(--card);
+}
+.client-insight {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: var(--bg);
+}
+.client-insight--warn {
+  background: var(--warning-light);
+  border-left: 3px solid var(--warning);
+}
+.client-insight--good {
+  background: var(--success-light);
+  border-left: 3px solid var(--success);
+}
+.client-insight--info {
+  background: var(--primary-light);
+  border-left: 3px solid var(--primary);
+}
+.client-insight-icon {
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+.client-insight-body {
+  flex: 1;
+  min-width: 0;
+}
+.client-insight-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.client-insight--warn .client-insight-title {
+  color: var(--warning);
+}
+.client-insight--good .client-insight-title {
+  color: var(--success);
+}
+.client-insight--info .client-insight-title {
+  color: var(--primary);
+}
+.client-insight-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
 /* ==================== 提醒類型矩陣（v3.8.0：每類自帶 desktop + calendar 兩 channel）==================== */
 .alert-matrix {
   display: grid;

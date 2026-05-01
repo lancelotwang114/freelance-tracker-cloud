@@ -1,5 +1,48 @@
 ﻿# 版本更新歷史
 
+## v3.9.0 — 業主 detail 頁（CRM-lite）（2026-05-01）
+
+> 業主分頁從單純列表升級成「點業主進詳細頁」，每個業主自帶 4 stat / 通訊錄 / 12 個月趨勢 / actionable 智慧分析 / 案件時間軸。
+
+### Schema migration v10 → v11
+- 業主加結構化 `contact: { person, phone, email, address }` 欄位（migration 自動補空值，舊資料無痛升級）
+- 既有 `client.note` 欄位繼續用，作為「內部備註（業主看不到）」
+
+### 業主分頁拆兩種視圖
+- `#client-list-view`：原本的列表（不動）
+- `#client-detail-view`：新的 detail 頁（預設 hidden）
+- 切到別的 tab 自動回列表
+- 業主名變可點 + 列表每筆右側加「詳細 →」按鈕
+
+### Detail 頁內容
+- **Header**：返回按鈕 + 業主色塊 + 業主名 + 編輯 + 「+ 新增案件」
+- **4 個 stat card**：
+  - 累計收入（含已收 + 待收）
+  - 案件數（活躍 / 含取消）
+  - 待收餘額
+  - 平均收款週期（依該業主 doneAt → 第一筆 payment.date 計算）
+- **💡 智慧分析 insights**（依條件動態出現）：
+  - 「已 N 天沒有新案件」（≥90 天 warn / ≥60 天 info）
+  - 「平均拖款 N 天，比整體多 X 天」（多 7 天以上 warn）
+  - 「平均收款比整體快 X 天 → 優質客戶」（少 5 天以上 good）
+  - 「年度貢獻佔 N%」（≥50% warn 集中度過高 / ≥30% info 主要客戶）
+  - 「待收金額 NT$X，建議集中請款」（≥50000 warn）
+- **過去 12 個月貢獻 mini chart**：堆疊條形圖（綠 = 已收 / 黃 = 待收）
+- **通訊錄**：4 欄 grid（聯絡人 / 電話 / Email / 地址）+ 內部備註，inline editable + auto-save（顯示「✓ 已儲存」淡入淡出）
+- **案件歷史時間軸**：依日期倒序、用既有 jobRow 渲染（含取消的）
+
+### 互動優化
+- 點 detail 頁的「+ 新增案件」會自動預選該業主
+- 點「編輯」會打開既有的 client modal
+- 通訊錄欄位 oninput 立即存（debounce 透過 save() 機制）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.9.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.9.0`
+- CURRENT_SCHEMA_VERSION → 11
+
+---
+
 ## v3.8.1 — UI 字眼統一 + Google 行事曆條件勾選（2026-05-01）
 
 ### UI 字眼「Calendar」全部改成「Google 行事曆」

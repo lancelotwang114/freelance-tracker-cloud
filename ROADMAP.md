@@ -2,6 +2,18 @@
 
 > 從 v2.10.15 fork 出來重寫後端為 Google Drive App Folder。
 
+## 🚧 v3.9.x ~ v4.5.x 大方向規劃（2026-05-01 起）
+
+依使用者選擇順序：
+- **v3.9.0 — 業主 detail 頁（CRM-lite）** ✅ 完成（2026-05-01）
+- **v3.10.0 — 全局計時器**：top bar 常駐顯示，跨 modal/分頁不中斷，今日總工時儀表
+- **v3.11.0 — 個人達成率 + 預測**：月/年目標、達成率進度條、簡單線性預測、業主集中度警告、churn warning
+- **v3.12.0 — 請款單歷史**：每次產出留紀錄、status 機器（未寄/已寄/已收/部分收）、一鍵重發
+- **v3.13.0 — Inline edit + 拖曳**：案件列表 inline edit、看板模式 / spreadsheet 模式、手機滑動快速 action
+- **v3.14.0 — 標籤系統升級**：業主多標籤 + 案件 multi-tag、標籤統計分頁、3 維 filter chip
+- **v3.15.0 — 撤銷系統 (Undo)**：刪除 / 改動 5-10 秒內 toast 內 undo button
+- **後續暫緩**：報稅報表 (#8)、手勢操作、業主入口升級、Plugin/Webhook、跨年比較等
+
 ## v3.8.1 ✅ UI 字眼統一 + Google 行事曆條件勾選（2026-05-01）
 - [x] 「Calendar」字眼全改「Google 行事曆」（表頭 / 分隔 / 按鈕 / hint / toast）
 - [x] master toggle OFF 時 reminder 卡 Google 行事曆欄整欄 disabled

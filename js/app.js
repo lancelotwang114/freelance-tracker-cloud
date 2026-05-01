@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.8.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.9.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2876,6 +2876,9 @@ calCursor.setDate(1);
 // 業主清單展開狀態（哪些業主展開）
 let expandedClients = new Set();
 
+// v3.9.0：業主分頁的 detail view 當前看哪一位（null = 列表模式）
+let detailClientId = null;
+
 // 收益頁模式
 let revenueState = {
   mode: 'month',        // 'month' | 'year'
@@ -2885,7 +2888,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 10;  // v3.2.0：v9 案件加 quantity；v10 paymentAccount 合併個人資訊（name/phone/email/invoiceTitle/taxId/address/invoiceNote/showPersonalInfo）
+const CURRENT_SCHEMA_VERSION = 11;  // v3.9.0：v11 業主加結構化通訊錄 contact{person,phone,email,address}
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -2981,6 +2984,19 @@ const SCHEMA_MIGRATIONS = {
   // state-level 無事（paymentAccounts 在 config）；由 ensurePaymentAccounts 補欄位 + 從 top-level userInfo 一次性 backfill
   9: function(state) {
     // 純版本標記
+  },
+  // v10 → v11：業主加結構化通訊錄 contact (v3.9.0 新增)
+  // 給業主 detail 頁的 CRM-lite 通訊錄欄位用
+  10: function(state) {
+    state.clients = (state.clients || []).map(c => ({
+      ...c,
+      contact: c.contact || {
+        person: '',   // 聯絡人姓名（公司情境，跟 client.name 是公司名）
+        phone: '',
+        email: '',
+        address: ''
+      }
+    }));
   }
 };
 
@@ -3319,6 +3335,12 @@ function switchTab(tab) {
   ['dashboard','jobs','calendar','revenue','clients','invoice','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.toggle('hidden', t !== tab);
   });
+  // v3.9.0：離開業主分頁時自動回列表（避免下次回來還停在 detail）
+  if (tab !== 'clients' && detailClientId) {
+    detailClientId = null;
+    document.getElementById('client-detail-view')?.classList.add('hidden');
+    document.getElementById('client-list-view')?.classList.remove('hidden');
+  }
   const fab = document.getElementById('fab-add');
   if (tab === 'settings' || tab === 'invoice' || tab === 'revenue') {
     fab.style.display = 'none';
@@ -3356,7 +3378,11 @@ function renderActiveTab() {
     case 'jobs':      renderJobs();      break;
     case 'calendar':  renderCalendar();  break;
     case 'revenue':   renderRevenue();   break;
-    case 'clients':   renderClients();   break;
+    case 'clients':
+      // v3.9.0：detail mode 時 render detail；否則 render 列表
+      if (detailClientId) renderClientDetail();
+      else renderClients();
+      break;
     case 'invoice':   renderInvoice();   break;
     // settings 不需要 render（純靜態）
   }
@@ -4494,6 +4520,319 @@ function openCustomMonthFilter() {
   setTimeout(() => document.getElementById('filter-month-from')?.focus(), 50);
 }
 
+// ============== v3.9.0：業主 detail 頁（CRM-lite）==============
+function viewClientDetail(clientId) {
+  detailClientId = clientId;
+  document.getElementById('client-list-view')?.classList.add('hidden');
+  document.getElementById('client-detail-view')?.classList.remove('hidden');
+  renderClientDetail();
+  // 滾到頂端
+  document.getElementById('tab-clients')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+}
+
+function closeClientDetail() {
+  detailClientId = null;
+  document.getElementById('client-detail-view')?.classList.add('hidden');
+  document.getElementById('client-list-view')?.classList.remove('hidden');
+  renderClients();
+}
+
+function editCurrentDetailClient() {
+  if (detailClientId) editClient(detailClientId);
+}
+
+function addJobForCurrentClient() {
+  if (!detailClientId) return;
+  openJobModal();
+  // 預選該業主
+  setTimeout(() => {
+    const sel = document.getElementById('job-client');
+    if (sel) {
+      sel.value = detailClientId;
+      onJobClientChange();
+    }
+  }, 50);
+}
+
+function onClientContactChange() {
+  if (!detailClientId) return;
+  const c = getClient(detailClientId);
+  if (!c) return;
+  c.contact = c.contact || {};
+  c.contact.person = document.getElementById('client-contact-person').value.trim();
+  c.contact.phone = document.getElementById('client-contact-phone').value.trim();
+  c.contact.email = document.getElementById('client-contact-email').value.trim();
+  c.contact.address = document.getElementById('client-contact-address').value.trim();
+  c.note = document.getElementById('client-contact-note').value.trim();
+  save();
+  // 顯示「已儲存」提示（淡入淡出）
+  const hint = document.getElementById('client-contact-saved-hint');
+  if (hint) {
+    hint.style.opacity = '1';
+    clearTimeout(window._contactSavedTimer);
+    window._contactSavedTimer = setTimeout(() => { hint.style.opacity = '0'; }, 1500);
+  }
+}
+
+function renderClientDetail() {
+  const c = getClient(detailClientId);
+  if (!c) { closeClientDetail(); return; }
+
+  // Header
+  document.getElementById('client-detail-name').textContent = c.name;
+  const dot = document.getElementById('client-detail-color-dot');
+  if (dot) dot.style.background = c.color || '#888';
+
+  // 該業主所有案件（含取消）
+  const allJobs = state.jobs.filter(j => j.clientId === c.id);
+  const aJobs = allJobs.filter(j => !j.cancelled && !j.isEstimate);
+
+  // 4 個 stat
+  const totalAmt = aJobs.reduce((s, j) => s + jobFinalAmount(j), 0);
+  const paidAmt = aJobs.reduce((s, j) => s + jobPaidTotal(j), 0);
+  const unpaidAmt = aJobs.filter(j => j.done).reduce((s, j) => s + jobUnpaidAmount(j), 0);
+  const unpaidCnt = aJobs.filter(j => j.done && !jobIsFullyPaid(j)).length;
+  document.getElementById('client-detail-total').textContent = fmt(totalAmt);
+  document.getElementById('client-detail-total-sub').textContent = `已收 ${fmt(paidAmt)}`;
+  document.getElementById('client-detail-jobcount').textContent = aJobs.length;
+  document.getElementById('client-detail-jobcount-sub').textContent = `共 ${allJobs.length} 筆（含取消）`;
+  document.getElementById('client-detail-unpaid').textContent = fmt(unpaidAmt);
+  document.getElementById('client-detail-unpaid-sub').textContent = `${unpaidCnt} 筆`;
+
+  // 平均收款週期：所有完成且至少有一筆 payment 的案件，計算 doneAt → 第一筆 payment.date 的天數
+  const cycles = [];
+  aJobs.forEach(j => {
+    if (!j.doneAt || !(j.payments || []).length) return;
+    const firstPay = [...j.payments].filter(p => p.date).sort((a,b) => (a.date||'').localeCompare(b.date||''))[0];
+    if (!firstPay) return;
+    const days = daysBetween(j.doneAt, firstPay.date);
+    if (days >= 0 && days <= 365) cycles.push(days);
+  });
+  if (cycles.length) {
+    const avg = Math.round(cycles.reduce((a,b) => a+b, 0) / cycles.length);
+    document.getElementById('client-detail-paycycle').textContent = avg + ' 天';
+    document.getElementById('client-detail-paycycle-sub').textContent = `${cycles.length} 筆樣本`;
+  } else {
+    document.getElementById('client-detail-paycycle').textContent = '—';
+    document.getElementById('client-detail-paycycle-sub').textContent = '尚無資料';
+  }
+
+  // Actionable insights
+  renderClientInsights(c, aJobs, cycles);
+
+  // 過去 12 個月 mini chart
+  renderClientMiniChart(c, aJobs);
+
+  // 通訊錄欄位
+  const ct = c.contact || {};
+  document.getElementById('client-contact-person').value = ct.person || '';
+  document.getElementById('client-contact-phone').value = ct.phone || '';
+  document.getElementById('client-contact-email').value = ct.email || '';
+  document.getElementById('client-contact-address').value = ct.address || '';
+  document.getElementById('client-contact-note').value = c.note || '';
+
+  // 案件歷史時間軸
+  renderClientJobsTimeline(c, allJobs);
+  document.getElementById('client-detail-jobs-count').textContent = `(${allJobs.length} 筆，含取消)`;
+}
+
+function renderClientInsights(c, aJobs, cycles) {
+  const box = document.getElementById('client-detail-insights');
+  if (!box) return;
+  const insights = [];
+
+  // 1. 最近 90 天無新案件
+  const lastDate = aJobs.map(j => j.date || '').filter(Boolean).sort().reverse()[0];
+  if (lastDate) {
+    const daysSinceLast = daysBetween(lastDate, todayStr());
+    if (daysSinceLast >= 90) {
+      insights.push({
+        kind: 'warn',
+        icon: '⏰',
+        title: `已 ${daysSinceLast} 天沒有新案件`,
+        desc: '可能該主動聯繫一下'
+      });
+    } else if (daysSinceLast >= 60) {
+      insights.push({
+        kind: 'info',
+        icon: '📅',
+        title: `${daysSinceLast} 天前最後一筆案件`,
+        desc: ''
+      });
+    }
+  } else if (aJobs.length === 0 && state.jobs.filter(j => j.clientId === c.id).length === 0) {
+    insights.push({
+      kind: 'info',
+      icon: '👋',
+      title: '還沒有任何案件',
+      desc: '點上方「＋ 新增案件」開始'
+    });
+  }
+
+  // 2. 拖款比較（該業主平均週期 vs 全體平均）
+  if (cycles.length >= 2) {
+    const myAvg = Math.round(cycles.reduce((a,b)=>a+b,0) / cycles.length);
+    // 全體平均
+    const allCycles = [];
+    activeJobs().forEach(j => {
+      if (!j.doneAt || !(j.payments||[]).length) return;
+      const fp = [...j.payments].filter(p => p.date).sort((a,b) => (a.date||'').localeCompare(b.date||''))[0];
+      if (!fp) return;
+      const d = daysBetween(j.doneAt, fp.date);
+      if (d >= 0 && d <= 365) allCycles.push(d);
+    });
+    if (allCycles.length >= 3) {
+      const allAvg = Math.round(allCycles.reduce((a,b)=>a+b,0) / allCycles.length);
+      const diff = myAvg - allAvg;
+      if (diff >= 7) {
+        insights.push({
+          kind: 'warn',
+          icon: '🐢',
+          title: `平均拖款 ${myAvg} 天，比整體平均（${allAvg} 天）多 ${diff} 天`,
+          desc: '請款時可考慮多催一次'
+        });
+      } else if (diff <= -5) {
+        insights.push({
+          kind: 'good',
+          icon: '⚡',
+          title: `平均收款 ${myAvg} 天，比整體平均（${allAvg} 天）快 ${-diff} 天`,
+          desc: '優質客戶'
+        });
+      }
+    }
+  }
+
+  // 3. 年度集中度（該業主佔今年總收入的比例）
+  const yr = String(new Date().getFullYear());
+  const myYearPaid = aJobs.reduce((s,j) => s + (j.payments||[]).filter(p => (p.date||'').startsWith(yr)).reduce((ss,p) => ss+(+p.amount||0), 0), 0);
+  const allYearPaid = activeJobs().reduce((s,j) => s + (j.payments||[]).filter(p => (p.date||'').startsWith(yr)).reduce((ss,p) => ss+(+p.amount||0), 0), 0);
+  if (allYearPaid > 0 && myYearPaid > 0) {
+    const pct = Math.round(myYearPaid / allYearPaid * 100);
+    if (pct >= 50) {
+      insights.push({
+        kind: 'warn',
+        icon: '⚠️',
+        title: `年度貢獻佔 ${pct}%`,
+        desc: '收入過度集中於單一業主，建議擴展客源'
+      });
+    } else if (pct >= 30) {
+      insights.push({
+        kind: 'info',
+        icon: '📊',
+        title: `年度貢獻佔 ${pct}%`,
+        desc: '主要客戶之一'
+      });
+    }
+  }
+
+  // 4. 待收餘額大時提醒
+  const unpaidTotal = aJobs.filter(j => j.done).reduce((s,j) => s + jobUnpaidAmount(j), 0);
+  if (unpaidTotal >= 50000) {
+    insights.push({
+      kind: 'warn',
+      icon: '💰',
+      title: `待收金額 ${fmt(unpaidTotal)}`,
+      desc: '建議集中請款'
+    });
+  }
+
+  if (!insights.length) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<div class="card client-insights-card">'
+    + '<h3 style="font-size: 14px; margin-bottom: 10px;">💡 智慧分析</h3>'
+    + insights.map(i => `
+        <div class="client-insight client-insight--${i.kind}">
+          <div class="client-insight-icon">${i.icon}</div>
+          <div class="client-insight-body">
+            <div class="client-insight-title">${escapeHtml(i.title)}</div>
+            ${i.desc ? `<div class="client-insight-desc">${escapeHtml(i.desc)}</div>` : ''}
+          </div>
+        </div>`).join('')
+    + '</div>';
+}
+
+function renderClientMiniChart(c, aJobs) {
+  const svg = document.getElementById('client-detail-chart');
+  if (!svg) return;
+  const W = Math.max(svg.clientWidth || 600, 320);
+  const H = 100;
+  const margin = { top: 8, right: 12, bottom: 24, left: 36 };
+  const chartW = W - margin.left - margin.right;
+  const chartH = H - margin.top - margin.bottom;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+  // 算過去 12 個月
+  const now = new Date(); now.setDate(1);
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now); d.setMonth(d.getMonth() - i);
+    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  const buckets = {};
+  months.forEach(m => buckets[m] = { paid: 0, unpaid: 0 });
+  aJobs.forEach(j => {
+    (j.payments||[]).forEach(p => {
+      const k = (p.date||'').slice(0,7);
+      if (buckets[k]) buckets[k].paid += (+p.amount||0);
+    });
+    if (j.date) {
+      const k = j.date.slice(0,7);
+      if (buckets[k] && j.done) {
+        buckets[k].unpaid += jobUnpaidAmount(j);
+      }
+    }
+  });
+  const data = months.map(m => ({ label: m, ...buckets[m] }));
+  const max = Math.max(...data.map(d => d.paid + d.unpaid), 1);
+  const niceMax = niceScale(max);
+  const barGroupW = chartW / data.length;
+  const barW = Math.min(barGroupW * 0.65, 24);
+
+  const parts = [];
+  // baseline
+  parts.push(`<line x1="${margin.left}" y1="${margin.top + chartH}" x2="${W - margin.right}" y2="${margin.top + chartH}" stroke="#e4e6eb" stroke-width="1"/>`);
+  // y-axis 一個 max 刻度
+  parts.push(`<text x="${margin.left - 4}" y="${margin.top + 8}" text-anchor="end" fill="#8a8f98" font-size="9">${fmtShort(niceMax)}</text>`);
+  parts.push(`<text x="${margin.left - 4}" y="${margin.top + chartH + 4}" text-anchor="end" fill="#8a8f98" font-size="9">0</text>`);
+  data.forEach((d, i) => {
+    const cx = margin.left + i * barGroupW + barGroupW / 2;
+    const bx = cx - barW / 2;
+    let y = margin.top + chartH;
+    if (d.paid > 0) {
+      const h = d.paid / niceMax * chartH;
+      y -= h;
+      parts.push(`<rect x="${bx}" y="${y}" width="${barW}" height="${h}" fill="#10b981" rx="2"><title>${d.label}　已收 ${fmt(d.paid)}</title></rect>`);
+    }
+    if (d.unpaid > 0) {
+      const h = d.unpaid / niceMax * chartH;
+      y -= h;
+      parts.push(`<rect x="${bx}" y="${y}" width="${barW}" height="${h}" fill="#f59e0b" rx="2"><title>${d.label}　待收 ${fmt(d.unpaid)}</title></rect>`);
+    }
+    // 每隔 2 個月顯示一次月份標籤（避免擠）
+    if (i % 2 === 0 || i === data.length - 1) {
+      parts.push(`<text x="${cx}" y="${H - 8}" text-anchor="middle" fill="#8a8f98" font-size="9">${d.label.slice(5)}</text>`);
+    }
+  });
+  svg.innerHTML = parts.join('');
+}
+
+function renderClientJobsTimeline(c, allJobs) {
+  const box = document.getElementById('client-detail-jobs-timeline');
+  if (!box) return;
+  if (!allJobs.length) {
+    box.innerHTML = '<div class="reminder-hint" style="text-align: center; padding: 20px;">這位業主還沒有任何案件</div>';
+    return;
+  }
+  // 依日期倒序
+  const sorted = [...allJobs].sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  // 用既有的 jobRow 渲染（單一風格、可點擊編輯）
+  box.innerHTML = sorted.map(j => jobRow(j, 'detail')).join('');
+}
+// /v3.9.0 業主 detail
+
 function applyMonthRangeFromInputs() {
   const from = document.getElementById('filter-month-from')?.value;
   const to = document.getElementById('filter-month-to')?.value;
@@ -4596,17 +4935,18 @@ function renderClients() {
     }
 
     return `<div style="padding: 14px 0; border-bottom: 1px solid var(--border);">
-      <div class="client-header" style="cursor: pointer;" onclick="toggleClientExpand('${c.id}')">
-        <span style="color: var(--muted); font-size: 12px; min-width: 16px;">${expandIcon}</span>
+      <div class="client-header">
+        <span style="color: var(--muted); font-size: 12px; min-width: 16px; cursor: pointer;" onclick="toggleClientExpand('${c.id}')" title="展開 / 收合案件清單">${expandIcon}</span>
         <div class="dot" style="background:${c.color}; width: 12px; height: 12px;"></div>
-        <div style="font-weight: 600; flex: 1;">
+        <!-- v3.9.0：業主名變可點 → 進詳細頁 -->
+        <div class="client-name-link" style="font-weight: 600; flex: 1; cursor: pointer;" onclick="viewClientDetail('${c.id}')" title="點開詳細頁">
           ${escapeHtml(c.name)}
           ${healthBadge}
           ${balanceBadge}
           ${allUnpaid > 0 && !c.prepaidMode ? `<span class="client-owes">待收 ${fmt(allUnpaid)}</span>` : ''}
           ${commissionInfo}
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); editClient('${c.id}')">編輯</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); viewClientDetail('${c.id}')">詳細 →</button>
       </div>
       <div style="font-size: 13px; color: var(--muted); margin-bottom: 4px; padding-left: 24px;">
         本月已收 ${fmt(mPaid)} · 待收 ${fmt(mUnpaid)} · 累計 ${clientJobs.length} 筆
