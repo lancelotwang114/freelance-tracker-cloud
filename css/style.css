@@ -1,5 +1,16 @@
+/*!
+ * Freelance Tracker (Cloud) - Stylesheet
+ * https://github.com/lancelotwang114/freelance-tracker-cloud
+ *
+ * Copyright (c) 2026 lancelotwang114. All rights reserved.
+ * Licensed under PolyForm Noncommercial License 1.0.0
+ * https://polyformproject.org/licenses/noncommercial/1.0.0/
+ *
+ * Commercial use is prohibited without prior written permission.
+ */
+
 /* =========================================
-   外包收益與排程管理 - 樣式表 v0.2
+   外包收益與排程管理 - 樣式表
    ========================================= */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

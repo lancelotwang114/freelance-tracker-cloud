@@ -57,6 +57,7 @@
 | **v3.19.0** | **行事曆拖曳改日期（單天案件 + 跨天案件 endDate 同步保持期間長度）** | ✅ **完成（2026-05-01）** |
 | **v3.20.0** | **手機案件 row 滑動快速 action（左滑標完成、右滑標收款，純 native touch）** | ✅ **完成（2026-05-01）** |
 | **v3.21.0** | **5 種視圖（完整/緊湊/報表/卡片/看板），預設報表，hover quick action，點業主色塊跳業主** | ✅ **完成（2026-05-01）** |
+| **v3.21.1** | **加 PolyForm Noncommercial 1.0.0 授權保護（LICENSE / 4 檔 copyright / console banner / PDF metadata）** | ✅ **完成（2026-05-01）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -87,4 +88,17 @@
 
 ## License
 
-個人專案，不含營利性使用授權。
+本專案採用 **[PolyForm Noncommercial License 1.0.0](./LICENSE)** 授權。
+
+- ✅ **允許**：個人使用、學習、研究、修改、Pull Request 貢獻
+- ✅ **允許**：非營利組織、教育機構、政府機構使用
+- ❌ **禁止**：任何商業用途，包括但不限於：
+  - 販售本專案或衍生作品
+  - 公司 / 工作室內部使用本專案管理業務
+  - 嵌入收費產品 / SaaS hosting
+  - 任何意圖獲利的使用情境
+
+**商業授權**請至 [GitHub repo](https://github.com/lancelotwang114/freelance-tracker-cloud) 開 issue 洽詢書面授權。
+
+著作權所有 © 2026 lancelotwang114
+完整授權條款見 [LICENSE](./LICENSE)。

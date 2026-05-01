@@ -1,5 +1,40 @@
 ﻿# 版本更新歷史
 
+## v3.21.1 — 加 PolyForm Noncommercial 授權保護（2026-05-01）
+
+> 從「個人專案，不含營利性使用授權」（含糊聲明）升級成正式法律授權。明確禁止任何商業用途。
+
+### 法律層
+- 加 `LICENSE` 檔（PolyForm Noncommercial 1.0.0 全文 + Required Notice）
+- README 「License」段重寫，列出明確的允許 / 禁止用途清單
+- 商業授權聯繫管道：GitHub repo issue
+
+### 程式碼層著作權聲明
+- `js/app.js`、`css/style.css`、`service-worker.js`、`index.html` 全部頂端加 `/*!  ... */` copyright header
+- `index.html` `<head>` 加 `meta[name=author]` / `copyright` / `license` 三個 meta tag
+- 所有檔頭含 LICENSE 連結 + 中英雙語警示
+
+### 啟動 console banner
+- 每次開頁 console 印藍色 banner：「© 2026 lancelotwang114 · Licensed under PolyForm Noncommercial 1.0.0」
+- 包含 GitHub repo 連結 + 中英雙語商用禁止警示
+
+### PDF metadata 嵌入著作權
+- `exportInvoicePDF` / `exportSingleJobPDF` 兩個函式加 `pdf.setProperties({ author, creator, keywords, ... })`
+- 任何匯出的 PDF 在 PDF reader 「文件屬性」內可看到作者跟著作權聲明
+- keywords 欄含「PolyForm Noncommercial 1.0.0; Commercial use prohibited」
+
+### 嚇阻效果
+- GitHub repo 頁面會自動偵測 LICENSE 並顯示「PolyForm Noncommercial」徽章
+- 任何想 fork 商用的人會看到清楚警告
+- 違規時可透過 GitHub DMCA 流程下架對方 repo
+- 法律訴訟時有明確授權合約可依憑
+
+### Bump
+- APP_VERSION → `v3.21.1`
+- SW CACHE_VERSION → `v3.21.1`
+
+---
+
 ## v3.21.0 — 5 種視圖切換（緊湊 / 報表 / 卡片 / 看板 / 完整）（2026-05-01）
 
 > 案件分頁從 2 種視圖（列表/看板）升級成 5 種，預設改報表模式。每種視圖都共享：點業主色塊跳業主 detail、hover 出現快速 action（✓/$/編輯）、手機滑動標完成/收款。
