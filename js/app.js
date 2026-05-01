@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.13.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.14.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2906,7 +2906,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 12;  // v3.12.0：v12 加 state.invoiceHistory[]（請款單歷史紀錄）
+const CURRENT_SCHEMA_VERSION = 13;  // v3.14.0：v13 業主 + 案件 加 tags[]（multi-tag），舊 tag 字串自動 backfill
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -3020,6 +3020,19 @@ const SCHEMA_MIGRATIONS = {
   // 每次匯出 PDF / PNG / 複製 / 列印 都留一筆紀錄
   11: function(state) {
     if (!Array.isArray(state.invoiceHistory)) state.invoiceHistory = [];
+  },
+  // v12 → v13：業主 + 案件 加 tags[] (v3.14.0 新增)
+  // 舊 case.tag 字串自動補進新 case.tags[]（保留 tag 字串相容老 caller）
+  12: function(state) {
+    state.clients = (state.clients || []).map(c => ({
+      ...c,
+      tags: Array.isArray(c.tags) ? c.tags : []
+    }));
+    state.jobs = (state.jobs || []).map(j => {
+      let tags = Array.isArray(j.tags) ? j.tags : [];
+      if (j.tag && !tags.includes(j.tag)) tags = [j.tag, ...tags];
+      return { ...j, tags };
+    });
   }
 };
 
@@ -3329,8 +3342,12 @@ function jobCommission(j) {
 
 // 已用過的標籤清單（補全用）
 function getUsedTags() {
+  // v3.14.0：包含 multi-tag、向下相容單字串 tag
   const tags = new Set();
-  state.jobs.forEach(j => { if (j.tag) tags.add(j.tag); });
+  state.jobs.forEach(j => {
+    if (j.tag) tags.add(j.tag);
+    (j.tags || []).forEach(t => tags.add(t));
+  });
   return [...tags].sort();
 }
 
@@ -4182,7 +4199,9 @@ function jobRow(j, ctx) {
     const cls = isOverdue || isUrgent ? 'urgent' : '';
     dueBadge = `<span class="due-badge ${cls}">截止 ${j.endDate.slice(5)}</span>`;
   }
-  const tagBadge = j.tag ? `<span class="tag-badge">${escapeHtml(j.tag)}</span>` : '';
+  // v3.14.0：multi-tag badges（向下相容單字串 tag）
+  const allTags = Array.isArray(j.tags) && j.tags.length ? j.tags : (j.tag ? [j.tag] : []);
+  const tagBadge = allTags.length ? allTags.map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join('') : '';
   // v2.6: 估價單與子任務 badge
   const estimateBadge = j.isEstimate ? '<span class="due-badge urgent" style="background: var(--warning); color: white;">📄 估價</span>' : '';
   const subDone = (j.subtasks || []).filter(s => s.done).length;
@@ -4343,7 +4362,14 @@ function renderJobs() {
   } else if (state.filters.status !== 'all' && state.filters.status !== 'estimate') {
     jobs = jobs.filter(j => jobStatus(j) === state.filters.status);
   }
-  if (state.filters.tag && state.filters.tag !== 'all') jobs = jobs.filter(j => j.tag === state.filters.tag);
+  // v3.14.0：filter.tag 比對 j.tags[] 跟舊 j.tag 字串都算 hit
+  if (state.filters.tag && state.filters.tag !== 'all') {
+    const ft = state.filters.tag;
+    jobs = jobs.filter(j => {
+      const t = Array.isArray(j.tags) ? j.tags : [];
+      return t.includes(ft) || j.tag === ft;
+    });
+  }
   jobs.sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
   const container = document.getElementById('jobs-list');
@@ -4831,6 +4857,10 @@ function renderClientDetail() {
   document.getElementById('client-contact-address').value = ct.address || '';
   document.getElementById('client-contact-note').value = c.note || '';
 
+  // v3.14.0：標籤
+  renderClientTagsChips();
+  refreshAllTagSuggestions();
+
   // 案件歷史時間軸
   renderClientJobsTimeline(c, allJobs);
   document.getElementById('client-detail-jobs-count').textContent = `(${allJobs.length} 筆，含取消)`;
@@ -5089,6 +5119,10 @@ function renderClients() {
     const allUnpaid = clientJobs.filter(j => j.done).reduce((s,j) => s + jobUnpaidAmount(j), 0);
     // 分潤資訊
     const introducer = c.commissionTo ? state.clients.find(x => x.id === c.commissionTo) : null;
+    // v3.14.0：tags badges
+    const tagsHtml = (c.tags || []).length
+      ? '<span class="client-tag-badges">' + c.tags.map(t => `<span class="tag-chip-mini">${escapeHtml(t)}</span>`).join('') + '</span>'
+      : '';
     const commissionInfo = (c.commissionRate > 0 && introducer)
       ? `<span class="commission-info">介紹人 ${escapeHtml(introducer.name)} · 抽成 ${c.commissionRate}%</span>`
       : '';
@@ -5141,6 +5175,7 @@ function renderClients() {
         <!-- v3.9.0：業主名變可點 → 進詳細頁 -->
         <div class="client-name-link" style="font-weight: 600; flex: 1; cursor: pointer;" onclick="viewClientDetail('${c.id}')" title="點開詳細頁">
           ${escapeHtml(c.name)}
+          ${tagsHtml}
           ${healthBadge}
           ${balanceBadge}
           ${allUnpaid > 0 && !c.prepaidMode ? `<span class="client-owes">待收 ${fmt(allUnpaid)}</span>` : ''}
@@ -6249,6 +6284,124 @@ function clickClientRank(cid) {
 
 // ============== Modal 內子任務（v2.6）==============
 let modalSubtasks = [];
+
+// v3.14.0：modal 內 multi-tag state
+let modalJobTags = [];      // 案件 modal 內的 tags
+let modalClientTags = [];   // 客戶 modal 內的 tags（如果加的話；目前 detail view 直接 mutate）
+
+// 業主 detail 頁的 tags（直接 mutate state.clients）
+function renderClientTagsChips() {
+  const c = (typeof detailClientId !== 'undefined' && detailClientId) ? getClient(detailClientId) : null;
+  const box = document.getElementById('client-tags-chips');
+  if (!box || !c) return;
+  c.tags = Array.isArray(c.tags) ? c.tags : [];
+  if (!c.tags.length) {
+    box.innerHTML = '<span class="reminder-hint" style="font-size: 12px;">還沒有標籤</span>';
+    return;
+  }
+  box.innerHTML = c.tags.map(t => `
+    <span class="tag-chip">
+      ${escapeHtml(t)}
+      <button onclick="removeClientTag('${escapeHtml(t).replace(/'/g, '&#39;')}')" title="移除標籤" aria-label="移除">×</button>
+    </span>`).join('');
+}
+
+function addClientTagFromInput() {
+  const inp = document.getElementById('client-tag-input');
+  if (!inp || !detailClientId) return;
+  const v = (inp.value || '').trim();
+  if (!v) return;
+  const c = getClient(detailClientId);
+  if (!c) return;
+  c.tags = Array.isArray(c.tags) ? c.tags : [];
+  if (c.tags.includes(v)) {
+    toast(`「${v}」已存在`);
+    inp.value = '';
+    return;
+  }
+  c.tags.push(v);
+  inp.value = '';
+  save();
+  renderClientTagsChips();
+  refreshAllTagSuggestions();
+}
+
+function removeClientTag(tag) {
+  if (!detailClientId) return;
+  const c = getClient(detailClientId);
+  if (!c) return;
+  c.tags = (c.tags || []).filter(t => t !== tag);
+  save();
+  renderClientTagsChips();
+}
+
+function onClientTagKeydown(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addClientTagFromInput();
+  }
+}
+
+// 案件 modal 的 tags
+function renderJobTagsChips() {
+  const box = document.getElementById('job-tags-chips');
+  if (!box) return;
+  if (!modalJobTags.length) {
+    box.innerHTML = '<span class="reminder-hint" style="font-size: 12px;">還沒有標籤</span>';
+    return;
+  }
+  box.innerHTML = modalJobTags.map(t => `
+    <span class="tag-chip">
+      ${escapeHtml(t)}
+      <button type="button" onclick="removeJobTag('${escapeHtml(t).replace(/'/g, '&#39;')}')" title="移除標籤" aria-label="移除">×</button>
+    </span>`).join('');
+}
+
+function addJobTagFromInput() {
+  const inp = document.getElementById('job-tag');
+  if (!inp) return;
+  const v = (inp.value || '').trim();
+  if (!v) return;
+  if (modalJobTags.includes(v)) {
+    toast(`「${v}」已存在`);
+    inp.value = '';
+    return;
+  }
+  modalJobTags.push(v);
+  inp.value = '';
+  renderJobTagsChips();
+}
+
+function removeJobTag(tag) {
+  modalJobTags = modalJobTags.filter(t => t !== tag);
+  renderJobTagsChips();
+}
+
+function onJobTagKeydown(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addJobTagFromInput();
+  }
+}
+
+// 收集本 app 內所有用過的標籤（業主 + 案件）→ datalist 自動建議
+function getAllUsedTags() {
+  const set = new Set();
+  state.clients.forEach(c => (c.tags || []).forEach(t => set.add(t)));
+  state.jobs.forEach(j => {
+    (j.tags || []).forEach(t => set.add(t));
+    if (j.tag) set.add(j.tag);  // 向下相容
+  });
+  return [...set].sort();
+}
+
+function refreshAllTagSuggestions() {
+  const tags = getAllUsedTags();
+  ['tag-suggestions', 'all-tag-suggestions'].forEach(id => {
+    const dl = document.getElementById(id);
+    if (dl) dl.innerHTML = tags.map(t => `<option value="${escapeHtml(t)}">`).join('');
+  });
+}
 
 function renderJobSubtasks() {
   const list = document.getElementById('job-subtasks-list');
@@ -8329,6 +8482,9 @@ function openJobModal() {
   document.getElementById('job-end-date').value = '';
   document.getElementById('job-title').value = '';
   document.getElementById('job-tag').value = '';
+  // v3.14.0：清空 multi-tag
+  modalJobTags = [];
+  renderJobTagsChips();
   document.getElementById('job-details').value = '';
   document.getElementById('job-amount').value = '';
   // v3.2.0：重設單價 + 數量
@@ -8582,6 +8738,11 @@ function updateJobHourlyHint() {
 }
 
 function refreshTagSuggestions() {
+  // v3.14.0：升級成包含業主 + 案件多 tag 的全集（datalist suggestion 兩處共用）
+  if (typeof refreshAllTagSuggestions === 'function') {
+    refreshAllTagSuggestions();
+    return;
+  }
   const dl = document.getElementById('tag-suggestions');
   if (!dl) return;
   dl.innerHTML = getUsedTags().map(t => `<option value="${escapeHtml(t)}">`).join('');
@@ -8624,7 +8785,10 @@ function editJob(id) {
   document.getElementById('job-date').value = j.date || '';
   document.getElementById('job-end-date').value = j.endDate || '';
   document.getElementById('job-title').value = j.title || '';
-  document.getElementById('job-tag').value = j.tag || '';
+  document.getElementById('job-tag').value = '';
+  // v3.14.0：載入 multi-tag（向下相容舊單字串 j.tag）
+  modalJobTags = Array.isArray(j.tags) ? [...j.tags] : (j.tag ? [j.tag] : []);
+  renderJobTagsChips();
   document.getElementById('job-details').value = j.details || '';
   document.getElementById('job-amount').value = j.amount || '';
   // v3.2.0：填入單價 + 數量
@@ -8719,7 +8883,9 @@ function saveJob() {
     date: document.getElementById('job-date').value,
     endDate: endDate || null,
     title: document.getElementById('job-title').value.trim(),
-    tag: document.getElementById('job-tag').value.trim(),
+    // v3.14.0：multi-tag（保留 tag 字串相容老 caller，取陣列第一個）
+    tags: [...modalJobTags],
+    tag: modalJobTags[0] || '',
     details: document.getElementById('job-details').value.trim(),
     amount: +document.getElementById('job-amount').value || 0,
     // v3.2.0：數量（單價只是顯示用，不存）

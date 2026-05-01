@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.13.0">
+<meta name="app-version" content="2026-05-01-v3.14.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -422,6 +422,17 @@
           <svg class="chart-svg" id="client-detail-chart" xmlns="http://www.w3.org/2000/svg"></svg>
         </div>
         <div style="font-size: 11px; color: var(--muted); margin-top: 6px;">綠色 = 已收 / 黃色 = 待收</div>
+      </div>
+
+      <!-- v3.14.0：業主標籤 -->
+      <div class="card">
+        <h3 style="font-size: 14px; margin-bottom: 8px;">🏷️ 標籤</h3>
+        <div id="client-tags-chips" class="tags-chips-row"></div>
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          <input type="text" id="client-tag-input" placeholder="輸入標籤後按 Enter（例：VIP、長期、潛在）" list="all-tag-suggestions" onkeydown="onClientTagKeydown(event)" style="flex: 1;">
+          <button class="btn btn-outline btn-sm" onclick="addClientTagFromInput()">＋</button>
+        </div>
+        <datalist id="all-tag-suggestions"></datalist>
       </div>
 
       <!-- 通訊錄（inline editable）-->
@@ -1031,8 +1042,12 @@
     <label>案件名稱</label>
     <input type="text" id="job-title" placeholder="例：首頁 banner 設計">
 
-    <label>類型 / 標籤（選填）</label>
-    <input type="text" id="job-tag" placeholder="例：廣告、設計、動畫" list="tag-suggestions">
+    <label>標籤（選填，可多個）</label>
+    <div id="job-tags-chips" class="tags-chips-row"></div>
+    <div style="display: flex; gap: 6px; margin-top: 4px;">
+      <input type="text" id="job-tag" placeholder="輸入後按 Enter（例：廣告、設計、動畫）" list="tag-suggestions" onkeydown="onJobTagKeydown(event)" style="flex: 1;">
+      <button type="button" class="btn btn-outline btn-sm" onclick="addJobTagFromInput()">＋</button>
+    </div>
     <datalist id="tag-suggestions"></datalist>
     </div>
     <!-- /區 1 -->

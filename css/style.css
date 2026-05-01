@@ -1432,6 +1432,60 @@ input:focus, select:focus, textarea:focus {
   flex: 0 0 auto;
 }
 
+/* ==================== 標籤 chip（v3.14.0）==================== */
+.tags-chips-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 28px;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 3px 4px 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.tag-chip button {
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tag-chip button:hover {
+  background: var(--primary);
+  color: #fff;
+}
+/* 業主列表行內的迷你 tag 顯示 */
+.client-tag-badges {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+.tag-chip-mini {
+  display: inline-block;
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
 /* ==================== 案件分頁 視圖切換 + 看板（v3.13.0）==================== */
 .jobs-view-toggle {
   display: inline-flex;

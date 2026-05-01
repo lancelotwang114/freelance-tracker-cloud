@@ -1,5 +1,52 @@
 ﻿# 版本更新歷史
 
+## v3.14.0 — 標籤系統升級（業主 + 案件 multi-tag）（2026-05-01）
+
+> 業主可打多標籤、案件 tag 從單字串升級成 multi-tag、共用標籤池 + 自動建議。
+
+### Schema migration v12 → v13
+- 業主加 `tags: string[]`（預設空）
+- 案件加 `tags: string[]`（migration 把舊 `tag` 字串自動補到 `tags[0]`）
+- **保留舊 `j.tag` 欄位**，所有 caller 仍可讀（向下相容）
+- 新 caller（jobRow / filter / suggestions）優先讀 `tags`、fallback `tag`
+
+### 業主 detail 頁加標籤編輯區
+- 新增「🏷️ 標籤」card 在通訊錄上方
+- chip 介面：每個 tag 是 pill + ✕ 移除按鈕
+- 輸入框 + ＋ 按鈕新增（Enter 也可）
+- datalist 自動建議全部用過的標籤（業主 + 案件共用標籤池）
+- 立即 save、無需按儲存
+
+### 業主列表 row 顯示 tags
+- 業主名右邊接迷你 tag chip badges（藍色背景、11px）
+
+### 案件 modal tags 改 multi
+- 原本單一 `<input id="job-tag">` 改成「chip 顯示區 + 輸入框 + ＋ 按鈕」
+- modalJobTags 全域 state 管理當前 modal 內 tag list
+- saveJob 寫入 `j.tags = [...modalJobTags]`，同時把 `j.tag = modalJobTags[0] || ''` 維持相容
+- editJob / openJobModal 載入時還原 modalJobTags
+
+### 案件列表 / 看板顯示多 tag badges
+- jobRow 的 tagBadge 從單一 chip 改成多 chip（依 tags[] 全列）
+- 看板卡片同樣支援（透過 jobRow 重用）
+
+### filter chip 列共享標籤池
+- `getUsedTags()` 升級：包含案件 multi-tag + 舊單字串 tag + 業主 tag（待後續加進業主分頁 filter）
+- filter 比對升級：`j.tags.includes(filter)` OR `j.tag === filter` 都算 hit
+
+### 工程量取捨（沒在這版做）
+- **業主分頁 tag filter chip 列**：留待 v3.14.1
+- **標籤統計分頁**：留待 v3.14.1
+- **業主 client modal 內加 tags 編輯**：detail view 已可編輯，modal 內暫不重複（避免 UI 衝突）
+- **標籤顏色 / 預定義列表**：留待之後（自由輸入已堪用）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.14.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.14.0`
+- CURRENT_SCHEMA_VERSION → 13
+
+---
+
 ## v3.13.0 — 看板模式 + 拖曳改狀態（2026-05-01）
 
 > 案件分頁加「列表 / 看板」視圖切換。看板模式可以直接拖卡片改狀態（完成 / 收款 / 取消），改變 4 個 column 之間的歸屬即時更新。
