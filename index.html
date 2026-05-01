@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.12.0">
+<meta name="app-version" content="2026-05-01-v3.13.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -154,7 +154,12 @@
   <section id="tab-jobs" class="hidden">
     <div class="filter-bar" id="job-filter"></div>
     <div class="card">
-      <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+      <!-- v3.13.0：視圖切換（列表 / 看板）+ 批次操作 -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+        <div class="jobs-view-toggle" id="jobs-view-toggle">
+          <button class="active" data-view="list" onclick="setJobsView('list')">📋 列表</button>
+          <button data-view="board" onclick="setJobsView('board')">🗂️ 看板</button>
+        </div>
         <button class="btn btn-outline btn-sm" id="bulk-toggle" onclick="toggleBulkMode()">☑️ 批次操作</button>
       </div>
       <div id="bulk-bar" class="bulk-bar hidden">
@@ -165,7 +170,10 @@
         <button class="btn btn-primary btn-sm" onclick="bulkMarkPaid()">$ 標記已收</button>
         <button class="btn btn-danger btn-sm" onclick="bulkDelete()">🗑️ 刪除</button>
       </div>
+      <!-- 列表視圖（現況） -->
       <div id="jobs-list"></div>
+      <!-- 看板視圖（v3.13.0 新） -->
+      <div id="jobs-board" class="hidden"></div>
     </div>
   </section>
 

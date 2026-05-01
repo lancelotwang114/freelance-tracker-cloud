@@ -1,5 +1,49 @@
 ﻿# 版本更新歷史
 
+## v3.13.0 — 看板模式 + 拖曳改狀態（2026-05-01）
+
+> 案件分頁加「列表 / 看板」視圖切換。看板模式可以直接拖卡片改狀態（完成 / 收款 / 取消），改變 4 個 column 之間的歸屬即時更新。
+
+### 視圖切換 toggle
+- 案件分頁頂端加 pill toggle「📋 列表 / 🗂️ 看板」
+- 選擇 persist 在 localStorage `cloud-ftJobsView_v1`
+- 切到看板時暫時隱藏批次按鈕（看板用拖曳取代批次）
+
+### 看板模式 4 column
+- **🔄 進行中**（pending）
+- **$ 待收款**（done-unpaid + partial）
+- **✓ 已收款**（paid + prepaid）
+- **🚫 已取消**（cancelled）
+- 每 column 顯示卡片數 + 該 column 金額小計
+- 寬螢幕 4 column 並排、≤900px 2 column、≤540px 單 column 直疊
+
+### 看板卡片
+- 業主色塊 + 案件標題（單行省略）
+- 日期 + 金額 + 業主名
+- 左邊框依 status 上色（綠/黃/灰/取消）
+- 點卡片 → 開啟編輯 modal
+- 拖卡片 → 用 HTML5 native drag and drop API
+
+### 拖曳改狀態行為
+- 從某 column 拖到另一個 column → 自動套對應狀態變化
+- **拖到「進行中」**：清 done / cancelled
+- **拖到「待收款」**：勾 done、自動填 doneAt = 今日
+- **拖到「已收款」**：勾 done、補一筆 payment 把餘額收齊（note: 「從看板拖曳標已收」）
+- **拖到「已取消」**：勾 cancelled
+- 已在該分類就不動
+- 拖曳中卡片 opacity 0.4 + 略 rotate；目標 column drop 時 primary 邊框高亮
+- toast 確認「✓ 已移到 XXX」+ 操作日誌 `job-board-move`
+
+### 不在這版範圍
+- Inline edit（點欄位直接改金額/日期/標題）— 留 v3.13.1 或之後做（避免一次改太多沒測就疊上）
+- 手機滑動快速 action — 留之後做（要 hammer.js 之類）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.13.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.13.0`
+
+---
+
 ## v3.12.0 — 請款單歷史 + status 追蹤（2026-05-01）
 
 > 每次匯出 PDF / PNG / 複製圖 / 複製字 / 列印 都會自動留一筆紀錄。可標 5 種 status、一鍵重發、刪除舊紀錄。

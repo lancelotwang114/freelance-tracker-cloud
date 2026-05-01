@@ -1432,6 +1432,161 @@ input:focus, select:focus, textarea:focus {
   flex: 0 0 auto;
 }
 
+/* ==================== 案件分頁 視圖切換 + 看板（v3.13.0）==================== */
+.jobs-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+.jobs-view-toggle button {
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  font-family: inherit;
+}
+.jobs-view-toggle button.active {
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.jobs-view-toggle button:hover:not(.active) {
+  color: var(--text);
+}
+
+.jobs-board-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+}
+@media (max-width: 900px) {
+  .jobs-board-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 540px) {
+  .jobs-board-grid { grid-template-columns: 1fr; }
+}
+
+.board-column {
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 10px;
+  min-height: 200px;
+  border: 2px solid transparent;
+  transition: border-color .15s, background .15s;
+}
+.board-column.drop-target {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.board-column-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.board-column-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.board-column-count {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--card);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.board-column-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.board-column-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 100px;
+}
+.board-empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 20px 10px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+}
+
+.board-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: grab;
+  transition: box-shadow .15s, transform .15s, opacity .15s;
+  user-select: none;
+}
+.board-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  border-color: var(--primary);
+}
+.board-card:active {
+  cursor: grabbing;
+}
+.board-card.dragging {
+  opacity: 0.4;
+  transform: rotate(-2deg);
+}
+.board-card.state-paid { border-left: 3px solid var(--success); }
+.board-card.state-done-unpaid { border-left: 3px solid var(--warning); }
+.board-card.state-pending { border-left: 3px solid var(--muted); }
+.board-card.state-cancelled { opacity: 0.5; }
+.board-card-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.board-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.board-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.board-card-amount {
+  font-weight: 600;
+  color: var(--text);
+}
+.board-card-client {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ==================== 請款單歷史（v3.12.0）==================== */
 .invoice-history-row {
   display: flex;

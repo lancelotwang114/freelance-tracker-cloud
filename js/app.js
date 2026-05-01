@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.12.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.13.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2891,6 +2891,12 @@ let expandedClients = new Set();
 // v3.9.0：業主分頁的 detail view 當前看哪一位（null = 列表模式）
 let detailClientId = null;
 
+// v3.13.0：案件分頁視圖模式（list / board），從 localStorage 還原
+const JOBS_VIEW_KEY = 'cloud-ftJobsView_v1';
+let jobsView = (function () {
+  try { return localStorage.getItem(JOBS_VIEW_KEY) || 'list'; } catch (_) { return 'list'; }
+})();
+
 // 收益頁模式
 let revenueState = {
   mode: 'month',        // 'month' | 'year'
@@ -4364,7 +4370,183 @@ function renderJobs() {
        · 計入統計 ${fmt(total)}
      </div>` +
     jobs.map(jobRow).join('');
+
+  // v3.13.0：依當前 view 切換顯示 list / board
+  applyJobsView();
+  if (jobsView === 'board') renderJobsBoard(jobs);
 }
+
+// ============== v3.13.0：案件分頁 視圖切換 + 看板 ==============
+function setJobsView(view) {
+  jobsView = view;
+  try { localStorage.setItem(JOBS_VIEW_KEY, view); } catch (_) {}
+  // 更新 toggle button 視覺
+  document.querySelectorAll('#jobs-view-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === view);
+  });
+  applyJobsView();
+  if (view === 'board') renderJobs();  // 重 render 才會觸發 renderJobsBoard
+}
+
+function applyJobsView() {
+  const list = document.getElementById('jobs-list');
+  const board = document.getElementById('jobs-board');
+  if (list) list.classList.toggle('hidden', jobsView !== 'list');
+  if (board) board.classList.toggle('hidden', jobsView !== 'board');
+  // 切到看板時，批次按鈕暫時隱藏（看板用拖曳取代批次）
+  const bulkBtn = document.getElementById('bulk-toggle');
+  if (bulkBtn) bulkBtn.style.display = jobsView === 'board' ? 'none' : '';
+}
+
+// 看板的 4 個 column：用 jobInvoiceCategory 分（與請款單統計一致的分類）
+const BOARD_COLUMNS = [
+  { key: 'pending',     title: '🔄 進行中',    desc: '未完成' },
+  { key: 'done-unpaid', title: '$ 待收款',     desc: '已完成等收款' },
+  { key: 'paid',        title: '✓ 已收款',    desc: '完整收齊' },
+  { key: 'cancelled',   title: '🚫 已取消',    desc: '保留紀錄' }
+];
+
+function renderJobsBoard(jobs) {
+  const box = document.getElementById('jobs-board');
+  if (!box) return;
+  // 把 jobs 依 invoice category 分組
+  const groups = {};
+  BOARD_COLUMNS.forEach(c => groups[c.key] = []);
+  jobs.forEach(j => {
+    let cat = jobInvoiceCategory(j);
+    // partial / prepaid 都先收進「待收款」column（簡化）
+    if (cat === 'partial') cat = 'done-unpaid';
+    if (cat === 'prepaid') cat = 'paid';
+    if (!groups[cat]) cat = 'pending';
+    groups[cat].push(j);
+  });
+  box.innerHTML = `<div class="jobs-board-grid">${
+    BOARD_COLUMNS.map(col => {
+      const list = groups[col.key];
+      const subTotal = list.reduce((s, j) => s + jobFinalAmount(j), 0);
+      return `<div class="board-column" data-status="${col.key}"
+                ondragover="onBoardDragOver(event)"
+                ondragleave="onBoardDragLeave(event)"
+                ondrop="onBoardDrop(event, '${col.key}')">
+        <div class="board-column-head">
+          <span class="board-column-title">${col.title}</span>
+          <span class="board-column-count">${list.length}</span>
+        </div>
+        <div class="board-column-sub">${col.desc} · ${fmt(subTotal)}</div>
+        <div class="board-column-cards">
+          ${list.length ? list.map(j => boardCard(j)).join('')
+            : '<div class="board-empty">拖案件到這裡</div>'}
+        </div>
+      </div>`;
+    }).join('')
+  }</div>`;
+}
+
+function boardCard(j) {
+  const c = getClient(j.clientId);
+  const color = c ? c.color : '#ccc';
+  const name = c ? c.name : '未指定';
+  const status = jobStatus(j);
+  return `<div class="board-card state-${status}" draggable="true"
+            data-job-id="${j.id}"
+            ondragstart="onBoardDragStart(event, '${j.id}')"
+            ondragend="onBoardDragEnd(event)"
+            onclick="editJob('${j.id}')">
+    <div class="board-card-row">
+      <span class="board-card-dot" style="background:${color}"></span>
+      <span class="board-card-title">${escapeHtml(j.title || '（無標題）')}</span>
+    </div>
+    <div class="board-card-meta">
+      <span>${j.date || '-'}</span>
+      <span class="board-card-amount">${fmt(jobFinalAmount(j))}</span>
+    </div>
+    <div class="board-card-client">${escapeHtml(name)}</div>
+  </div>`;
+}
+
+let _boardDragJobId = null;
+
+function onBoardDragStart(e, jobId) {
+  _boardDragJobId = jobId;
+  e.dataTransfer.effectAllowed = 'move';
+  // Firefox 需要 setData 才會觸發 drag
+  try { e.dataTransfer.setData('text/plain', jobId); } catch (_) {}
+  e.currentTarget.classList.add('dragging');
+}
+
+function onBoardDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.board-column.drop-target').forEach(el => el.classList.remove('drop-target'));
+  _boardDragJobId = null;
+}
+
+function onBoardDragOver(e) {
+  e.preventDefault();  // 必須 preventDefault 才允許 drop
+  e.dataTransfer.dropEffect = 'move';
+  const col = e.currentTarget;
+  if (col && !col.classList.contains('drop-target')) col.classList.add('drop-target');
+}
+
+function onBoardDragLeave(e) {
+  // 只有在離開 column 邊界才移除（避免 hover 子元素時誤觸發）
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    e.currentTarget.classList.remove('drop-target');
+  }
+}
+
+function onBoardDrop(e, newStatus) {
+  e.preventDefault();
+  const col = e.currentTarget;
+  col.classList.remove('drop-target');
+  const jobId = _boardDragJobId;
+  if (!jobId) return;
+  const j = state.jobs.find(x => x.id === jobId);
+  if (!j) return;
+  const curStatus = jobInvoiceCategory(j);
+  // 已經在該分類就不動
+  if (curStatus === newStatus || (curStatus === 'partial' && newStatus === 'done-unpaid') || (curStatus === 'prepaid' && newStatus === 'paid')) {
+    return;
+  }
+  // 依目標 column 套對應狀態變化
+  if (newStatus === 'pending') {
+    j.done = false;
+    j.cancelled = false;
+    j.doneAt = null;
+  } else if (newStatus === 'done-unpaid') {
+    j.done = true;
+    j.cancelled = false;
+    if (!j.doneAt) j.doneAt = todayStr();
+    // 如果已經有 payment、把它清掉？保守起見不清，讓使用者自己處理
+  } else if (newStatus === 'paid') {
+    j.done = true;
+    j.cancelled = false;
+    if (!j.doneAt) j.doneAt = todayStr();
+    // 直接補 1 筆 payment 把餘額收齊
+    const final = jobFinalAmount(j);
+    const paidTotal = jobPaidTotal(j);
+    const remain = Math.max(0, final - paidTotal - (+j.writeOff || 0));
+    if (remain > 0) {
+      j.payments = j.payments || [];
+      j.payments.push({
+        id: uid(),
+        date: todayStr(),
+        amount: remain,
+        note: '從看板拖曳標已收'
+      });
+    }
+    recomputePaidStatus(j);
+  } else if (newStatus === 'cancelled') {
+    j.cancelled = true;
+  }
+  if (typeof logAction === 'function') {
+    logAction('job-board-move', { jobId, from: curStatus, to: newStatus, title: j.title });
+  }
+  save();
+  renderJobs();
+  toast(`✓ 已移到「${BOARD_COLUMNS.find(c => c.key === newStatus)?.title || newStatus}」`, 2500);
+}
+
+// ============== Calendar Tab ==============
 
 // ============== Calendar Tab ==============
 function calPrev() { calCursor.setMonth(calCursor.getMonth()-1); renderCalendar(); }
@@ -10148,6 +10330,13 @@ updateNotifUI();
 // v3.10.0：啟動時還原全局計時器（瀏覽器關了再開、計時器繼續跑）
 loadActiveTimerFromStorage();
 renderActiveTimerWidget();
+
+// v3.13.0：套用案件分頁的視圖模式（依 localStorage）
+setTimeout(() => {
+  const btns = document.querySelectorAll('#jobs-view-toggle button');
+  btns.forEach(b => b.classList.toggle('active', b.dataset.view === jobsView));
+  applyJobsView();
+}, 50);
 // v2.5: 開頁掃一次推通知（一天一次）
 setTimeout(maybeFireNotifications, 4000);
 
