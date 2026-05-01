@@ -1,5 +1,55 @@
 ﻿# 版本更新歷史
 
+## v3.20.0 — 手機滑動快速 action（2026-05-01）
+- 案件 row 左滑 → 標完成；右滑 → 標收款（自動補餘額 payment）
+- 純 native touch event，沒加任何依賴
+- 桌面點擊不受影響（只在 touch 裝置觸發）
+- 滑動視覺：row 跟手位移最多 ±100px、背景漸層提示「✓ 完成」/「$ 收款」
+- 動作觸發前先 pushUndoSnapshot，誤觸 Ctrl+Z 即可復原
+- `touch-action: pan-y` 允許縱向 scroll 不被攔截
+- APP_VERSION → `v3.20.0`
+
+## v3.19.0 — 行事曆拖曳改日期（2026-05-01）
+- cal-chip 加 draggable + cal-cell 加 ondragover/drop
+- 拖曳單天案件到別格 → 自動更新 j.date
+- 跨天案件同步移 endDate（保持期間長度）
+- 跨天案件本身的 spans cell 不允許拖（避免歧義，要拖請拖第一個 cell）
+- 操作日誌 `job-cal-drag`、含 from/to 日期
+- 自動 pushUndoSnapshot，誤拖 Ctrl+Z 即可復原
+- APP_VERSION → `v3.19.0`
+
+## v3.18.0 — 案件分組視圖（2026-05-01）
+- 案件列表加分組選單：不分組 / 依日期（年月）/ 依業主 / 依狀態 / 依主標籤
+- 每組顯示 group header（標題 + 筆數 + 金額小計）+ sticky top
+- 分組偏好 persist 在 localStorage
+- 看板模式不適用分組（僅列表模式生效）
+- APP_VERSION → `v3.18.0`
+
+## v3.17.0 — 暗色微調 + Quick Add 工具列（2026-05-01）
+- **暗色主題微調**：純黑 `#0f1115` 改深灰 `#1a1d23`，跟 macOS / iOS 一致
+  - bg / card / muted / border / *-light 全部微調
+  - 避免 OLED 對比過強，看久眼睛不累
+- **Quick Add 工具列**：FAB 從「文字按鈕」改成「圓形 ＋ + popup menu」
+  - 點 ＋ → 浮現 4 個選項：新增案件 / 新增業主 / 開始計時 / 編輯最近一筆
+  - 旋轉 ✕ icon 動畫 + slide-up 動畫
+  - 點外面自動 close
+  - 設定/收益/請款分頁仍隱藏（這些頁通常不會新增）
+- APP_VERSION → `v3.17.0`
+
+## v3.16.0 — Undo v2（multi-step + Ctrl+Z + redo）（2026-05-01）
+- 從 v3.15 的單一 snapshot 升級成 stack（最多 30 步）
+- 加 redoStack：Ctrl+Shift+Z 可重做之前的 undo
+- 加 Ctrl+Z / Cmd+Z 鍵盤快捷鍵
+  - input/textarea/select/contenteditable 內讓瀏覽器原生 undo 處理
+  - modal 開時不攔截
+- snapshot 永久保留（不再 8 秒過期）
+- 新動作會清空 redoStack（避免奇怪狀態）
+- 操作日誌：每次 push / undo / redo 都記，可追蹤誰做了什麼
+- toast 顯示「✓ XXX  [↶ 復原] 1/30」帶 stack depth 提示
+- APP_VERSION → `v3.16.0`
+
+---
+
 ## v3.15.0 — Undo 撤銷系統（2026-05-01）
 
 > 任何破壞性動作（刪除案件 / 業主 / 批次操作）後 8 秒內可一鍵復原。State snapshot-based 實作，簡單可靠。

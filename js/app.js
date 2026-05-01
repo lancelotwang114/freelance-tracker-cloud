@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.15.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.20.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2897,6 +2897,12 @@ let jobsView = (function () {
   try { return localStorage.getItem(JOBS_VIEW_KEY) || 'list'; } catch (_) { return 'list'; }
 })();
 
+// v3.18.0：列表分組模式（none / date / client / status / tag）
+const JOBS_GROUP_KEY = 'cloud-ftJobsGroupBy_v1';
+let jobsGroupBy = (function () {
+  try { return localStorage.getItem(JOBS_GROUP_KEY) || 'none'; } catch (_) { return 'none'; }
+})();
+
 // 收益頁模式
 let revenueState = {
   mode: 'month',        // 'month' | 'year'
@@ -3253,74 +3259,296 @@ function toastDismiss() {
   if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
 }
 
-// ============== v3.15.0：Undo 撤銷系統 ==============
-// 任何破壞性動作前 call pushUndoSnapshot('label')，動作後 toast 8 秒內可復原
-// 後續任何別的破壞性動作會清掉舊 snapshot（避免復原舊狀態誤蓋新動作）
-const UNDO_TIMEOUT_MS = 8000;
+// ============== v3.16.0：Undo v2（multi-step stack + Redo + Ctrl+Z）==============
+// 重大升級：snapshot 永久保留（直到 stack 滿 30 才裁掉最舊的），不再 8 秒過期
+// Ctrl+Z 隨時可復原、Ctrl+Shift+Z redo
+const UNDO_MAX = 30;
+const UNDO_TOAST_MS = 4500;
 
-let undoState = {
-  snapshot: null,    // { clients, jobs }
-  label: '',
-  timer: null,
-  uiTimer: null      // 進度條動畫
-};
+let undoStack = [];   // 每個 entry: { snapshot: {clients, jobs}, label, timestamp }
+let redoStack = [];
+
+function _undoDeepClone(state) {
+  return {
+    clients: JSON.parse(JSON.stringify(state.clients || [])),
+    jobs: JSON.parse(JSON.stringify(state.jobs || []))
+  };
+}
 
 function pushUndoSnapshot(label) {
   // 把當前 state 整個 snapshot 起來（不含 invoiceHistory，避免拖慢）
-  undoState.snapshot = {
-    clients: JSON.parse(JSON.stringify(state.clients)),
-    jobs: JSON.parse(JSON.stringify(state.jobs))
-  };
-  undoState.label = label || '已執行動作';
-  if (undoState.timer) clearTimeout(undoState.timer);
-  undoState.timer = setTimeout(() => clearUndo(), UNDO_TIMEOUT_MS);
+  undoStack.push({
+    snapshot: _undoDeepClone(state),
+    label: label || '已執行動作',
+    timestamp: Date.now()
+  });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  // 新動作清空 redo（避免「undo → 改別的東西 → redo 變奇怪狀態」）
+  redoStack = [];
   showUndoToast(label);
+  if (typeof logAction === 'function') {
+    logAction('undo-snapshot', { label, depth: undoStack.length });
+  }
 }
 
 function showUndoToast(label) {
   const t = document.getElementById('toast');
   if (!t) return;
-  // 替換 toast 內容為「訊息 + 復原按鈕 + 進度條」
+  const depth = undoStack.length;
   t.innerHTML = `
-    <span style="margin-right: 14px;">✓ ${escapeHtml(label)}</span>
+    <span style="margin-right: 12px;">✓ ${escapeHtml(label)}</span>
     <button id="undo-toast-btn" onclick="performUndo()" style="background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.4); padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;">↶ 復原</button>
-    <div class="undo-toast-progress"><div class="undo-toast-progress-fill"></div></div>
+    <span style="margin-left: 8px; font-size: 11px; opacity: 0.7;">${depth}/${UNDO_MAX}</span>
   `;
   t.classList.add('show', 'toast--undo');
   if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
-  // 進度條動畫
-  setTimeout(() => {
-    const fill = t.querySelector('.undo-toast-progress-fill');
-    if (fill) {
-      fill.style.transition = `width ${UNDO_TIMEOUT_MS}ms linear`;
-      fill.style.width = '0%';
-    }
-  }, 30);
-  // 隱藏時點：UNDO_TIMEOUT_MS 之後
   toastTimer = setTimeout(() => {
     t.classList.remove('show', 'toast--undo');
     setTimeout(() => { if (!t.classList.contains('show')) t.innerHTML = ''; }, 250);
-  }, UNDO_TIMEOUT_MS);
+  }, UNDO_TOAST_MS);
 }
 
 function performUndo() {
-  if (!undoState.snapshot) return;
-  state.clients = undoState.snapshot.clients;
-  state.jobs = undoState.snapshot.jobs;
-  clearUndo();
-  // 用 toast 確認復原成功
+  if (!undoStack.length) {
+    toast('沒有可復原的動作');
+    return;
+  }
+  // 把當前狀態存進 redoStack（讓使用者可以反悔 undo）
+  redoStack.push({
+    snapshot: _undoDeepClone(state),
+    label: undoStack[undoStack.length - 1].label,
+    timestamp: Date.now()
+  });
+  if (redoStack.length > UNDO_MAX) redoStack.shift();
+  const entry = undoStack.pop();
+  state.clients = entry.snapshot.clients;
+  state.jobs = entry.snapshot.jobs;
+  // 確保 detail view / modal 內看的案件如果被 undo 影響也重渲染
+  save(); render();
+  // 顯示確認 toast（不要用 undo toast 樣式，避免混淆）
   const t = document.getElementById('toast');
   if (t) { t.classList.remove('toast--undo'); t.innerHTML = ''; }
-  save();
-  render();
-  toast('✓ 已復原');
-  if (typeof logAction === 'function') logAction('undo');
+  const remaining = undoStack.length;
+  toast(`↶ 已復原「${entry.label}」${remaining > 0 ? `（剩 ${remaining} 步）` : ''}`, 3000);
+  if (typeof logAction === 'function') {
+    logAction('undo', { label: entry.label, remaining });
+  }
 }
 
-function clearUndo() {
-  undoState.snapshot = null;
-  undoState.label = '';
-  if (undoState.timer) { clearTimeout(undoState.timer); undoState.timer = null; }
+function performRedo() {
+  if (!redoStack.length) {
+    toast('沒有可重做的動作');
+    return;
+  }
+  // 把當前狀態存回 undoStack
+  undoStack.push({
+    snapshot: _undoDeepClone(state),
+    label: redoStack[redoStack.length - 1].label,
+    timestamp: Date.now()
+  });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  const entry = redoStack.pop();
+  state.clients = entry.snapshot.clients;
+  state.jobs = entry.snapshot.jobs;
+  save(); render();
+  const t = document.getElementById('toast');
+  if (t) { t.classList.remove('toast--undo'); t.innerHTML = ''; }
+  toast(`↷ 已重做「${entry.label}」`, 3000);
+  if (typeof logAction === 'function') {
+    logAction('redo', { label: entry.label });
+  }
+}
+
+// v3.16.0：全域鍵盤監聽 — Ctrl+Z / Cmd+Z 復原，Ctrl+Shift+Z / Cmd+Shift+Z 重做
+document.addEventListener('keydown', (e) => {
+  // 跳過：input / textarea / select / contenteditable 內讓瀏覽器原生 undo 處理
+  const tag = (e.target?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (e.target?.isContentEditable) return;
+  // 跳過：modal 開時不攔截（避免衝突）
+  const anyModalOpen = !!document.querySelector('.modal-bg.open');
+  if (anyModalOpen) return;
+
+  const isUndoCombo = (e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z');
+  if (!isUndoCombo) return;
+  e.preventDefault();
+  if (e.shiftKey) performRedo();
+  else performUndo();
+});
+
+// 為了兼容舊呼叫，clearUndo 留 noop
+function clearUndo() { /* v3.16.0: stack 模式，不再單獨 clear */ }
+
+// ============== v3.20.0：手機案件 row 滑動快速 action（純 native touch）==============
+// 案件 row 左滑 → 出現「✓ 完成 / 🗑️ 刪除」紅色按鈕
+// 案件 row 右滑 → 出現「$ 收款 / 📋 編輯」綠色按鈕
+// 只在 touch 裝置啟用、桌面點擊不受影響
+const SWIPE_THRESHOLD_PX = 60;   // 拉超過 60px 才算啟動 action
+const SWIPE_LOCK_PX = 14;        // 水平移動 > 14px 才鎖定（避免誤觸發 vertical scroll）
+
+let _swipeState = null;
+function isTouchDevice() {
+  return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+}
+
+function onJobRowTouchStart(e, jobId) {
+  if (!isTouchDevice()) return;
+  if (e.touches.length !== 1) return;
+  const t = e.touches[0];
+  _swipeState = {
+    jobId,
+    rowEl: e.currentTarget,
+    startX: t.clientX,
+    startY: t.clientY,
+    locked: null  // 'horizontal' / 'vertical'
+  };
+}
+
+function onJobRowTouchMove(e) {
+  if (!_swipeState) return;
+  const t = e.touches[0];
+  const dx = t.clientX - _swipeState.startX;
+  const dy = t.clientY - _swipeState.startY;
+  // 第一次判斷方向
+  if (!_swipeState.locked) {
+    if (Math.abs(dx) > SWIPE_LOCK_PX || Math.abs(dy) > SWIPE_LOCK_PX) {
+      _swipeState.locked = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+    }
+  }
+  if (_swipeState.locked !== 'horizontal') return;
+  // 拖曳 row（最多 ±100px）
+  const tx = Math.max(-100, Math.min(100, dx));
+  _swipeState.rowEl.style.transform = `translateX(${tx}px)`;
+  // 顯示對應的背景 action 提示
+  _swipeState.rowEl.classList.toggle('swipe-left', tx < -SWIPE_THRESHOLD_PX);
+  _swipeState.rowEl.classList.toggle('swipe-right', tx > SWIPE_THRESHOLD_PX);
+  // 防止頁面 scroll
+  e.preventDefault();
+}
+
+function onJobRowTouchEnd(e) {
+  if (!_swipeState) return;
+  const rowEl = _swipeState.rowEl;
+  const jobId = _swipeState.jobId;
+  // 取最終位移
+  const tx = parseFloat((rowEl.style.transform.match(/translateX\(([-0-9.]+)px\)/) || [0, 0])[1]) || 0;
+  // 還原 row 視覺
+  rowEl.style.transition = 'transform 0.2s ease';
+  rowEl.style.transform = '';
+  rowEl.classList.remove('swipe-left', 'swipe-right');
+  setTimeout(() => { rowEl.style.transition = ''; }, 220);
+  // 判斷觸發
+  if (tx <= -SWIPE_THRESHOLD_PX) {
+    // 左滑 → 預設「標完成」
+    swipeActionMarkDone(jobId);
+  } else if (tx >= SWIPE_THRESHOLD_PX) {
+    // 右滑 → 預設「標收款」
+    swipeActionMarkPaid(jobId);
+  }
+  _swipeState = null;
+}
+
+function onJobRowTouchCancel() {
+  if (!_swipeState) return;
+  _swipeState.rowEl.style.transform = '';
+  _swipeState.rowEl.classList.remove('swipe-left', 'swipe-right');
+  _swipeState = null;
+}
+
+function swipeActionMarkDone(jobId) {
+  const j = state.jobs.find(x => x.id === jobId);
+  if (!j) return;
+  if (j.done) {
+    toast('案件已標完成');
+    return;
+  }
+  pushUndoSnapshot(`滑動標完成「${j.title || ''}」`);
+  j.done = true;
+  if (!j.doneAt) j.doneAt = todayStr();
+  save(); render();
+}
+
+function swipeActionMarkPaid(jobId) {
+  const j = state.jobs.find(x => x.id === jobId);
+  if (!j) return;
+  if (jobIsFullyPaid(j)) {
+    toast('案件已收齊');
+    return;
+  }
+  pushUndoSnapshot(`滑動標收款「${j.title || ''}」`);
+  j.done = true;
+  if (!j.doneAt) j.doneAt = todayStr();
+  // 補一筆 payment 把餘額收齊
+  const remain = Math.max(0, jobFinalAmount(j) - jobPaidTotal(j) - (+j.writeOff || 0));
+  if (remain > 0) {
+    j.payments = j.payments || [];
+    j.payments.push({
+      id: uid(),
+      date: todayStr(),
+      amount: remain,
+      note: '滑動標收款'
+    });
+  }
+  recomputePaidStatus(j);
+  save(); render();
+}
+
+// ============== v3.17.0：Quick Add 工具列 ==============
+function toggleFabMenu() {
+  const wrap = document.getElementById('fab-wrap');
+  const menu = document.getElementById('fab-menu');
+  if (!wrap || !menu) return;
+  const isOpen = wrap.classList.toggle('fab-open');
+  menu.classList.toggle('hidden', !isOpen);
+  if (isOpen) {
+    // 點到外面 close
+    setTimeout(() => document.addEventListener('click', _closeFabOnOutside, { once: true }), 50);
+  }
+}
+function _closeFabOnOutside(e) {
+  const wrap = document.getElementById('fab-wrap');
+  if (wrap && !wrap.contains(e.target)) closeFabMenu();
+}
+function closeFabMenu() {
+  const wrap = document.getElementById('fab-wrap');
+  const menu = document.getElementById('fab-menu');
+  wrap?.classList.remove('fab-open');
+  menu?.classList.add('hidden');
+}
+
+function quickAddJob() {
+  closeFabMenu();
+  if (typeof openJobModal === 'function') openJobModal();
+}
+
+function quickAddClient() {
+  closeFabMenu();
+  if (typeof openClientModal === 'function') openClientModal();
+}
+
+function quickStartTimer() {
+  closeFabMenu();
+  // 如果已在計時 → 跳到該案件
+  if (activeTimer.jobId) {
+    focusActiveTimerJob();
+    return;
+  }
+  // 否則打開最近一筆案件，使用者按開始
+  const recent = [...state.jobs].filter(j => !j.cancelled).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+  if (recent) {
+    editJob(recent.id);
+    toast('打開最近一筆案件，請按計時器「▶ 開始」', 4000);
+  } else {
+    toast('還沒有案件，先新增一筆吧');
+    quickAddJob();
+  }
+}
+
+function quickOpenLastJob() {
+  closeFabMenu();
+  const recent = [...state.jobs].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+  if (recent) editJob(recent.id);
+  else toast('還沒有案件');
 }
 
 function escapeHtml(s) {
@@ -3452,14 +3680,17 @@ function switchTab(tab) {
     document.getElementById('client-detail-view')?.classList.add('hidden');
     document.getElementById('client-list-view')?.classList.remove('hidden');
   }
-  const fab = document.getElementById('fab-add');
-  if (tab === 'settings' || tab === 'invoice' || tab === 'revenue') {
-    fab.style.display = 'none';
-  } else {
-    fab.style.display = 'inline-flex';
-    fab.onclick = (tab === 'clients') ? openClientModal : openJobModal;
-    fab.textContent = (tab === 'clients') ? '＋ 新增業主' : '＋ 新增案件';
+  // v3.17.0：FAB 升級成 Quick Add（單一 ＋ 按鈕，所有功能在 popup menu）
+  // 設定/請款/收益分頁仍然隱藏（這些頁面通常不會新增）
+  const fabWrap = document.getElementById('fab-wrap');
+  if (fabWrap) {
+    if (tab === 'settings' || tab === 'invoice' || tab === 'revenue') {
+      fabWrap.style.display = 'none';
+    } else {
+      fabWrap.style.display = '';
+    }
   }
+  closeFabMenu();
   // 切到該分頁時才重畫該分頁
   renderActiveTab();
 }
@@ -4311,7 +4542,12 @@ function jobRow(j, ctx) {
     </div>`;
   }
 
-  return `<div class="row state-${status}${hl}" data-job-id="${j.id}" onclick="editJob('${j.id}')">
+  return `<div class="row state-${status}${hl}" data-job-id="${j.id}"
+              onclick="editJob('${j.id}')"
+              ontouchstart="onJobRowTouchStart(event, '${j.id}')"
+              ontouchmove="onJobRowTouchMove(event)"
+              ontouchend="onJobRowTouchEnd(event)"
+              ontouchcancel="onJobRowTouchCancel()">
     <div class="check-group" onclick="event.stopPropagation();">
       <div class="check-with-label" onclick="toggleDone('${j.id}')">
         <div class="check ${j.done?'done':''}" title="點一下標記「案件完成」"></div>
@@ -4467,17 +4703,90 @@ function renderJobs() {
        </div>`
     : '';
 
+  // v3.18.0：列表模式才支援分組；看板模式跳過分組
+  let jobsHtml = '';
+  if (jobsView === 'list' && jobsGroupBy !== 'none') {
+    jobsHtml = renderJobsGrouped(jobs);
+  } else {
+    jobsHtml = jobs.map(jobRow).join('');
+  }
+
   container.innerHTML = lockBanner +
     `<div style="padding: 8px 0 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted);">
        共 ${jobs.length} 筆${cancelledCount ? `（含 ${cancelledCount} 筆已取消）` : ''}　已收 <b style="color:var(--success)">${fmt(paidTotal)}</b>
        ${unpaidTotal ? `· 待收 <b style="color:var(--warning)">${fmt(unpaidTotal)}</b>` : ''}
        · 計入統計 ${fmt(total)}
      </div>` +
-    jobs.map(jobRow).join('');
+    jobsHtml;
 
   // v3.13.0：依當前 view 切換顯示 list / board
   applyJobsView();
   if (jobsView === 'board') renderJobsBoard(jobs);
+}
+
+// v3.18.0：依 jobsGroupBy 把 jobs 分組顯示（含 group header 跟小計）
+function renderJobsGrouped(jobs) {
+  const groups = new Map();
+  jobs.forEach(j => {
+    let key, label;
+    if (jobsGroupBy === 'date') {
+      key = (j.date || '').slice(0, 7) || '無日期';
+      label = key;
+    } else if (jobsGroupBy === 'client') {
+      const c = getClient(j.clientId);
+      key = c ? c.id : '_none_';
+      label = c ? c.name : '（無業主）';
+    } else if (jobsGroupBy === 'status') {
+      key = jobInvoiceCategory(j);
+      const labelMap = {
+        pending: '🔄 進行中',
+        'done-unpaid': '$ 待收款',
+        partial: '🔶 部分收款',
+        paid: '✓ 已收款',
+        prepaid: '已收·待做',
+        cancelled: '🚫 已取消'
+      };
+      label = labelMap[key] || key;
+    } else if (jobsGroupBy === 'tag') {
+      const t = (Array.isArray(j.tags) && j.tags.length) ? j.tags[0] : (j.tag || '');
+      key = t || '_notag_';
+      label = t || '（無標籤）';
+    }
+    if (!groups.has(key)) groups.set(key, { label, items: [] });
+    groups.get(key).items.push(j);
+  });
+  // 依 key 排序：日期模式用倒序（最新月在最上）
+  let sortedKeys = [...groups.keys()];
+  if (jobsGroupBy === 'date') {
+    sortedKeys.sort((a, b) => (b || '').localeCompare(a || ''));
+  } else if (jobsGroupBy === 'client') {
+    sortedKeys.sort((a, b) => (groups.get(a).label || '').localeCompare(groups.get(b).label || '', 'zh-Hant'));
+  } else if (jobsGroupBy === 'status') {
+    const order = ['pending', 'done-unpaid', 'partial', 'prepaid', 'paid', 'cancelled'];
+    sortedKeys.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  } else {
+    sortedKeys.sort();
+  }
+  return sortedKeys.map(k => {
+    const g = groups.get(k);
+    const cnt = g.items.length;
+    const sum = g.items.reduce((s, j) => s + jobFinalAmount(j), 0);
+    return `<div class="jobs-group">
+      <div class="jobs-group-head">
+        <span class="jobs-group-label">${escapeHtml(g.label)}</span>
+        <span class="jobs-group-meta">${cnt} 筆 · ${fmt(sum)}</span>
+      </div>
+      <div class="jobs-group-body">${g.items.map(jobRow).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function onJobsGroupChange() {
+  const sel = document.getElementById('jobs-group-by');
+  if (!sel) return;
+  jobsGroupBy = sel.value;
+  try { localStorage.setItem(JOBS_GROUP_KEY, jobsGroupBy); } catch (_) {}
+  renderJobs();
 }
 
 // ============== v3.13.0：案件分頁 視圖切換 + 看板 ==============
@@ -4773,11 +5082,69 @@ function cellHtml(y, m, d, isOther) {
     // 跨天案件加 spans class
     const isSpan = j.endDate && j.date && j.endDate !== j.date && ds !== j.date;
     if (isSpan) cls += ' spans';
-    return `<div class="cal-chip ${cls}" style="background:${bg}" onclick="event.stopPropagation(); editJob('${j.id}')" title="${escapeHtml(j.title)} · ${fmt(+j.amount||0)}${j.endDate?' · '+j.date+' ~ '+j.endDate:''}">${escapeHtml(j.title)}</div>`;
+    // v3.19.0：拖曳支援（純單天案件才支援，跨天案件 spans cell 不允許拖避免歧義）
+    const dragAttrs = isSpan ? '' : `draggable="true" ondragstart="onCalChipDragStart(event, '${j.id}')" ondragend="onCalChipDragEnd(event)"`;
+    return `<div class="cal-chip ${cls}" style="background:${bg}" ${dragAttrs} onclick="event.stopPropagation(); editJob('${j.id}')" title="${escapeHtml(j.title)} · ${fmt(+j.amount||0)}${j.endDate?' · '+j.date+' ~ '+j.endDate:''}">${escapeHtml(j.title)}</div>`;
   }).join('');
   const more = jobs.length > maxShow ? `<div class="cal-more">+${jobs.length-maxShow}</div>` : '';
   const classes = ['cal-cell', dowCls, isOther?'other-month':'', isToday?'today':''].filter(Boolean).join(' ');
-  return `<div class="${classes}" onclick="quickAddOnDate('${ds}')"><div class="cal-date">${d}</div>${chips}${more}</div>`;
+  // v3.19.0：cell 加 drop target
+  return `<div class="${classes}" onclick="quickAddOnDate('${ds}')"
+            ondragover="onCalCellDragOver(event)"
+            ondragleave="onCalCellDragLeave(event)"
+            ondrop="onCalCellDrop(event, '${ds}')"
+            data-date="${ds}"><div class="cal-date">${d}</div>${chips}${more}</div>`;
+}
+
+// ============== v3.19.0：行事曆拖曳改日期 ==============
+let _calDragJobId = null;
+
+function onCalChipDragStart(e, jobId) {
+  _calDragJobId = jobId;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', jobId); } catch (_) {}
+  e.currentTarget.classList.add('cal-chip-dragging');
+  // 阻止 cell click 也被觸發
+  e.stopPropagation();
+}
+function onCalChipDragEnd(e) {
+  e.currentTarget.classList.remove('cal-chip-dragging');
+  document.querySelectorAll('.cal-cell.cal-drop-target').forEach(el => el.classList.remove('cal-drop-target'));
+  _calDragJobId = null;
+}
+function onCalCellDragOver(e) {
+  if (!_calDragJobId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const cell = e.currentTarget;
+  if (!cell.classList.contains('cal-drop-target')) cell.classList.add('cal-drop-target');
+}
+function onCalCellDragLeave(e) {
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    e.currentTarget.classList.remove('cal-drop-target');
+  }
+}
+function onCalCellDrop(e, newDate) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('cal-drop-target');
+  const jobId = _calDragJobId;
+  if (!jobId) return;
+  const j = state.jobs.find(x => x.id === jobId);
+  if (!j) return;
+  const oldDate = j.date;
+  if (oldDate === newDate) return;
+  pushUndoSnapshot(`案件「${j.title || ''}」改到 ${newDate}`);
+  // 跨天案件：要同步移 endDate（保持期間長度）
+  if (j.endDate && j.date) {
+    const span = daysBetween(j.date, j.endDate);
+    j.date = newDate;
+    j.endDate = addDays(new Date(newDate), span);
+  } else {
+    j.date = newDate;
+  }
+  if (typeof logAction === 'function') logAction('job-cal-drag', { jobId, from: oldDate, to: newDate });
+  save(); render();
 }
 
 function quickAddOnDate(ds) {
@@ -10580,10 +10947,13 @@ loadActiveTimerFromStorage();
 renderActiveTimerWidget();
 
 // v3.13.0：套用案件分頁的視圖模式（依 localStorage）
+// v3.18.0：分組 select 也還原
 setTimeout(() => {
   const btns = document.querySelectorAll('#jobs-view-toggle button');
   btns.forEach(b => b.classList.toggle('active', b.dataset.view === jobsView));
   applyJobsView();
+  const groupSel = document.getElementById('jobs-group-by');
+  if (groupSel) groupSel.value = jobsGroupBy;
 }, 50);
 // v2.5: 開頁掃一次推通知（一天一次）
 setTimeout(maybeFireNotifications, 4000);

@@ -27,24 +27,25 @@
 
 /* ==================== 暗色模式（v2.2）==================== */
 html[data-theme="dark"] {
-  --bg: #0f1115;
-  --card: #1a1d23;
+  /* v3.17.0：純黑改深灰，跟 macOS / iOS 暗色一致，避免 OLED 對比過強眼睛累 */
+  --bg: #1a1d23;          /* 原 #0f1115 → 提亮成深灰 */
+  --card: #232730;        /* 原 #1a1d23 → 微提亮跟 bg 拉開層次 */
   --text: #e7e9ec;
-  --muted: #8b929e;
-  --border: #2a2f38;
+  --muted: #9aa0a8;       /* 原 #8b929e → 微提亮提高可讀性 */
+  --border: #353a45;      /* 原 #2a2f38 → 微提亮邊界更清楚 */
   --primary: #5b8def;
   --primary-dark: #4a7ce0;
   --primary-light: #1e293b;
   --success: #34d399;
-  --success-light: #064e3b;
+  --success-light: #0a3a2e;     /* 原 #064e3b → 微調更柔和 */
   --warning: #fbbf24;
-  --warning-light: #422006;
+  --warning-light: #3a2f0d;     /* 原 #422006 → 微調 */
   --danger: #f87171;
-  --danger-light: #4c0519;
+  --danger-light: #3d1320;      /* 原 #4c0519 → 微調 */
   --orange: #fb923c;
-  --orange-light: #431407;
+  --orange-light: #3d1f0a;
   --gold: #facc15;
-  --shadow: 0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.6);
+  --shadow: 0 1px 3px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.7);
 }
 html[data-theme="dark"] input[type="text"],
 html[data-theme="dark"] input[type="number"],
@@ -660,25 +661,73 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 }
 .btn-icon:hover { background: var(--bg); }
 
-.fab {
+/* v3.17.0：FAB 改成 Quick Add — 浮起 ＋ 按鈕 + 點開的選單 */
+.fab-wrap {
   position: fixed;
-  bottom: 20px; right: 20px;
-  height: 52px;
-  padding: 0 22px;
-  border-radius: 26px;
+  bottom: 20px;
+  right: 20px;
+  z-index: 5;
+}
+.fab {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
   background: var(--primary);
   color: #fff;
   border: none;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 300;
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(37,99,235,.4);
-  z-index: 5;
-  white-space: nowrap;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  transition: transform 0.1s, box-shadow 0.1s;
+  justify-content: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.fab-menu {
+  position: absolute;
+  bottom: 70px;
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  animation: fab-menu-slide-up 0.18s ease-out;
+}
+@keyframes fab-menu-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fab-menu-item {
+  background: transparent;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fab-menu-item:hover {
+  background: var(--bg);
+  color: var(--primary);
+}
+.fab-wrap.fab-open .fab {
+  transform: rotate(45deg);
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 .fab:active { transform: scale(0.96); }
 .fab:hover { box-shadow: 0 6px 20px rgba(37,99,235,.5); }
@@ -1484,6 +1533,94 @@ input:focus, select:focus, textarea:focus {
   border-radius: 10px;
   font-size: 11px;
   font-weight: 500;
+}
+
+/* ==================== 案件 row 滑動快速 action（v3.20.0）==================== */
+/* 只在 touch 裝置才有用，桌面點擊不受影響 */
+.row {
+  position: relative;
+  touch-action: pan-y;  /* 允許縱向滾動，水平由 JS 處理 */
+}
+/* 滑動觸發時整個 row 用淡背景提示動作 */
+.row.swipe-left {
+  background: linear-gradient(to left, var(--success-light) 50%, transparent);
+}
+.row.swipe-right {
+  background: linear-gradient(to right, var(--primary-light) 50%, transparent);
+}
+.row.swipe-left::after {
+  content: '✓ 完成';
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
+  color: var(--success);
+  font-size: 14px;
+  pointer-events: none;
+}
+.row.swipe-right::before {
+  content: '$ 收款';
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+/* ==================== 行事曆拖曳改日期（v3.19.0）==================== */
+.cal-cell.cal-drop-target {
+  background: var(--primary-light) !important;
+  outline: 2px dashed var(--primary);
+  outline-offset: -2px;
+}
+.cal-chip {
+  cursor: pointer;
+}
+.cal-chip[draggable="true"] {
+  cursor: grab;
+}
+.cal-chip[draggable="true"]:active {
+  cursor: grabbing;
+}
+.cal-chip.cal-chip-dragging {
+  opacity: 0.4;
+}
+
+/* ==================== 案件分組視圖（v3.18.0）==================== */
+.jobs-group {
+  margin-bottom: 14px;
+}
+.jobs-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg);
+  border-radius: 6px 6px 0 0;
+  border-bottom: 2px solid var(--primary);
+  font-size: 13px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.jobs-group-label {
+  font-weight: 600;
+}
+.jobs-group-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.jobs-group-body {
+  padding: 4px 0;
+}
+/* 看板模式時隱藏分組選單 */
+body.view-board #jobs-group-control {
+  display: none;
 }
 
 /* ==================== 案件分頁 視圖切換 + 看板（v3.13.0）==================== */
