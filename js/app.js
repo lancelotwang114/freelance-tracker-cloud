@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.22.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.22.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -209,7 +209,12 @@ async function cloudInitGoogleAuth() {
     } else {
       _scheduleSilentRefresh();
     }
+    // v3.22.3：切回前景順便刷新 indicator 的相對時間（背景時 ticker 可能被瀏覽器壓制）
+    cloudUpdateSyncIndicator();
   });
+
+  // v3.22.3：啟動 indicator ticker，讓「30 秒前」自動跳成「1 分前」「2 分前」…
+  cloudStartIndicatorTicker();
 }
 
 // 點「使用 Google 登入」按鈕（index.html 的 onclick 直接呼叫）
@@ -456,6 +461,29 @@ function cloudSetSyncStatus(status, errMsg) {
   cloudUpdateSyncIndicator();
 }
 
+// v3.22.3：把 ISO 時間轉成中文相對時間（剛剛 / 30 秒前 / 5 分前 / 2 小時前 / 3 天前 / 5/1）
+function cloudFormatRelativeTime(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return '';
+  const diff = Date.now() - t;
+  if (diff < 10 * 1000) return '剛剛';
+  if (diff < 60 * 1000) return Math.floor(diff / 1000) + ' 秒前';
+  if (diff < 60 * 60 * 1000) return Math.floor(diff / 60000) + ' 分前';
+  if (diff < 24 * 60 * 60 * 1000) return Math.floor(diff / 3600000) + ' 小時前';
+  if (diff < 7 * 24 * 60 * 60 * 1000) return Math.floor(diff / 86400000) + ' 天前';
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// v3.22.3：把 ISO 時間轉成完整中文時間（給 hover title 顯示）
+function cloudFormatFullTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('zh-TW', { hour12: false });
+  } catch (_) { return iso; }
+}
+
 function cloudUpdateSyncIndicator() {
   const el = document.getElementById('sync-indicator');
   if (!el) return;
@@ -470,30 +498,56 @@ function cloudUpdateSyncIndicator() {
   const email = (cloudAuthState.user && cloudAuthState.user.email) || '';
   const accountLine = email ? `\n帳號：${email}` : '';
 
+  // v3.22.3：從 meta 拿目前已同步的版本號 + 時間
+  const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
+  const syncedVer = meta.lastSyncedVersion || 0;
+  const syncedAt = meta.lastSyncedAt || null;
+  const verBadge = syncedVer ? `v#${syncedVer}` : '';
+  const relTime = syncedAt ? cloudFormatRelativeTime(syncedAt) : '';
+  const fullTime = syncedAt ? cloudFormatFullTime(syncedAt) : '';
+  const verLine = syncedVer ? `\n版本：v#${syncedVer}` : '';
+  const timeLine = syncedAt ? `\n最後同步：${fullTime}（${relTime}）` : '';
+
   switch (cloudSyncStatus) {
     case 'pending':
       el.className = 'sync-indicator sync-syncing';
-      el.innerHTML = '⌛ 待同步…';
-      el.title = `本機有未上傳的改動，2 秒後自動推送${accountLine}`;
+      el.innerHTML = verBadge ? `⌛ ${verBadge} → 推送…` : '⌛ 待同步…';
+      el.title = `本機有未上傳的改動，2 秒後自動推送${verLine}${timeLine}${accountLine}`;
       break;
     case 'syncing':
       el.className = 'sync-indicator sync-syncing';
       el.innerHTML = '⏳ 同步中…';
-      el.title = `正在推送到 Drive${accountLine}`;
+      el.title = `正在推送到 Drive${verLine}${timeLine}${accountLine}`;
       break;
     case 'error': {
       el.className = 'sync-indicator sync-error';
-      el.innerHTML = '✗ 同步失敗';
+      el.innerHTML = verBadge ? `✗ ${verBadge}（同步失敗）` : '✗ 同步失敗';
       const errLine = cloudLastSyncError ? `\n錯誤：${cloudLastSyncError}` : '';
-      el.title = `Drive 同步失敗，本機資料安全，下次改動會自動重試${accountLine}${errLine}`;
+      el.title = `Drive 同步失敗，本機資料安全，下次改動會自動重試${verLine}${timeLine}${accountLine}${errLine}`;
       break;
     }
     case 'idle':
     default:
       el.className = 'sync-indicator sync-synced';
-      el.innerHTML = '✓ 已同步';
-      el.title = `Google Drive 已連線、資料已同步${accountLine}（點擊開啟設定頁）`;
+      // 已同步過：顯示 v#N · 相對時間；尚未同步過：保持「✓ 已同步」
+      if (syncedVer && syncedAt) {
+        el.innerHTML = `✓ ${verBadge} · ${relTime}`;
+      } else {
+        el.innerHTML = '✓ 已同步';
+      }
+      el.title = `Google Drive 已連線、資料已同步${verLine}${timeLine}${accountLine}\n（點擊開啟設定頁）`;
   }
+}
+
+// v3.22.3：每 30 秒更新一次 indicator，讓相對時間「30 秒前」自動跳成「1 分前」等
+let _syncIndicatorTickerId = null;
+function cloudStartIndicatorTicker() {
+  if (_syncIndicatorTickerId) return;
+  _syncIndicatorTickerId = setInterval(() => {
+    // 沒登入或已 destroy 就不浪費 tick；indicator DOM 沒掛上去也跳過
+    if (!document.getElementById('sync-indicator')) return;
+    cloudUpdateSyncIndicator();
+  }, 30 * 1000);
 }
 
 // ---------- 對外 API（alpha.2 開始寫 Drive API 同步時會用到）----------
