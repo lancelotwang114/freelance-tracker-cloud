@@ -1,5 +1,39 @@
 ﻿# 版本更新歷史
 
+## v3.22.2 — Google token silent refresh（2026-05-01）
+
+> 解決使用者每 1 小時要重新登入的痛點。token 過期前 5 分鐘自動背景續約，使用者無感。
+
+### 問題背景
+GIS（Google Identity Services）隱式流發出的 access token 一律 1 小時過期，且**不發 refresh token**。原本的處理：過期就要使用者點「使用 Google 登入」重來。長時間使用體驗不好。
+
+### 解決方案
+利用 GIS `tokenClient.requestAccessToken({ prompt: '' })` 機制：只要 Google session（瀏覽器有登入 Google）還在，這個呼叫就能拿到新 token、不會跳同意畫面。我們在 token 過期前 5 分鐘自動跑一次。
+
+### 實作要點
+- **`_scheduleSilentRefresh()`**：用 setTimeout 在 `tokenExpiresAt - 5 分鐘` 排程下一次 refresh
+- **`_silentRefresh()`**：呼叫 tokenClient 拿新 token，設 `_isSilentRefreshing = true` 區分手動 vs 背景
+- **`cloudOnTokenResponse` 雙模式**：
+  - 手動登入：完整流程（userinfo + tracker.json init + calendar prompt）
+  - 背景 refresh：只更新 token + 持久化 + 排下一次（不重抓 userinfo / 不彈 calendar prompt）
+- **錯誤處理分流**：手動失敗 → alert（會打斷）；背景失敗 → toast（不打擾，提示需要重登）
+- **visibilitychange listener**：分頁從背景切回前景時，檢查 token 剩餘時間。背景太久 setTimeout 可能被瀏覽器壓制，靠這個補刀
+- **登入後 + 從 localStorage 還原後**都自動排程 refresh
+
+### 操作日誌
+- `cloud-token-refresh`（背景續約成功）— 跟 `cloud-signin`（手動登入）區分
+
+### 使用者體驗變化
+- **改善前**：每 1 小時 sync 失敗 → 點「使用 Google 登入」 → 重新跳授權確認 → 繼續用
+- **改善後**：完全無感，只要瀏覽器還有 Google session 就一直能用；session 過期時跳 toast 提示
+
+### 邊界情境
+- Google session 過期（使用者登出 Google / 切帳號）→ silent refresh 失敗 → toast 提示重登（資料不會丟，本機 cache 還在，下次手動登入即恢復）
+- 撤銷 app 授權 → 同上
+- 完全離線 → silent refresh 會失敗，但本機資料還能讀 / 編輯（cache 模式）
+
+---
+
 ## v3.22.1 — 自動化 v2 → v3 匯入（2026-05-01）
 
 > 改 importData 函式，從 v2 匯出的 JSON 中**自動帶入收款帳號 + 通知偏好 + 跑 schema migration + 觸發存摺照片遷移**。使用者搬遷時間從 10-15 分縮成 3-5 分。

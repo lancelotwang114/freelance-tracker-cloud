@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.22.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.22.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -190,8 +190,26 @@ async function cloudInitGoogleAuth() {
   if (!restored) {
     cloudShowAuthState('signed-out');
     cloudUpdateSyncIndicator();  // v3.0.0-alpha.1 commit 5：top-bar 顯示「○ 未連雲端」
+  } else {
+    // v3.22.2：從 localStorage 還原為已登入 → 排程 silent refresh
+    // 必須等 tokenClient 初始化完才能排，剛好我們現在已經 init 好了
+    _scheduleSilentRefresh();
   }
   // restored 的情境 cloudRenderSignedIn() 已經在前面呼叫過 cloudUpdateSyncIndicator()
+
+  // v3.22.2：分頁從背景切回前景時，檢查 token 是否快過期，必要時立刻 refresh
+  // （setTimeout 在分頁背景時可能被瀏覽器壓制，靠這個補刀）
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!cloudAuthState.accessToken || !cloudAuthState.tokenExpiresAt) return;
+    const remaining = cloudAuthState.tokenExpiresAt - Date.now();
+    // 剩不到 refresh 閾值 → 立刻 refresh；否則重排計時器（覆蓋可能被壓制的舊 timer）
+    if (remaining < REFRESH_BEFORE_EXPIRY_MS) {
+      _silentRefresh();
+    } else {
+      _scheduleSilentRefresh();
+    }
+  });
 }
 
 // 點「使用 Google 登入」按鈕（index.html 的 onclick 直接呼叫）
@@ -204,11 +222,63 @@ function cloudSignIn() {
   cloudAuthState.tokenClient.requestAccessToken({ prompt: '' });
 }
 
+// ---------- v3.22.2：silent token refresh（無感續約）----------
+// GIS 隱式流的 access token 一律 1 小時過期，且不發 refresh token。
+// 但只要 Google session 還有效，呼叫 requestAccessToken({ prompt: '' }) 就能直接拿到新 token，
+// 不會跳同意畫面。我們在過期前 5 分鐘自動跑一次，使用者完全無感。
+const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 過期前 5 分鐘預先 refresh
+let _silentRefreshTimer = null;
+let _isSilentRefreshing = false;  // 區分手動登入 vs 背景 refresh，影響錯誤訊息呈現
+
+function _scheduleSilentRefresh() {
+  if (_silentRefreshTimer) {
+    clearTimeout(_silentRefreshTimer);
+    _silentRefreshTimer = null;
+  }
+  if (!cloudAuthState.tokenExpiresAt || !cloudAuthState.tokenClient) return;
+  const refreshAt = cloudAuthState.tokenExpiresAt - REFRESH_BEFORE_EXPIRY_MS;
+  const delay = refreshAt - Date.now();
+  if (delay <= 0) {
+    // 已經過了 refresh 時點 → 立刻 refresh
+    _silentRefresh();
+  } else {
+    _silentRefreshTimer = setTimeout(_silentRefresh, delay);
+  }
+}
+
+function _silentRefresh() {
+  if (!cloudAuthState.tokenClient) return;
+  if (_isSilentRefreshing) return;  // 防重入
+  _isSilentRefreshing = true;
+  try {
+    // prompt: '' = Google session 還在就直接放行，沒在了會失敗（callback 收到 error）
+    cloudAuthState.tokenClient.requestAccessToken({ prompt: '' });
+  } catch (e) {
+    _isSilentRefreshing = false;
+    console.warn('[cloud-auth] silent refresh failed:', e);
+    if (typeof toast === 'function') {
+      toast('⚠️ Google 連線即將過期，請點右上角重新登入', 8000);
+    }
+  }
+}
+
 // GIS callback：拿到 access token（成功 or 失敗都會進這裡）
 async function cloudOnTokenResponse(resp) {
+  // v3.22.2：抓 silent refresh flag 後立刻清，避免後續流程誤判
+  const wasSilentRefresh = _isSilentRefreshing;
+  _isSilentRefreshing = false;
+
   if (resp.error) {
     console.error('[cloud-auth] token error:', resp);
-    alert('Google 登入失敗：' + (resp.error_description || resp.error));
+    if (wasSilentRefresh) {
+      // 背景 refresh 失敗（Google session 過期 / 撤銷授權 / 網路問題）→ 用 toast 不打擾
+      if (typeof toast === 'function') {
+        toast('⚠️ Google 連線過期，請點右上角頭像重新登入', 8000);
+      }
+    } else {
+      // 手動登入失敗 → 維持原本 alert
+      alert('Google 登入失敗：' + (resp.error_description || resp.error));
+    }
     return;
   }
 
@@ -216,6 +286,18 @@ async function cloudOnTokenResponse(resp) {
   cloudAuthState.accessToken = resp.access_token;
   cloudAuthState.tokenExpiresAt = Date.now() + expiresIn * 1000;
 
+  // v3.22.2：silent refresh 只更新 token + 持久化，不要重抓 userinfo / 不要重跳 calendar prompt
+  if (wasSilentRefresh) {
+    cloudSaveAuthState();
+    if (typeof logAction === 'function') {
+      logAction('cloud-token-refresh', { email: cloudAuthState.user && cloudAuthState.user.email });
+    }
+    _scheduleSilentRefresh();  // 排下一次 refresh
+    console.log('[cloud-auth] silent refresh ok, next refresh in ~', Math.round((expiresIn - 300) / 60), 'min');
+    return;
+  }
+
+  // 以下是首次登入 / 手動重登的完整流程：
   // 拿 userinfo（name / email / 大頭貼）
   try {
     const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -249,6 +331,9 @@ async function cloudOnTokenResponse(resp) {
 
   // v3.7.0：首次登入後 prompt「要不要啟用行事曆同步」
   setTimeout(cloudMaybeShowCalendarPrompt, 1500);
+
+  // v3.22.2：登入成功後排程 silent refresh（過期前 5 分鐘自動續約）
+  _scheduleSilentRefresh();
 }
 
 // v3.7.0：登入後跳一次 prompt 介紹 Calendar 同步

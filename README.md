@@ -60,6 +60,7 @@
 | **v3.21.1** | **加 PolyForm Noncommercial 1.0.0 授權保護（LICENSE / 4 檔 copyright / console banner / PDF metadata）** | ✅ **完成（2026-05-01）** |
 | **v3.22.0** | **範例資料大改：6 業主 / 35 案件 / 3 收款帳號 / 跨 14 個月，新使用者一載入就看到所有功能** | ✅ **完成（2026-05-01）** |
 | **v3.22.1** | **自動化 v2→v3 匯入：自動帶收款帳號 + 通知偏好 + schema migration + 存摺照片遷移** | ✅ **完成（2026-05-01）** |
+| **v3.22.2** | **Google token silent refresh：過期前 5 分鐘自動續約，使用者無感（不再每 1 小時要重登）** | ✅ **完成（2026-05-01）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
