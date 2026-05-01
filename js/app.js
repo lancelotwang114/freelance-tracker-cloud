@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.22.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.22.5';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2255,7 +2255,8 @@ function _calendarCollectDayItems(dateStr, cfg) {
           : `進行中 (${_calendarShortDate(start)}~${_calendarShortDate(end)})`;
         items.push({
           icon: status.emoji,
-          line: `${status.emoji} ${j.title || '(無標題)'} · ${c?.name || '?'}（${span}，NT$ ${(+j.amount || 0).toLocaleString('en-US')}）`,
+          // v3.22.5：顯示折扣後應收
+          line: `${status.emoji} ${j.title || '(無標題)'} · ${c?.name || '?'}（${span}，NT$ ${jobFinalAmount(j).toLocaleString('en-US')}）`,
           group: '📌 案件'
         });
       }
@@ -2376,7 +2377,8 @@ function buildTargetCalendarEvents(cfg) {
       events.push({
         ftKey: `unpaid-long-${j.id}-${remindStr}`,
         summary: `🟠 ${c?.name || '?'} 完成 ${days} 天未收款 · ${j.title}`,
-        description: `業主：${c?.name || '?'}\n案件：${j.title}\n金額：NT$ ${(+j.amount || 0).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n今天已過 ${days} 天還沒收款，可考慮發提醒。`,
+        // v3.22.5：顯示待收金額（折扣後 - 已收 - 呆帳）
+        description: `業主：${c?.name || '?'}\n案件：${j.title}\n待收：NT$ ${jobUnpaidAmount(j).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n今天已過 ${days} 天還沒收款，可考慮發提醒。`,
         start: { date: remindStr },
         end: { date: _calendarDayAfter(remindStr) },
         colorId: '6',  // Tangerine
@@ -2437,7 +2439,8 @@ function buildTargetCalendarEvents(cfg) {
       events.push({
         ftKey: `slow-pay-${j.id}-${today}`,
         summary: `🐢 拖款警告：${c?.name || '?'} · ${j.title}`,
-        description: `業主：${c?.name || '?'} 平均收款 ${j.avgDays} 天\n案件：${j.title}\n金額：NT$ ${(+j.amount || 0).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n已過 ${j.daysSince} 天（超過該業主平均），建議主動聯繫。`,
+        // v3.22.5：顯示待收金額
+        description: `業主：${c?.name || '?'} 平均收款 ${j.avgDays} 天\n案件：${j.title}\n待收：NT$ ${jobUnpaidAmount(j).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n已過 ${j.daysSince} 天（超過該業主平均），建議主動聯繫。`,
         start: { date: today },
         end: { date: _calendarDayAfter(today) },
         colorId: '11',  // Tomato
@@ -3814,11 +3817,12 @@ function getUsedTags() {
 }
 
 // 儲值制業主餘額計算
+// v3.22.5：used 改用 jobFinalAmount（折扣後）— 業主實際被扣的就是折扣後金額
 function clientBalance(clientId) {
   const c = getClient(clientId);
   if (!c?.prepaidMode) return null;
   const total = (c.prepayments || []).reduce((s,p) => s + (+p.amount||0), 0);
-  const used = activeJobs().filter(j => j.clientId === clientId).reduce((s,j) => s + (+j.amount||0), 0);
+  const used = activeJobs().filter(j => j.clientId === clientId).reduce((s,j) => s + jobFinalAmount(j), 0);
   return { total, used, balance: total - used };
 }
 
@@ -4159,15 +4163,18 @@ function computeClientHealth(clientId) {
   const daysSinceLastJob = lastJobDate ? daysBetween(lastJobDate, todayStr()) : null;
 
   // 3. 單價趨勢：最近 6 個月 vs 之前 6 個月平均
+  // v3.22.5：用 jobFinalAmount（折扣後）才是業主實際付的「單價」
   const now = new Date();
   const sixMoAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
   const twelveMoAgo = new Date(now.getFullYear(), now.getMonth() - 12, 1);
   const recent = [], prev = [];
   jobs.forEach(j => {
-    if (!j.date || !(+j.amount)) return;
+    if (!j.date) return;
+    const final = jobFinalAmount(j);
+    if (!final) return;
     const d = new Date(j.date);
-    if (d >= sixMoAgo) recent.push(+j.amount);
-    else if (d >= twelveMoAgo) prev.push(+j.amount);
+    if (d >= sixMoAgo) recent.push(final);
+    else if (d >= twelveMoAgo) prev.push(final);
   });
   const recentAvg = recent.length ? Math.round(recent.reduce((a,b)=>a+b,0) / recent.length) : 0;
   const prevAvg = prev.length ? Math.round(prev.reduce((a,b)=>a+b,0) / prev.length) : 0;
@@ -4249,7 +4256,8 @@ function computeAlerts() {
   if (config.enableOverdueAlert !== false) {
     const overdue = active.filter(j => !j.done && j.date && j.date < today);
     if (overdue.length) {
-      const amt = overdue.reduce((s,j) => s + (+j.amount||0), 0);
+      // v3.22.5：用 jobFinalAmount（折扣後應收）
+      const amt = overdue.reduce((s,j) => s + jobFinalAmount(j), 0);
       alerts.push({
         type: 'overdue',
         icon: '🔴',
@@ -4285,12 +4293,13 @@ function computeAlerts() {
       return j.doneAt <= threshold;
     });
     if (unpaidLong.length) {
-      const amt = unpaidLong.reduce((s,j) => s + (+j.amount||0), 0);
+      // v3.22.5：用 jobUnpaidAmount（待收金額，已扣折扣 + 已收 + 呆帳）
+      const amt = unpaidLong.reduce((s,j) => s + jobUnpaidAmount(j), 0);
       const byClient = {};
       unpaidLong.forEach(j => {
         const c = getClient(j.clientId);
         const name = c ? c.name : '未指定';
-        byClient[name] = (byClient[name]||0) + (+j.amount||0);
+        byClient[name] = (byClient[name]||0) + jobUnpaidAmount(j);
       });
       const clientsStr = Object.entries(byClient).map(([n,a]) => `${n} ${fmt(a)}`).join('、');
       alerts.push({
@@ -4311,7 +4320,8 @@ function computeAlerts() {
     if (dom >= startDay) {
       const thisMonthUnpaid = active.filter(j => j.done && !jobIsFullyPaid(j) && getMonth(j.date) === thisMonth());
       if (thisMonthUnpaid.length) {
-        const amt = thisMonthUnpaid.reduce((s,j) => s + (+j.amount||0), 0);
+        // v3.22.5：用 jobUnpaidAmount（待收）
+        const amt = thisMonthUnpaid.reduce((s,j) => s + jobUnpaidAmount(j), 0);
         alerts.push({
           type: 'month-end',
           icon: '📅',
@@ -4346,7 +4356,8 @@ function computeAlerts() {
       // 該業主有沒有未收款的案件可請？
       const billable = active.filter(j => j.clientId === c.id && j.done && !jobIsFullyPaid(j));
       if (!billable.length) return;
-      const amt = billable.reduce((s,j) => s + (+j.amount||0), 0);
+      // v3.22.5：用 jobUnpaidAmount（待收）
+      const amt = billable.reduce((s,j) => s + jobUnpaidAmount(j), 0);
       const dateStr = `${billingDate.getMonth()+1}/${billingDate.getDate()}`;
       alerts.push({
         type: 'billing-day-' + c.id,
@@ -4404,7 +4415,8 @@ function computeAlerts() {
   // 5b. 智慧待收款警告（v2.2）：每個業主的歷史平均收款週期，超過該週期 1.5 倍的案件
   const slowJobs = config.enableSlowPayAlert !== false ? computeSlowPayJobs(active) : [];
   if (slowJobs.length) {
-    const amt = slowJobs.reduce((s,j) => s + (+j.amount||0), 0);
+    // v3.22.5：用 jobUnpaidAmount（待收）
+    const amt = slowJobs.reduce((s,j) => s + jobUnpaidAmount(j), 0);
     const samples = slowJobs.slice(0, 2).map(s => `${getClient(s.clientId)?.name || '?'} 拖了 ${s.daysSince} 天（平均 ${s.avgDays} 天）`).join('、');
     alerts.push({
       type: 'slow-pay',
@@ -4506,7 +4518,8 @@ function renderDashboard() {
   } else {
     let html = '';
     if (dashBulkMode) {
-      const total = recent.filter(j => dashBulkSelected.has(j.id)).reduce((s,j) => s + (+j.amount || 0), 0);
+      // v3.22.5：批次合計用 jobFinalAmount（折扣後應收）
+      const total = recent.filter(j => dashBulkSelected.has(j.id)).reduce((s,j) => s + jobFinalAmount(j), 0);
       const count = recent.filter(j => dashBulkSelected.has(j.id)).length;
       html += `<div style="background: var(--primary-light); border-radius: 8px; padding: 10px; margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 13px;">
         <span style="flex: 1; min-width: 120px; font-weight: 600;">已選 ${count} 筆 ${count ? `· ${fmt(total)}` : ''}</span>
@@ -4527,13 +4540,14 @@ function renderDashboard() {
   if (dashBulkBtn) dashBulkBtn.textContent = dashBulkMode ? '✕ 退出批次' : '☑️ 批次操作';
 
   // 月度圖：最近 6 個「日曆月份」（v2.10.14：改成由近到遠，當月在最上面）
+  // v3.22.5：paid 用 jobFinalAmount（fully paid 案件的實收）、pending 用 jobUnpaidAmount（partial paid 也精確）
   const byMonth = {};
   active.forEach(j => {
     if (!j.date) return;
     const mm = getMonth(j.date);
     if (!byMonth[mm]) byMonth[mm] = { paid: 0, pending: 0 };
-    if (j.paid) byMonth[mm].paid += (+j.amount||0);
-    else if (j.done) byMonth[mm].pending += (+j.amount||0);
+    if (j.paid) byMonth[mm].paid += jobFinalAmount(j);
+    else if (j.done) byMonth[mm].pending += jobUnpaidAmount(j);
   });
   const months = [];
   const nowRef = new Date();
@@ -8359,11 +8373,12 @@ function renderHourlyTrend() {
   }
 
   // 按月分組
+  // v3.22.5：時薪用 jobFinalAmount（折扣後）/ 工時，才是實領時薪
   const byMonth = {};
   jobs.forEach(j => {
     const m = getMonth(j.date);
     if (!byMonth[m]) byMonth[m] = { totalAmt: 0, totalHrs: 0, count: 0 };
-    byMonth[m].totalAmt += +j.amount;
+    byMonth[m].totalAmt += jobFinalAmount(j);
     byMonth[m].totalHrs += +j.hoursWorked;
     byMonth[m].count++;
   });
@@ -8395,7 +8410,8 @@ function renderHourlyTrend() {
   }).join('');
 
   // 整體統計
-  const totalAmt = jobs.reduce((s,j) => s + (+j.amount || 0), 0);
+  // v3.22.5：用 jobFinalAmount（折扣後）算實領時薪
+  const totalAmt = jobs.reduce((s,j) => s + jobFinalAmount(j), 0);
   const totalHrs = jobs.reduce((s,j) => s + (+j.hoursWorked || 0), 0);
   const overallAvg = totalAmt / totalHrs;
   const trend = rates.length >= 6
@@ -9162,12 +9178,14 @@ function openPaidDateModal(jobIds) {
   if (jobIds.length === 1) {
     const j = state.jobs.find(x => x.id === jobIds[0]);
     const c = j ? getClient(j.clientId) : null;
+    // v3.22.5：單筆顯示折扣後應收
     document.getElementById('paid-date-info').textContent =
-      `${c?.name || '?'} · ${j?.title || '(無標題)'} · ${fmt(+j?.amount||0)}`;
+      `${c?.name || '?'} · ${j?.title || '(無標題)'} · ${j ? fmt(jobFinalAmount(j)) : 'NT$ 0'}`;
   } else {
+    // v3.22.5：批次合計用 jobFinalAmount
     const total = state.jobs
       .filter(j => jobIds.includes(j.id))
-      .reduce((s,j) => s + (+j.amount||0), 0);
+      .reduce((s,j) => s + jobFinalAmount(j), 0);
     document.getElementById('paid-date-info').textContent =
       `批次標記 ${jobIds.length} 筆案件 · 合計 ${fmt(total)}`;
   }
@@ -9795,8 +9813,9 @@ function renderPrepaymentList() {
   }
 
   // 計算餘額
+  // v3.22.5：used 改用 jobFinalAmount（折扣後）— 跟 clientBalance() 對齊
   const total = modalPrepayments.reduce((s,p) => s + (+p.amount||0), 0);
-  const used = editingClientId ? activeJobs().filter(j => j.clientId === editingClientId).reduce((s,j) => s + (+j.amount||0), 0) : 0;
+  const used = editingClientId ? activeJobs().filter(j => j.clientId === editingClientId).reduce((s,j) => s + jobFinalAmount(j), 0) : 0;
   const balance = total - used;
   document.getElementById('prepayment-balance').innerHTML =
     `累計儲值：<b>${fmt(total)}</b> · 已使用：<b>${fmt(used)}</b> · ` +
@@ -11460,7 +11479,8 @@ function buildReminderEvents() {
         date: remindDate,
         type: 'unpaid-long',
         title: `🟠 ${c?.name || '?'} 已完成 ${days} 天仍未收款：${j.title}`,
-        desc: `業主：${c?.name || '?'}\n案件：${j.title}\n金額：${fmtMoney(j.amount)}\n完成日：${j.doneAt}\n— App 提醒：完成已久未收款 —`
+        // v3.22.5：顯示待收金額
+        desc: `業主：${c?.name || '?'}\n案件：${j.title}\n待收：${fmtMoney(jobUnpaidAmount(j))}\n完成日：${j.doneAt}\n— App 提醒：完成已久未收款 —`
       });
     });
   }
@@ -11516,7 +11536,8 @@ function buildReminderEvents() {
         date: today,
         type: 'slow-pay',
         title: `🐢 拖款警告：${c?.name || '?'} - ${j.title}`,
-        desc: `業主：${c?.name || '?'}\n案件：${j.title}\n金額：${fmtMoney(j.amount)}\n完成日：${j.doneAt}\n已過 ${j.daysSince} 天（該業主平均 ${j.avgDays} 天）\n— App 提醒：智慧拖款警告 —`
+        // v3.22.5：顯示待收金額
+        desc: `業主：${c?.name || '?'}\n案件：${j.title}\n待收：${fmtMoney(jobUnpaidAmount(j))}\n完成日：${j.doneAt}\n已過 ${j.daysSince} 天（該業主平均 ${j.avgDays} 天）\n— App 提醒：智慧拖款警告 —`
       });
     });
   }

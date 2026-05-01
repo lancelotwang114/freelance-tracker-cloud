@@ -1,5 +1,35 @@
 ﻿# 版本更新歷史
 
+## v3.22.5 — 折扣全面巡修：8 大類算錯點全部對齊（2026-05-01）
+
+> 全面審視 `+j.amount` 的所有 callsite，把「該扣折扣的全部用 `jobFinalAmount(j)` / 該算待收的用 `jobUnpaidAmount(j)`」一次清乾淨。
+
+### 修正清單（8 類 / 約 14 個 callsite）
+
+| # | 位置 | 改動 |
+|---|---|---|
+| 1 | `clientBalance()` 業主儲值已用 | `+j.amount` → `jobFinalAmount(j)` |
+| 2 | Dashboard 月度堆疊圖 | paid: `jobFinalAmount` / pending: `jobUnpaidAmount`（partial paid 也精確） |
+| 3 | Dashboard 批次模式合計 | `+j.amount` → `jobFinalAmount(j)` |
+| 4 | 批次標收款 modal「合計」 | `+j.amount` → `jobFinalAmount(j)` |
+| 5 | 提醒卡 5 處（逾期 / 完成已久 / 月底 / 請款日 / 拖款） | 逾期用 `jobFinalAmount`，其餘 4 個用 `jobUnpaidAmount`（待收） |
+| 6 | Calendar event + 通知描述 5 處 | 早報用 `jobFinalAmount`，拖款 / unpaid-long 用 `jobUnpaidAmount`（待收） |
+| 7 | 業主健康度單價趨勢 | 近 6 個月 vs 前 6 個月用 `jobFinalAmount` 才是實際單價 |
+| 8 | 月度時薪統計 + 整體時薪 | `+j.amount / hours` → `jobFinalAmount / hours` 才是實領時薪 |
+
+### 沒動的（語意上 j.amount = 原價，本來就對）
+- 月度報表的 `r.gross` 欄位（標明「原始金額」）
+- 請款單 `grossTotal`（原價合計欄）
+- 請款單「單價 = amount / quantity」（折扣有獨立欄）
+- 案件編輯 modal 的「金額」input（本來就是原價）
+- 操作日誌 / snapshot 紀錄（凍結當下原價）
+
+### 灰色地帶（先不動，看設計意圖）
+- 行事曆 chip / 案件搜尋結果 row 顯示金額
+- 通知 / 早報的「金額：」欄（user 確認後可再調）
+
+---
+
 ## v3.22.4 — Bug fix：月度趨勢漏當月、實收沒套折扣、拿掉業主分享連結按鈕（2026-05-01）
 
 ### 🐛 修 bug 1：月度收益趨勢沒從當月開始
