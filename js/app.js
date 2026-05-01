@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.21.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.22.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -10221,63 +10221,287 @@ function loadDemo() {
       return;
     }
   }
-  const c1 = uid(), c2 = uid(), c3 = uid();
+  // v3.22.0：豐富版 demo — 6 業主 / 30+ 案件 / 跨 14 個月 / 3 收款帳號
+  // ----- helpers -----
+  const today = new Date();
+  const todayS = todayStr();
+  const dayBack = (n) => addDays(new Date(), -n);   // n 天前
+  const dayFwd = (n) => addDays(new Date(), n);     // n 天後
+  const monthBackDay = (mBack, day) => {
+    // mBack 個月前的某天，回傳 YYYY-MM-DD
+    const d = new Date(today.getFullYear(), today.getMonth() - mBack, day);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+
+  // ----- 6 業主（不同類型 / 含 contact + tags） -----
+  const c1 = uid(), c2 = uid(), c3 = uid(), c4 = uid(), c5 = uid(), c6 = uid();
   state.clients = [
-    { id: c1, name: 'A 媒體公司', color: COLORS[0], note: '月結' },
-    { id: c2, name: 'B 電商品牌', color: COLORS[2], note: '結案付款' },
-    { id: c3, name: 'C 工作室', color: COLORS[3], note: '' }
-  ];
-  const m = thisMonth();
-  const today = todayStr();
-  state.jobs = [
-    // 已收款（v3.6.1：payments[] 才是 source of truth，paid 旗標只是 mirror）
-    { id: uid(), clientId: c1, date: m+'-03', title: 'FB 廣告 banner 5 張', details: '1080x1080，含兩次修改', amount: 4500, quantity: 1, done: true, paid: true, doneAt: m+'-05', paidAt: m+'-10',
-      payments: [{ id: uid(), date: m+'-10', amount: 4500, note: '範例收款' }] },
-    // 完成未收款（超過 7 天 → 會觸發提醒）
-    { id: uid(), clientId: c1, date: m+'-12', title: '官網首頁改版', details: '首頁 + 3 內頁', amount: 18000, quantity: 1, done: true, paid: false, doneAt: addDays(new Date(), -10), paidAt: null,
-      payments: [] },
-    // 剛完成待收款
-    { id: uid(), clientId: c2, date: m+'-08', title: '產品攝影後製', details: '15 張', amount: 3000, quantity: 1, done: true, paid: false, doneAt: addDays(new Date(), -2), paidAt: null,
-      payments: [] },
-    // 進行中（未來）
-    { id: uid(), clientId: c2, date: addDays(new Date(), 2), title: 'EDM 設計', details: '春季促銷 EDM', amount: 2500, quantity: 1, done: false, paid: false, doneAt: null, paidAt: null,
-      payments: [] },
-    // 逾期未完成
-    { id: uid(), clientId: c3, date: addDays(new Date(), -3), title: '形象動畫', details: '30 秒片頭', amount: 12000, quantity: 1, done: false, paid: false, doneAt: null, paidAt: null,
-      payments: [] },
-    // 未來案件
-    { id: uid(), clientId: c3, date: addDays(new Date(), 10), title: 'Logo 優化', details: '主視覺調整', amount: 5000, quantity: 1, done: false, paid: false, doneAt: null, paidAt: null,
-      payments: [] },
+    {
+      id: c1, name: 'A 媒體公司', color: COLORS[0],
+      note: '長期合作，月結 30 天，發票寄會計室',
+      billingDay: 25,
+      contact: { person: '王經理', phone: '02-2700-1234', email: 'wang@a-media.example.com', address: '台北市信義區信義路五段 7 號' },
+      tags: ['VIP', '長期合作', '月結']
+    },
+    {
+      id: c2, name: 'B 電商品牌', color: COLORS[2],
+      note: '結案付款，下單頻繁，常做廣告素材',
+      contact: { person: '林總監', phone: '0912-345-678', email: 'design@b-shop.example.com', address: '' },
+      tags: ['電商', '頻繁下單']
+    },
+    {
+      id: c3, name: 'C 設計工作室', color: COLORS[3],
+      note: '介紹的同行，偶爾外包 overflow 過來',
+      contact: { person: '陳設計師', phone: '0922-111-222', email: 'chen@c-studio.example.com', address: '' },
+      tags: ['同行', '外包', '潛在']
+    },
+    {
+      id: c4, name: 'D 出版社', color: COLORS[4],
+      note: '月刊客戶，每月 25 日固定請款',
+      billingDay: 25,
+      contact: { person: '張主編', phone: '02-2345-6789', email: 'editor@d-publishing.example.com', address: '台北市中正區重慶南路一段 122 號' },
+      tags: ['月刊', '長期合作']
+    },
+    {
+      id: c5, name: 'E 個人客戶（張先生）', color: COLORS[5],
+      note: '一次性 logo 案，預算有限',
+      contact: { person: '張先生', phone: '0987-654-321', email: 'mr.chang@example.com', address: '' },
+      tags: ['一次性', '個人']
+    },
+    {
+      id: c6, name: 'F 政府單位', color: COLORS[7],
+      note: '公文流程慢，付款週期 60-90 天，需要正式發票',
+      billingDay: 15,
+      contact: { person: '李承辦', phone: '02-2311-5555#3210', email: 'lee@gov.example.tw', address: '台北市中正區忠孝東路一段 1 號' },
+      tags: ['政府', '拖款', '大金額']
+    }
   ];
 
-  // v3.6.1：載入範例時也建一筆收款帳號，請款單分頁立刻可用（避免空狀態看不到範例）
+  // ----- 3 個收款帳號 -----
+  const pa1 = uid(), pa2 = uid(), pa3 = uid();
   config.userInfo = config.userInfo || {};
-  const pa1 = uid();
-  config.userInfo.paymentAccounts = [{
-    id: pa1,
-    label: '個人',
-    holderName: '王小明',
-    bank: '玉山銀行 (808)',
-    account: '0000-000-000000',
-    note: '請註明案件名稱',
-    bankbookImage: '',
-    bankbookImageFileId: '',
-    name: '王小明',
-    phone: '0912-000-000',
-    email: 'demo@example.com',
-    invoiceTitle: '',
-    taxId: '',
-    address: '',
-    invoiceNote: '',
-    showPersonalInfo: true,
-    showPersonalInfoOnTop: false,
-    showInvoiceInfo: false
-  }];
+  config.userInfo.paymentAccounts = [
+    {
+      id: pa1, label: '個人', holderName: '王小明',
+      bank: '玉山銀行 (808)', account: '0000-1234-5678',
+      note: '請註明案件名稱方便對帳',
+      bankbookImage: '', bankbookImageFileId: '',
+      name: '王小明', phone: '0912-000-000', email: 'demo@example.com',
+      invoiceTitle: '', taxId: '', address: '', invoiceNote: '',
+      showPersonalInfo: true, showPersonalInfoOnTop: false, showInvoiceInfo: false
+    },
+    {
+      id: pa2, label: '工作室', holderName: '王小明設計工作室',
+      bank: '玉山銀行 (808)', account: '0000-5678-9012',
+      note: '工作室專用',
+      bankbookImage: '', bankbookImageFileId: '',
+      name: '王小明設計工作室', phone: '02-2700-9999', email: 'studio@example.com',
+      invoiceTitle: '王小明設計工作室', taxId: '12345678',
+      address: '台北市信義區市府路 45 號 8 樓',
+      invoiceNote: '統一發票二聯式',
+      showPersonalInfo: true, showPersonalInfoOnTop: false, showInvoiceInfo: true
+    },
+    {
+      id: pa3, label: '公司', holderName: '小明創意有限公司',
+      bank: '台新銀行 (812)', account: '0000-9876-5432',
+      note: '公司戶（給政府 / 大企業客戶）',
+      bankbookImage: '', bankbookImageFileId: '',
+      name: '小明創意有限公司', phone: '02-2700-8888', email: 'contact@xiaoming-creative.example.com',
+      invoiceTitle: '小明創意有限公司', taxId: '87654321',
+      address: '台北市信義區市府路 45 號 8 樓',
+      invoiceNote: '統一發票三聯式（請填寫公司抬頭與統編）',
+      showPersonalInfo: true, showPersonalInfoOnTop: false, showInvoiceInfo: true
+    }
+  ];
   config.userInfo.selectedPaymentAccountId = pa1;
   saveConfigOnly();
 
+  // ----- 案件（30+ 筆，跨 14 個月）-----
+  // 過去資料偏向歷史（已收 / 已完成）；近期偏向 mix；未來偏向待做
+  state.jobs = [];
+  const J = (obj) => state.jobs.push(Object.assign({
+    id: uid(),
+    quantity: 1,
+    done: false, paid: false, doneAt: null, paidAt: null,
+    payments: [],
+    tags: []
+  }, obj));
+
+  // ===== 14 個月前：歷史已結清 =====
+  J({ clientId: c1, date: monthBackDay(14, 5), title: '月度社群圖卡 8 張', details: 'IG/FB 雙平台共 8 張', amount: 6400, quantity: 8, hoursWorked: 6,
+      done: true, paid: true, doneAt: monthBackDay(14, 12), paidAt: monthBackDay(13, 5),
+      payments: [{ id: uid(), date: monthBackDay(13, 5), amount: 6400, note: '月結' }],
+      tags: ['設計', 'social'] });
+  J({ clientId: c4, date: monthBackDay(14, 10), title: '月刊封面', details: 'A4 滿版 + 內頁配圖 3 張', amount: 12000, hoursWorked: 10,
+      done: true, paid: true, doneAt: monthBackDay(14, 25), paidAt: monthBackDay(13, 25),
+      payments: [{ id: uid(), date: monthBackDay(13, 25), amount: 12000 }],
+      tags: ['設計', '月刊'] });
+
+  // ===== 12-13 個月前 =====
+  J({ clientId: c1, date: monthBackDay(13, 3), title: 'FB 廣告 banner 5 張', amount: 4500, quantity: 5,
+      done: true, paid: true, doneAt: monthBackDay(13, 6), paidAt: monthBackDay(12, 5),
+      payments: [{ id: uid(), date: monthBackDay(12, 5), amount: 4500 }],
+      tags: ['廣告'] });
+  J({ clientId: c2, date: monthBackDay(12, 10), title: '雙11 主視覺 + EDM', details: '主視覺 1 + EDM 3 套', amount: 28000, hoursWorked: 24,
+      done: true, paid: true, doneAt: monthBackDay(12, 28), paidAt: monthBackDay(11, 10),
+      payments: [{ id: uid(), date: monthBackDay(11, 10), amount: 28000 }],
+      tags: ['設計', '電商', '大案'] });
+  J({ clientId: c4, date: monthBackDay(12, 10), title: '月刊封面 + 編輯', amount: 12000,
+      done: true, paid: true, doneAt: monthBackDay(12, 25), paidAt: monthBackDay(11, 25),
+      payments: [{ id: uid(), date: monthBackDay(11, 25), amount: 12000 }],
+      tags: ['設計', '月刊'] });
+
+  // ===== 9-11 個月前 =====
+  J({ clientId: c1, date: monthBackDay(10, 5), title: '年度品牌指南更新', amount: 35000, hoursWorked: 30,
+      done: true, paid: true, doneAt: monthBackDay(10, 25), paidAt: monthBackDay(9, 25),
+      payments: [{ id: uid(), date: monthBackDay(9, 25), amount: 35000 }],
+      tags: ['設計', '品牌', '大案'] });
+  J({ clientId: c6, date: monthBackDay(10, 8), title: '政府宣導海報設計 5 款', amount: 75000, quantity: 5, hoursWorked: 40,
+      done: true, paid: true, doneAt: monthBackDay(10, 28), paidAt: monthBackDay(8, 15),
+      payments: [{ id: uid(), date: monthBackDay(8, 15), amount: 75000, note: '公文後付款' }],
+      tags: ['設計', '政府', '大案'] });
+  J({ clientId: c3, date: monthBackDay(9, 20), title: '同行 overflow：產品圖修圖', amount: 3500, quantity: 14, hoursWorked: 5,
+      done: true, paid: true, doneAt: monthBackDay(9, 25), paidAt: monthBackDay(8, 10),
+      payments: [{ id: uid(), date: monthBackDay(8, 10), amount: 3500 }],
+      tags: ['修圖', '外包'] });
+  J({ clientId: c4, date: monthBackDay(9, 10), title: '月刊封面', amount: 12000,
+      done: true, paid: true, doneAt: monthBackDay(9, 25), paidAt: monthBackDay(8, 25),
+      payments: [{ id: uid(), date: monthBackDay(8, 25), amount: 12000 }],
+      tags: ['設計', '月刊'] });
+
+  // ===== 6-8 個月前 =====
+  J({ clientId: c2, date: monthBackDay(7, 5), title: '春季新品攝影後製 30 張', amount: 9000, quantity: 30, hoursWorked: 12,
+      done: true, paid: true, doneAt: monthBackDay(7, 18), paidAt: monthBackDay(6, 15),
+      payments: [{ id: uid(), date: monthBackDay(6, 15), amount: 9000 }],
+      tags: ['攝影', '電商'] });
+  J({ clientId: c5, date: monthBackDay(6, 3), title: '個人 logo 設計', details: '3 稿 + 確認後 2 稿修改', amount: 8000, hoursWorked: 10,
+      done: true, paid: true, doneAt: monthBackDay(6, 18), paidAt: monthBackDay(6, 20),
+      payments: [{ id: uid(), date: monthBackDay(6, 20), amount: 8000 }],
+      tags: ['設計', 'logo'] });
+
+  // ===== 4-5 個月前 =====
+  J({ clientId: c1, date: monthBackDay(5, 8), title: '官網首頁改版', amount: 18000, hoursWorked: 16,
+      done: true, paid: true, doneAt: monthBackDay(5, 22), paidAt: monthBackDay(4, 25),
+      payments: [{ id: uid(), date: monthBackDay(4, 25), amount: 18000 }],
+      tags: ['設計', '網站'] });
+  J({ clientId: c6, date: monthBackDay(5, 12), title: '政府年報設計 + 印製協調', amount: 120000, hoursWorked: 60,
+      done: true, paid: true, doneAt: monthBackDay(4, 5), paidAt: monthBackDay(2, 10),
+      payments: [{ id: uid(), date: monthBackDay(2, 10), amount: 120000, note: '預算季結算' }],
+      tags: ['設計', '政府', '大案'] });
+  J({ clientId: c4, date: monthBackDay(4, 10), title: '月刊封面', amount: 12000,
+      done: true, paid: true, doneAt: monthBackDay(4, 25), paidAt: monthBackDay(3, 25),
+      payments: [{ id: uid(), date: monthBackDay(3, 25), amount: 12000 }],
+      tags: ['設計', '月刊'] });
+
+  // ===== 2-3 個月前 =====
+  J({ clientId: c2, date: monthBackDay(3, 6), title: '618 廣告素材包', details: '主視覺 + 5 個社群圖', amount: 22000, quantity: 6, hoursWorked: 18,
+      done: true, paid: true, doneAt: monthBackDay(3, 18), paidAt: monthBackDay(2, 5),
+      payments: [{ id: uid(), date: monthBackDay(2, 5), amount: 22000 }],
+      tags: ['廣告', '電商'] });
+  J({ clientId: c1, date: monthBackDay(2, 12), title: '形象動畫 30 秒', details: 'After Effects 動態圖形', amount: 25000, hoursWorked: 22,
+      done: true, paid: true, doneAt: monthBackDay(2, 28), paidAt: monthBackDay(1, 25),
+      payments: [{ id: uid(), date: monthBackDay(1, 25), amount: 25000 }],
+      tags: ['動畫'] });
+  J({ clientId: c4, date: monthBackDay(2, 10), title: '月刊封面 + 內頁編排', amount: 14000,
+      done: true, paid: true, doneAt: monthBackDay(2, 25), paidAt: monthBackDay(1, 25),
+      payments: [{ id: uid(), date: monthBackDay(1, 25), amount: 14000 }],
+      tags: ['設計', '月刊'] });
+
+  // ===== 上個月 =====
+  J({ clientId: c2, date: monthBackDay(1, 5), title: '夏季 EDM 4 款', amount: 8000, quantity: 4,
+      done: true, paid: true, doneAt: monthBackDay(1, 12), paidAt: dayBack(20),
+      payments: [{ id: uid(), date: dayBack(20), amount: 8000 }],
+      tags: ['設計', 'EDM'] });
+  J({ clientId: c1, date: monthBackDay(1, 18), title: '官方 LINE 表情貼設計', amount: 16000, quantity: 8, hoursWorked: 14,
+      done: true, paid: true, doneAt: monthBackDay(1, 28), paidAt: dayBack(15),
+      payments: [{ id: uid(), date: dayBack(15), amount: 16000 }],
+      tags: ['插畫', 'LINE'] });
+  J({ clientId: c4, date: monthBackDay(1, 10), title: '月刊封面', amount: 12000,
+      done: true, paid: false, doneAt: monthBackDay(1, 25), paidAt: null,  // 上月已完成、本月待收
+      payments: [],
+      tags: ['設計', '月刊'] });
+  J({ clientId: c6, date: monthBackDay(1, 8), title: '政府年度報告設計', details: '60 頁圖文編排', amount: 85000, hoursWorked: 50,
+      done: true, paid: false, doneAt: dayBack(28), paidAt: null,  // 完成已久未收（典型政府拖款）
+      payments: [],
+      tags: ['設計', '政府', '大案'] });
+
+  // ===== 本月（多筆混合狀態）=====
+  const m = thisMonth();
+  J({ clientId: c1, date: m+'-03', title: 'FB 廣告 banner 5 張', details: '1080x1080，含兩次修改', amount: 4500, quantity: 5,
+      done: true, paid: true, doneAt: m+'-05', paidAt: m+'-10',
+      payments: [{ id: uid(), date: m+'-10', amount: 4500, note: '本月已收' }],
+      tags: ['廣告'] });
+  J({ clientId: c2, date: m+'-08', title: '產品攝影後製 15 張', details: '商品白底 + 情境 5 張', amount: 4500, quantity: 15, hoursWorked: 6,
+      done: true, paid: true, doneAt: dayBack(5), paidAt: dayBack(2),
+      payments: [{ id: uid(), date: dayBack(2), amount: 4500 }],
+      tags: ['攝影', '電商'] });
+  J({ clientId: c1, date: m+'-12', title: '官網首頁第二輪改版', details: '首頁 + 3 內頁', amount: 18000, hoursWorked: 14,
+      done: true, paid: false, doneAt: dayBack(10), paidAt: null,
+      payments: [],
+      tags: ['設計', '網站'] });
+  J({ clientId: c2, date: m+'-15', title: '雙12 主視覺 + 5 廣告', details: '預付一半', amount: 30000, hoursWorked: 20,
+      done: true, paid: false, doneAt: dayBack(3), paidAt: null,
+      // 部分收款示範：總價 30000、已收 15000
+      payments: [{ id: uid(), date: dayBack(15), amount: 15000, note: '訂金 50%' }],
+      tags: ['設計', '電商', '大案'] });
+  J({ clientId: c5, date: m+'-18', title: '個人名片 + 信封設計', amount: 4000, hoursWorked: 5,
+      done: true, paid: false, doneAt: dayBack(2), paidAt: null,
+      payments: [],
+      tags: ['設計'] });
+  J({ clientId: c4, date: m+'-20', title: '月刊封面', amount: 12000,
+      done: false, paid: false,  // 進行中
+      payments: [],
+      tags: ['設計', '月刊'] });
+  J({ clientId: c3, date: dayBack(3), title: '同行外包：banner 改稿', amount: 1500, hoursWorked: 1.5,
+      done: false, paid: false,
+      payments: [],
+      tags: ['外包'] });
+  J({ clientId: c6, date: dayBack(7), title: '政府活動 KV', details: '公文跑流程中', amount: 45000, hoursWorked: 25,
+      done: false, paid: false,  // 逾期未完成（提醒）
+      payments: [],
+      tags: ['設計', '政府'] });
+  // 折扣示範
+  J({ clientId: c1, date: dayBack(2), title: 'FB 即時廣告（折扣價）', amount: 6000, hoursWorked: 4,
+      discountType: 'percent', discountValue: 15,  // 折扣 15%
+      done: true, paid: false, doneAt: dayBack(1), paidAt: null,
+      payments: [],
+      tags: ['廣告', 'VIP折扣'] });
+  // 已取消
+  J({ clientId: c2, date: dayBack(20), title: '六月廣告（已撤案）', amount: 5000,
+      cancelled: true,
+      payments: [],
+      tags: ['取消'] });
+  // 跨天案件（v3.19 拖曳示範）
+  J({ clientId: c4, date: m+'-22', endDate: m+'-26', title: '季刊跨頁專題排版', details: '5 天工期', amount: 18000, hoursWorked: 24,
+      done: false, paid: false,
+      payments: [],
+      tags: ['設計', '月刊'] });
+
+  // ===== 未來案件 =====
+  J({ clientId: c2, date: dayFwd(3), title: 'EDM 春季促銷', amount: 3000,
+      done: false, paid: false,
+      payments: [],
+      tags: ['設計', 'EDM'] });
+  J({ clientId: c3, date: dayFwd(7), title: 'Logo 優化（介紹案）', amount: 8000, hoursWorked: 0,
+      done: false, paid: false,
+      payments: [],
+      tags: ['設計', 'logo'] });
+  J({ clientId: c1, date: dayFwd(14), title: '年中檢討 + 下半年規劃會議', amount: 0, hoursWorked: 3,
+      done: false, paid: false,
+      payments: [],
+      tags: ['顧問', '會議'] });
+  J({ clientId: c5, date: dayFwd(21), title: '名片改版（追加）', amount: 2500,
+      done: false, paid: false,
+      payments: [],
+      tags: ['設計'] });
+  // 估價單示範
+  J({ clientId: c2, date: dayFwd(30), title: '【估價中】Q4 廣告整體規劃', details: '主視覺 + 10 套素材', amount: 60000, quantity: 10,
+      isEstimate: true,  // 估價單模式
+      payments: [],
+      tags: ['估價', '電商'] });
+
   logAction('data-load-demo', { clients: state.clients.length, jobs: state.jobs.length });
-  save(); renderAll(); toast('✓ 已載入範例');
+  save(); renderAll(); toast(`✓ 已載入範例：${state.clients.length} 業主 · ${state.jobs.length} 案件 · 跨 14 個月`, 4500);
 }
 
 function clearAll() {
