@@ -45,6 +45,7 @@
 | **v3.8.0** | **提醒類型矩陣（9×2 channel）：通知/Calendar 整合一張卡、immediate save、Calendar 卡精簡** | ✅ **完成（2026-05-01）** |
 | **v3.8.1** | **UI 字眼統一「Google 行事曆」+ master OFF 時 reminder 卡的行事曆欄 disable** | ✅ **完成（2026-05-01）** |
 | **v3.9.0** | **業主 detail 頁（CRM-lite）：4 stat + 通訊錄 + 12 月趨勢 + 智慧分析 + 案件時間軸** | ✅ **完成（2026-05-01）** |
+| **v3.10.0** | **全局計時器：top bar 常駐 + 跨會期 persist + 跨案件自動切換 + 結束加到工時** | ✅ **完成（2026-05-01）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

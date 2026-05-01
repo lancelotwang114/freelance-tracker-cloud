@@ -1,5 +1,46 @@
 ﻿# 版本更新歷史
 
+## v3.10.0 — 全局計時器（top bar 常駐 + 跨會期 persist）（2026-05-01）
+
+> 從 modal 內計時器升級成「全局計時器」：top bar 常駐顯示、切到任何分頁 / modal 都繼續跑、瀏覽器關了再開計時還在。
+
+### 全局計時器 state（記憶體 + localStorage 同步）
+- 新增 `activeTimer = { jobId, startedAt, accumulatedMs }`
+- localStorage key `cloud-ftActiveTimer_v1`
+- 隨時 persist：開始 / 暫停 / 重設 / 結束都立刻寫
+- 啟動時 `loadActiveTimerFromStorage()` 還原（即使瀏覽器關了再開計時繼續跑）
+
+### Top bar 常駐 widget
+- 沒在計時時 hidden、有 jobId 時常駐顯示
+- 內容：⏱️ icon + `00:00:00` 時間 + 案件標題 + ⏸/▶ 暫停繼續按鈕 + ✓ 結束按鈕
+- 計時中：success 綠色背景 + icon 脈動動畫
+- 暫停中：白底邊框、純顯示
+- 點 widget 主體 → 跳到該案件 modal 編輯
+- 手機版自動藏掉案件標題、保留時間 + 按鈕
+
+### Modal 內計時器接全局狀態
+- 開啟「正在計時的案件」modal → 自動顯示當前累積時間 + 按鈕變「⏸ 暫停 / ▶ 繼續」
+- 開啟「不是計時中的案件」modal → 顯示該案件已存的 timeSpentMs（不會干擾全局計時）
+- 按「▶ 開始」如果全局正在計時別的案件 → confirm「要切換嗎？前一個會自動暫停並寫回工時」
+- 按「✓ 結束」→ 把累積時間轉成小時加到 `j.hoursWorked`、清空 timeSpentMs、清空全局 activeTimer
+- 按「重設」→ 清空累積但保留 jobId（按繼續從 0 開始）
+
+### 行為細節
+- **跨案件切換**：自動 pause 舊的、save() timeSpentMs、切到新案件
+- **跨會期持久**：startedAt 是 epoch ms，瀏覽器關了再開仍能算對時間
+- **案件被刪除**：deleteJob 偵測到 activeTimer.jobId === deletedId 自動 clearActiveTimer
+- **Modal 關閉**：計時器繼續跑（top bar widget 持續顯示）— 不再 stopJobTimerOnClose
+
+### 不在這版範圍
+- 「今日總工時」儀表板（依日 / 業主 / 類型分類）— 留 v3.10.1 或之後
+- 自動 idle 偵測（5 分鐘沒活動暫停）— 留之後
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.10.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.10.0`
+
+---
+
 ## v3.9.0 — 業主 detail 頁（CRM-lite）（2026-05-01）
 
 > 業主分頁從單純列表升級成「點業主進詳細頁」，每個業主自帶 4 stat / 通訊錄 / 12 個月趨勢 / actionable 智慧分析 / 案件時間軸。

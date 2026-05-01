@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.9.0">
+<meta name="app-version" content="2026-05-01-v3.10.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -52,6 +52,14 @@
         </div>
       </div>
       <div style="display: flex; gap: 6px; align-items: center;">
+        <!-- v3.10.0：全局計時器 widget（沒計時時 hidden，計時 / 暫停中常駐顯示） -->
+        <div id="active-timer-widget" class="active-timer-widget hidden" onclick="focusActiveTimerJob()" title="點擊跳到此案件編輯">
+          <span class="active-timer-icon">⏱️</span>
+          <span id="active-timer-display" class="active-timer-display">00:00:00</span>
+          <span id="active-timer-title" class="active-timer-title">—</span>
+          <button id="active-timer-toggle-btn" onclick="event.stopPropagation(); onActiveTimerToggleBtn()" class="active-timer-btn" title="暫停 / 繼續">⏸</button>
+          <button onclick="event.stopPropagation(); finishActiveTimer()" class="active-timer-btn" title="結束計時並加到工時欄">✓</button>
+        </div>
         <!-- v3.6.1：右上 icon 按鈕統一放大（font-size 18px、padding 7px 11px） -->
         <button id="global-search-toggle-btn" onclick="toggleGlobalSearch()" title="全域搜尋（業主 / 案件 / 備註）" class="topbar-icon-btn" aria-label="搜尋">🔍</button>
         <button id="hard-reload-btn" onclick="hardReload()" title="重新整理（清除所有快取、Service Worker、Cookie）" class="topbar-icon-btn" aria-label="重新整理">↻</button>

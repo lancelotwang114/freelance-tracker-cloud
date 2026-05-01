@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.9.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.10.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5849,10 +5849,18 @@ function removeJobSubtask(i) {
   renderJobSubtasks();
 }
 
-// ============== Modal 內計時器（v2.6）==============
-let modalTimerStart = 0;     // 當前 session 開始的 timestamp（0 = 未在計時）
-let modalTimerBaseMs = 0;    // 之前累積的毫秒（從 job 載入）
-let modalTimerInterval = null;
+// ============== 全局計時器（v3.10.0：從 modal 內升級成跨 modal/分頁/會期常駐）==============
+const TIMER_KEY = 'cloud-ftActiveTimer_v1';
+
+// 全局計時器狀態：jobId 不為 null = 有案件「正在計時或暫停中」
+//   - startedAt > 0 = 計時中
+//   - startedAt === 0 = 暫停中（仍綁定該案件，按繼續就接著跑）
+let activeTimer = {
+  jobId: null,
+  startedAt: 0,
+  accumulatedMs: 0
+};
+let activeTimerTickInterval = null;
 
 function fmtTimerMs(ms) {
   const totalSec = Math.floor(ms / 1000);
@@ -5862,74 +5870,261 @@ function fmtTimerMs(ms) {
   return `${h}:${m}:${s}`;
 }
 
-function getCurrentTimerMs() {
-  const sessionMs = modalTimerStart ? (Date.now() - modalTimerStart) : 0;
-  return modalTimerBaseMs + sessionMs;
+function getActiveTimerMs() {
+  if (!activeTimer.jobId) return 0;
+  const sessionMs = activeTimer.startedAt ? (Date.now() - activeTimer.startedAt) : 0;
+  return activeTimer.accumulatedMs + sessionMs;
 }
 
-function refreshTimerDisplay() {
-  const el = document.getElementById('job-timer-display');
-  if (el) el.textContent = fmtTimerMs(getCurrentTimerMs());
+function loadActiveTimerFromStorage() {
+  try {
+    const raw = localStorage.getItem(TIMER_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (obj && obj.jobId) {
+      activeTimer = {
+        jobId: obj.jobId,
+        startedAt: +obj.startedAt || 0,
+        accumulatedMs: +obj.accumulatedMs || 0
+      };
+      // 還原時若是「計時中」狀態，立刻啟動 tick
+      if (activeTimer.startedAt) startActiveTimerTick();
+    }
+  } catch (e) { console.warn('[timer] restore failed:', e); }
 }
 
-function loadJobTimer(timeSpentMs) {
-  modalTimerBaseMs = +timeSpentMs || 0;
-  modalTimerStart = 0;
-  refreshTimerDisplay();
-  const btn = document.getElementById('job-timer-toggle');
-  if (btn) btn.innerHTML = '▶ 開始';
-}
-
-function toggleJobTimer() {
-  const btn = document.getElementById('job-timer-toggle');
-  if (modalTimerStart) {
-    // 暫停 → 把 session 累計到 base
-    modalTimerBaseMs += Date.now() - modalTimerStart;
-    modalTimerStart = 0;
-    if (modalTimerInterval) { clearInterval(modalTimerInterval); modalTimerInterval = null; }
-    if (btn) btn.innerHTML = '▶ 繼續';
+function saveActiveTimerToStorage() {
+  if (activeTimer.jobId) {
+    localStorage.setItem(TIMER_KEY, JSON.stringify(activeTimer));
   } else {
-    // 開始
-    modalTimerStart = Date.now();
-    modalTimerInterval = setInterval(refreshTimerDisplay, 500);
-    if (btn) btn.innerHTML = '⏸ 暫停';
+    localStorage.removeItem(TIMER_KEY);
   }
 }
 
+function startActiveTimerTick() {
+  if (activeTimerTickInterval) clearInterval(activeTimerTickInterval);
+  activeTimerTickInterval = setInterval(() => {
+    renderActiveTimerWidget();
+    refreshModalTimerDisplay();
+  }, 1000);
+}
+
+function stopActiveTimerTick() {
+  if (activeTimerTickInterval) { clearInterval(activeTimerTickInterval); activeTimerTickInterval = null; }
+}
+
+// 開始（or 繼續）計時某案件
+//   如果切到不同案件 → 先把舊的暫停 + 寫回 timeSpentMs，再切到新案件
+function startActiveTimer(jobId) {
+  if (!jobId) return;
+  if (activeTimer.jobId && activeTimer.jobId !== jobId) {
+    // 切換案件：先把舊的暫停 + 存回 timeSpentMs
+    pauseActiveTimer({ silent: true });
+    // 切到新案件
+    activeTimer.jobId = jobId;
+    activeTimer.accumulatedMs = (state.jobs.find(j => j.id === jobId)?.timeSpentMs) || 0;
+  }
+  if (!activeTimer.jobId) {
+    activeTimer.jobId = jobId;
+    activeTimer.accumulatedMs = (state.jobs.find(j => j.id === jobId)?.timeSpentMs) || 0;
+  }
+  activeTimer.startedAt = Date.now();
+  saveActiveTimerToStorage();
+  startActiveTimerTick();
+  renderActiveTimerWidget();
+  refreshModalTimerDisplay();
+}
+
+// 暫停：保留 jobId，可按繼續接著跑
+function pauseActiveTimer(opt = {}) {
+  if (!activeTimer.jobId) return;
+  if (activeTimer.startedAt) {
+    activeTimer.accumulatedMs += Date.now() - activeTimer.startedAt;
+    activeTimer.startedAt = 0;
+  }
+  // 寫回 job.timeSpentMs（每次暫停都即時寫，不靠 modal 關閉）
+  const j = state.jobs.find(x => x.id === activeTimer.jobId);
+  if (j) {
+    j.timeSpentMs = activeTimer.accumulatedMs;
+    if (!opt.silent) save();
+  }
+  saveActiveTimerToStorage();
+  stopActiveTimerTick();
+  renderActiveTimerWidget();
+  refreshModalTimerDisplay();
+}
+
+// 結束計時 + 加到工時欄
+function finishActiveTimer() {
+  if (!activeTimer.jobId) { toast('還沒開始計時'); return; }
+  const totalMs = getActiveTimerMs();
+  if (totalMs <= 0) { toast('累積時間為 0，無需加到工時'); clearActiveTimer(); return; }
+  const hours = +(totalMs / 3600000).toFixed(2);
+  const j = state.jobs.find(x => x.id === activeTimer.jobId);
+  if (j) {
+    j.hoursWorked = +((+j.hoursWorked || 0) + hours).toFixed(2);
+    j.timeSpentMs = 0;  // 已結算，歸零
+  }
+  toast(`✓ 已加 ${hours} 小時到 ${j ? (j.title || '案件') : '案件'} 的工時`);
+  clearActiveTimer();
+  save();
+  // 如果 modal 正開的就是這個案件，也同步更新工時 input
+  if (typeof editingJobId !== 'undefined' && editingJobId === (j && j.id)) {
+    const inp = document.getElementById('job-hours');
+    if (inp && j) { inp.value = j.hoursWorked; updateJobHourlyHint(); }
+  }
+}
+
+// 重設：清空累積但保留 jobId（按繼續會從 0 開始）
+function resetActiveTimer() {
+  if (!activeTimer.jobId) return;
+  if (getActiveTimerMs() > 0) {
+    if (!confirm('確定清空這段計時？此案件累計工時會歸零。')) return;
+  }
+  activeTimer.startedAt = 0;
+  activeTimer.accumulatedMs = 0;
+  const j = state.jobs.find(x => x.id === activeTimer.jobId);
+  if (j) { j.timeSpentMs = 0; save(); }
+  saveActiveTimerToStorage();
+  stopActiveTimerTick();
+  renderActiveTimerWidget();
+  refreshModalTimerDisplay();
+}
+
+// 完全清掉計時器（不再綁定任何案件）
+function clearActiveTimer() {
+  activeTimer = { jobId: null, startedAt: 0, accumulatedMs: 0 };
+  saveActiveTimerToStorage();
+  stopActiveTimerTick();
+  renderActiveTimerWidget();
+  refreshModalTimerDisplay();
+}
+
+// Top bar widget render
+function renderActiveTimerWidget() {
+  const widget = document.getElementById('active-timer-widget');
+  if (!widget) return;
+  if (!activeTimer.jobId) {
+    widget.classList.add('hidden');
+    return;
+  }
+  widget.classList.remove('hidden');
+  const j = state.jobs.find(x => x.id === activeTimer.jobId);
+  const display = document.getElementById('active-timer-display');
+  if (display) display.textContent = fmtTimerMs(getActiveTimerMs());
+  const titleEl = document.getElementById('active-timer-title');
+  if (titleEl) titleEl.textContent = j ? (j.title || '無標題案件') : '案件已刪除';
+  const isRunning = !!activeTimer.startedAt;
+  widget.classList.toggle('running', isRunning);
+  const toggleBtn = document.getElementById('active-timer-toggle-btn');
+  if (toggleBtn) toggleBtn.textContent = isRunning ? '⏸' : '▶';
+}
+
+// Top bar widget 點擊：跳到該案件 modal
+function focusActiveTimerJob() {
+  if (!activeTimer.jobId) return;
+  const j = state.jobs.find(x => x.id === activeTimer.jobId);
+  if (!j) {
+    if (confirm('原計時案件已被刪除，要清掉計時器嗎？')) clearActiveTimer();
+    return;
+  }
+  editJob(activeTimer.jobId);
+}
+
+// Top bar widget 的「⏸/▶」按鈕
+function onActiveTimerToggleBtn() {
+  if (!activeTimer.jobId) return;
+  if (activeTimer.startedAt) pauseActiveTimer();
+  else startActiveTimer(activeTimer.jobId);
+}
+
+// ----- Modal 計時器 UI（接全局狀態）-----
+
+// 案件 modal 開啟時呼叫，jobId 是當前正在編輯的案件
+//   - 如果該案件 === activeTimer.jobId → 顯示當前計時數字 + 適當按鈕
+//   - 如果該案件 !== activeTimer.jobId → 顯示該案件的 timeSpentMs 但按鈕是「▶ 開始」
+function loadJobTimer(timeSpentMs, jobId) {
+  refreshModalTimerDisplay(jobId, timeSpentMs);
+}
+
+function refreshModalTimerDisplay(jobId, fallbackTimeSpentMs) {
+  const el = document.getElementById('job-timer-display');
+  if (!el) return;
+  // 用參數或全域 editingJobId
+  const targetId = jobId || (typeof editingJobId !== 'undefined' ? editingJobId : null);
+  if (activeTimer.jobId && activeTimer.jobId === targetId) {
+    // 正在計時或暫停中，顯示全局狀態
+    el.textContent = fmtTimerMs(getActiveTimerMs());
+    const btn = document.getElementById('job-timer-toggle');
+    if (btn) btn.innerHTML = activeTimer.startedAt ? '⏸ 暫停' : '▶ 繼續';
+  } else {
+    // 沒在計時，顯示該案件的 timeSpentMs（或 fallback）
+    const j = targetId ? state.jobs.find(x => x.id === targetId) : null;
+    const ms = (j && +j.timeSpentMs) || (+fallbackTimeSpentMs || 0);
+    el.textContent = fmtTimerMs(ms);
+    const btn = document.getElementById('job-timer-toggle');
+    if (btn) btn.innerHTML = '▶ 開始';
+  }
+}
+
+// modal 內按「▶ 開始 / ⏸ 暫停 / ▶ 繼續」
+function toggleJobTimer() {
+  const targetId = (typeof editingJobId !== 'undefined') ? editingJobId : null;
+  if (!targetId) { toast('請先儲存案件再開始計時'); return; }
+  if (activeTimer.jobId === targetId && activeTimer.startedAt) {
+    pauseActiveTimer();
+  } else {
+    // 開始（如果 activeTimer 在跑別的案件，會自動切換）
+    if (activeTimer.jobId && activeTimer.jobId !== targetId) {
+      const otherJob = state.jobs.find(x => x.id === activeTimer.jobId);
+      const otherTitle = otherJob ? (otherJob.title || '案件') : '其他案件';
+      if (!confirm(`目前正在計時「${otherTitle}」，要切換到目前這個案件嗎？\n（前一個的計時會自動暫停並寫回工時）`)) return;
+    }
+    startActiveTimer(targetId);
+  }
+}
+
+// modal 內按「重設」
 function resetJobTimer() {
-  if (modalTimerStart || modalTimerBaseMs > 0) {
-    if (!confirm('確定清空計時器？此案件累計工時會歸零。')) return;
+  const targetId = (typeof editingJobId !== 'undefined') ? editingJobId : null;
+  if (!targetId) return;
+  // 如果重設的是當前計時案件，呼叫 resetActiveTimer
+  if (activeTimer.jobId === targetId) {
+    resetActiveTimer();
+  } else {
+    // 重設別的案件的 timeSpentMs（沒在跑全局計時）
+    const j = state.jobs.find(x => x.id === targetId);
+    if (j && +j.timeSpentMs > 0) {
+      if (!confirm('確定清空此案件累計工時？')) return;
+      j.timeSpentMs = 0;
+      save();
+      refreshModalTimerDisplay();
+    }
   }
-  modalTimerStart = 0;
-  modalTimerBaseMs = 0;
-  if (modalTimerInterval) { clearInterval(modalTimerInterval); modalTimerInterval = null; }
-  refreshTimerDisplay();
-  const btn = document.getElementById('job-timer-toggle');
-  if (btn) btn.innerHTML = '▶ 開始';
 }
 
+// modal 內按「✓ 結束」
 function finishJobTimer() {
-  // 暫停 + 把累計時間加到工時欄
-  if (modalTimerStart) toggleJobTimer();
-  const ms = getCurrentTimerMs();
-  if (ms <= 0) { toast('還沒開始計時'); return; }
-  const hours = +(ms / 3600000).toFixed(2);
-  const inp = document.getElementById('job-hours');
-  if (inp) {
-    const existing = +inp.value || 0;
-    inp.value = (existing + hours).toFixed(2);
-    updateJobHourlyHint();
+  const targetId = (typeof editingJobId !== 'undefined') ? editingJobId : null;
+  if (!targetId) return;
+  if (activeTimer.jobId === targetId) {
+    finishActiveTimer();
+  } else {
+    // 沒在計時，直接把 timeSpentMs 結算到工時欄
+    const j = state.jobs.find(x => x.id === targetId);
+    if (!j || !(+j.timeSpentMs)) { toast('還沒開始計時'); return; }
+    const hours = +(j.timeSpentMs / 3600000).toFixed(2);
+    const inp = document.getElementById('job-hours');
+    if (inp) { inp.value = (+inp.value || 0) + hours; updateJobHourlyHint(); }
+    j.timeSpentMs = 0;
+    save();
+    refreshModalTimerDisplay();
+    toast(`✓ 已加 ${hours} 小時到工時欄`);
   }
-  toast(`✓ 已加 ${hours} 小時到工時欄`);
 }
 
 function stopJobTimerOnClose() {
-  // Modal 關閉時記錄當前計時狀態（不清除 base，因為要儲存）
-  if (modalTimerStart) {
-    modalTimerBaseMs += Date.now() - modalTimerStart;
-    modalTimerStart = 0;
-  }
-  if (modalTimerInterval) { clearInterval(modalTimerInterval); modalTimerInterval = null; }
+  // v3.10.0：modal 關閉計時器繼續跑（top bar widget 持續顯示），這函式變 noop 但留著相容
 }
 
 // ============== 估價單（v2.6）==============
@@ -7525,10 +7720,10 @@ function openJobModal() {
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
   document.getElementById('job-export-estimate-btn')?.classList.add('hidden');
   document.getElementById('job-confirm-estimate-btn')?.classList.add('hidden');
-  // v2.6: 子任務 + 計時器
+  // v2.6: 子任務 + 計時器（v3.10.0：新案件還沒 ID，計時器只能顯示 0:00:00）
   modalSubtasks = [];
   renderJobSubtasks();
-  loadJobTimer(0);
+  loadJobTimer(0, null);
   refreshTagSuggestions();
   onJobClientChange();
   updateJobHourlyHint();
@@ -7824,10 +8019,10 @@ function editJob(id) {
   // 估價單模式：顯示「轉正」與「估價單 PDF」按鈕
   document.getElementById('job-export-estimate-btn')?.classList.toggle('hidden', !j.isEstimate);
   document.getElementById('job-confirm-estimate-btn')?.classList.toggle('hidden', !j.isEstimate);
-  // v2.6: 子任務 + 計時器
+  // v2.6: 子任務 + 計時器（v3.10.0：傳 jobId 讓計時器知道是哪個案件 → 對到全局 activeTimer 才顯示計時中狀態）
   modalSubtasks = JSON.parse(JSON.stringify(j.subtasks || []));
   renderJobSubtasks();
-  loadJobTimer(j.timeSpentMs || 0);
+  loadJobTimer(j.timeSpentMs || 0, j.id);
   refreshTagSuggestions();
   onJobClientChange();
   updateJobHourlyHint();
@@ -7941,6 +8136,8 @@ function deleteJob() {
   if (!confirm('確定要刪除這筆案件？')) return;
   const j = state.jobs.find(x => x.id === editingJobId);
   const c = j ? getClient(j.clientId) : null;
+  // v3.10.0：刪掉的案件如果正在計時，清掉計時器
+  if (activeTimer.jobId === editingJobId) clearActiveTimer();
   state.jobs = state.jobs.filter(j => j.id !== editingJobId);
   if (j) logAction('job-delete', { jobId: editingJobId, title: j.title, amount: j.amount, clientId: j.clientId, clientName: c?.name });
   save(); closeJobModal(); render(); toast('已刪除');
@@ -9497,6 +9694,10 @@ fetchDeviceLocation();
 loadThemeUI();
 updateThemeToggleIcon();
 updateNotifUI();
+
+// v3.10.0：啟動時還原全局計時器（瀏覽器關了再開、計時器繼續跑）
+loadActiveTimerFromStorage();
+renderActiveTimerWidget();
 // v2.5: 開頁掃一次推通知（一天一次）
 setTimeout(maybeFireNotifications, 4000);
 
