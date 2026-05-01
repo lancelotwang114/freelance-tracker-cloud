@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.14.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.15.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3253,6 +3253,76 @@ function toastDismiss() {
   if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
 }
 
+// ============== v3.15.0：Undo 撤銷系統 ==============
+// 任何破壞性動作前 call pushUndoSnapshot('label')，動作後 toast 8 秒內可復原
+// 後續任何別的破壞性動作會清掉舊 snapshot（避免復原舊狀態誤蓋新動作）
+const UNDO_TIMEOUT_MS = 8000;
+
+let undoState = {
+  snapshot: null,    // { clients, jobs }
+  label: '',
+  timer: null,
+  uiTimer: null      // 進度條動畫
+};
+
+function pushUndoSnapshot(label) {
+  // 把當前 state 整個 snapshot 起來（不含 invoiceHistory，避免拖慢）
+  undoState.snapshot = {
+    clients: JSON.parse(JSON.stringify(state.clients)),
+    jobs: JSON.parse(JSON.stringify(state.jobs))
+  };
+  undoState.label = label || '已執行動作';
+  if (undoState.timer) clearTimeout(undoState.timer);
+  undoState.timer = setTimeout(() => clearUndo(), UNDO_TIMEOUT_MS);
+  showUndoToast(label);
+}
+
+function showUndoToast(label) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  // 替換 toast 內容為「訊息 + 復原按鈕 + 進度條」
+  t.innerHTML = `
+    <span style="margin-right: 14px;">✓ ${escapeHtml(label)}</span>
+    <button id="undo-toast-btn" onclick="performUndo()" style="background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.4); padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;">↶ 復原</button>
+    <div class="undo-toast-progress"><div class="undo-toast-progress-fill"></div></div>
+  `;
+  t.classList.add('show', 'toast--undo');
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  // 進度條動畫
+  setTimeout(() => {
+    const fill = t.querySelector('.undo-toast-progress-fill');
+    if (fill) {
+      fill.style.transition = `width ${UNDO_TIMEOUT_MS}ms linear`;
+      fill.style.width = '0%';
+    }
+  }, 30);
+  // 隱藏時點：UNDO_TIMEOUT_MS 之後
+  toastTimer = setTimeout(() => {
+    t.classList.remove('show', 'toast--undo');
+    setTimeout(() => { if (!t.classList.contains('show')) t.innerHTML = ''; }, 250);
+  }, UNDO_TIMEOUT_MS);
+}
+
+function performUndo() {
+  if (!undoState.snapshot) return;
+  state.clients = undoState.snapshot.clients;
+  state.jobs = undoState.snapshot.jobs;
+  clearUndo();
+  // 用 toast 確認復原成功
+  const t = document.getElementById('toast');
+  if (t) { t.classList.remove('toast--undo'); t.innerHTML = ''; }
+  save();
+  render();
+  toast('✓ 已復原');
+  if (typeof logAction === 'function') logAction('undo');
+}
+
+function clearUndo() {
+  undoState.snapshot = null;
+  undoState.label = '';
+  if (undoState.timer) { clearTimeout(undoState.timer); undoState.timer = null; }
+}
+
 function escapeHtml(s) {
   return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -3485,6 +3555,8 @@ function dashBulkExit() {
 function dashBulkMarkDone() {
   if (!dashBulkSelected.size) return;
   const ids = Array.from(dashBulkSelected);
+  // v3.15.0：先 snapshot 才動作
+  pushUndoSnapshot(`已標記 ${ids.length} 筆完成`);
   let count = 0;
   let totalAmt = 0;
   ids.forEach(id => {
@@ -3499,7 +3571,6 @@ function dashBulkMarkDone() {
   });
   save();
   if (count > 0) logAction('bulk-done', { count, amount: totalAmt });
-  toast(`✓ 已標記 ${count} 筆完成`);
   dashBulkExit();
   render();
 }
@@ -3562,13 +3633,14 @@ function dashBulkMarkCancelled() {
   if (!dashBulkSelected.size) return;
   if (!confirm(`確定要把 ${dashBulkSelected.size} 筆案件標記為已取消？\n\n（取消的案件不計入收益統計，但保留紀錄）`)) return;
   const ids = Array.from(dashBulkSelected);
+  // v3.15.0：snapshot for undo
+  pushUndoSnapshot(`已取消 ${ids.length} 筆案件`);
   ids.forEach(id => {
     const j = state.jobs.find(x => x.id === id);
     if (j) j.cancelled = true;
   });
   save();
   logAction('bulk-cancel', { count: ids.length });
-  toast(`✓ 已取消 ${ids.length} 筆`);
   dashBulkExit();
   render();
 }
@@ -3609,6 +3681,8 @@ function bulkInvert() {
 function bulkMarkDone() {
   if (!bulkSelected.size) { toast('沒有選任何案件'); return; }
   if (!confirm(`將選中的 ${bulkSelected.size} 筆案件標記為「已完成」（如果已是完成不變）？`)) return;
+  // v3.15.0：snapshot for undo
+  pushUndoSnapshot(`已標記 ${bulkSelected.size} 筆完成`);
   let n = 0;
   state.jobs.forEach(j => {
     if (bulkSelected.has(j.id) && !j.done) {
@@ -3619,7 +3693,6 @@ function bulkMarkDone() {
   });
   bulkSelected.clear();
   save(); render();
-  toast(`✓ ${n} 筆已標記完成`);
 }
 
 function bulkMarkPaid() {
@@ -3630,14 +3703,19 @@ function bulkMarkPaid() {
 
 function bulkDelete() {
   if (!bulkSelected.size) { toast('沒有選任何案件'); return; }
-  if (!confirm(`⚠️ 即將刪除 ${bulkSelected.size} 筆案件！\n\n此操作不可復原（除非從 Sheet 還原）。確定？`)) return;
-  const verify = prompt('最後確認：請輸入「確認刪除」四個字');
-  if (verify !== '確認刪除') { toast('已取消'); return; }
+  // v3.15.0：5 筆以下不需要二次驗證（有 undo 接住），多筆才嚴格 confirm
   const cnt = bulkSelected.size;
+  if (cnt > 5) {
+    if (!confirm(`⚠️ 即將刪除 ${cnt} 筆案件！\n\n8 秒內可復原，超過 8 秒就只能從 Drive 備份還原。確定？`)) return;
+    const verify = prompt('最後確認：請輸入「確認刪除」四個字');
+    if (verify !== '確認刪除') { toast('已取消'); return; }
+  } else {
+    if (!confirm(`即將刪除 ${cnt} 筆案件（8 秒內可復原），確定？`)) return;
+  }
+  pushUndoSnapshot(`已刪除 ${cnt} 筆案件`);
   state.jobs = state.jobs.filter(j => !bulkSelected.has(j.id));
   bulkSelected.clear();
   save(); render();
-  toast(`已刪除 ${cnt} 筆`);
 }
 
 // ============== Reminders / Alerts ==============
@@ -8930,11 +9008,13 @@ function deleteJob() {
   if (!confirm('確定要刪除這筆案件？')) return;
   const j = state.jobs.find(x => x.id === editingJobId);
   const c = j ? getClient(j.clientId) : null;
+  // v3.15.0：先 snapshot 再執行
+  pushUndoSnapshot(`已刪除案件「${j ? (j.title || '無標題') : ''}」`);
   // v3.10.0：刪掉的案件如果正在計時，清掉計時器
   if (activeTimer.jobId === editingJobId) clearActiveTimer();
   state.jobs = state.jobs.filter(j => j.id !== editingJobId);
   if (j) logAction('job-delete', { jobId: editingJobId, title: j.title, amount: j.amount, clientId: j.clientId, clientName: c?.name });
-  save(); closeJobModal(); render(); toast('已刪除');
+  save(); closeJobModal(); render();
 }
 
 // ----- Client Modal -----
@@ -9132,10 +9212,12 @@ function deleteClient() {
   const c = getClient(editingClientId);
   const cnt = state.jobs.filter(j => j.clientId === editingClientId).length;
   if (!confirm(`確定要刪除業主「${c.name}」？這將同時刪除 ${cnt} 筆案件。`)) return;
+  // v3.15.0：snapshot for undo
+  pushUndoSnapshot(`已刪除業主「${c.name}」+ ${cnt} 筆案件`);
   state.jobs = state.jobs.filter(j => j.clientId !== editingClientId);
   state.clients = state.clients.filter(x => x.id !== editingClientId);
   logAction('client-delete', { clientId: editingClientId, name: c.name, deletedJobs: cnt });
-  save(); closeClientModal(); render(); toast('已刪除');
+  save(); closeClientModal(); render();
 }
 
 // ----- Invoice actions -----

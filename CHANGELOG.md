@@ -1,5 +1,51 @@
 ﻿# 版本更新歷史
 
+## v3.15.0 — Undo 撤銷系統（2026-05-01）
+
+> 任何破壞性動作（刪除案件 / 業主 / 批次操作）後 8 秒內可一鍵復原。State snapshot-based 實作，簡單可靠。
+
+### 核心機制
+- 全域 `undoState = { snapshot, label, timer }`
+- 動作前 `pushUndoSnapshot('label')` → 把 `state.clients` + `state.jobs` 整個 deep clone（不含 invoiceHistory，避免拖慢）
+- 動作後 toast 出現「✓ XXX [↶ 復原]」+ 8 秒倒數進度條
+- 點復原 → restore state、save、render
+- 後續任何別的破壞性動作會覆蓋舊 snapshot
+- 8 秒到期自動 clearUndo
+
+### Toast UI 升級
+- 加 `.toast--undo` 修飾類：寬 280px、含 ↶ 復原按鈕、底部 3px 進度條
+- 進度條從 100% → 0% width transition 8 秒，視覺倒數
+- 復原按鈕半透明白底、hover 變實
+- 點復原按鈕 → call `performUndo()` → 還原 state + 寫回 + render + 顯示「✓ 已復原」toast
+
+### 6 個動作接 undo
+- `deleteJob`（刪單筆案件）
+- `deleteClient`（刪業主 + 該業主所有案件）
+- `bulkDelete`（批次刪案件）
+- `bulkMarkDone`（批次標完成）
+- `dashBulkMarkDone`（dashboard 批次標完成）
+- `dashBulkMarkCancelled`（dashboard 批次取消）
+
+### bulkDelete 簡化二次確認
+- 5 筆以下：只要 1 個 confirm（有 undo 接住，不需 prompt 輸入確認）
+- 6 筆以上：保留原有的「輸入確認刪除」嚴格驗證
+- toast 提示「8 秒內可復原」
+
+### 沒在這版做（留之後）
+- toggleDone / togglePaid 加 undo（這些頻繁操作，加 undo 會 toast 滿天飛）
+- 編輯欄位的 undo（要 deep diff state 才有意義）
+- Ctrl+Z 鍵盤快捷鍵（要先有命令面板架構）
+- Multi-step undo stack（目前是單層，最近一個動作）
+
+### 操作日誌
+- 加 `undo` type（成功復原時記錄）
+
+### 版本 bump
+- APP_VERSION → `2026-05-01-v3.15.0`
+- SW CACHE_VERSION → `ftracker-cloud-v3.15.0`
+
+---
+
 ## v3.14.0 — 標籤系統升級（業主 + 案件 multi-tag）（2026-05-01）
 
 > 業主可打多標籤、案件 tag 從單字串升級成 multi-tag、共用標籤池 + 自動建議。

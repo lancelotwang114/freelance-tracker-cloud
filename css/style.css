@@ -2418,6 +2418,33 @@ input:focus, select:focus, textarea:focus {
 }
 .toast.show { opacity: 1; }
 
+/* v3.15.0：undo toast — 比一般 toast 寬，含復原按鈕跟進度條 */
+.toast.toast--undo {
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 16px 14px 16px;
+  position: relative;
+  min-width: 280px;
+}
+.toast.toast--undo .undo-toast-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+}
+.toast.toast--undo .undo-toast-progress-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--success);
+}
+.toast.toast--undo button:hover {
+  background: rgba(255,255,255,0.35) !important;
+}
+
 /* ==================== 🔐 Google Drive 同步 卡片（v3.0.0-alpha.1）==================== */
 /* 設定頁最上方的 Sign in with Google 區塊。三個狀態互斥顯示：pending / signed-out / signed-in */
 /* 注意：名稱跟 v2 沿用的「☁️ 雲端同步」(Apps Script) 區隔，beta.1 才會移除 v2 那張 */
