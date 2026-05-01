@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.22.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.22.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3783,20 +3783,23 @@ function jobBelongMonth(j) {
   return getMonth(j.endDate || j.date);
 }
 
-// 案件的「實收金額」：扣掉業主分潤（給介紹人的部分）
+// 案件的「實收金額」：折扣後 × (1 - 分潤比例)
+// v3.22.4 修：先扣折扣再算分潤，避免月度報表「實收」總計沒考慮折扣
 function jobNetAmount(j) {
   const c = getClient(j.clientId);
   const rate = (c && c.commissionRate) || 0;
-  if (rate <= 0) return +j.amount || 0;
-  return Math.round((+j.amount || 0) * (1 - rate / 100));
+  const final = jobFinalAmount(j);  // 已扣折扣
+  if (rate <= 0) return final;
+  return Math.round(final * (1 - rate / 100));
 }
 
 // 案件的分潤金額（給介紹人的）
+// v3.22.4 修：分潤基準改用 jobFinalAmount（折扣後），跟 net 一致
 function jobCommission(j) {
   const c = getClient(j.clientId);
   const rate = (c && c.commissionRate) || 0;
   if (rate <= 0) return 0;
-  return (+j.amount || 0) - jobNetAmount(j);
+  return jobFinalAmount(j) - jobNetAmount(j);
 }
 
 // 已用過的標籤清單（補全用）
@@ -5936,7 +5939,6 @@ function renderClients() {
       <div style="display:flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
         <button class="btn btn-outline btn-sm" onclick="setFilter('clientId','${c.id}'); switchTab('jobs')">查看案件</button>
         <button class="btn btn-outline btn-sm" onclick="gotoInvoice('${c.id}')">產生請款單</button>
-        <button class="btn btn-outline btn-sm" onclick="copyShareLink('${c.id}')">複製分享連結</button>
       </div>
     </div>`;
   }).join('');
@@ -6136,7 +6138,17 @@ function renderRevenue() {
         // 確保 buckets 有當年（沒就建空的）
         wantedYears.forEach(y => { if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0 }; });
       } else {
-        displayKeys = filled.slice(-n);
+        // v3.22.4 修：以「當月」為終點往前推 N 個月（保證一定含當月，即使當月沒任何 payment / 案件）
+        // 舊版 filled.slice(-n) 是「有資料的最近 N 個月」，當月若沒任何資料就會被漏掉
+        const today = new Date();
+        const wantedMonths = [];
+        for (let i = n - 1; i >= 0; i--) {
+          const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+          const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          wantedMonths.push(k);
+          if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0 };
+        }
+        displayKeys = wantedMonths;
       }
     }
   }
@@ -9911,11 +9923,6 @@ function gotoInvoice(cid) {
     document.getElementById('inv-month').value = thisMonth();
     drawInvoice();
   }, 50);
-}
-
-function copyShareLink(cid) {
-  const url = location.origin + location.pathname + '?client=' + cid;
-  navigator.clipboard.writeText(url).then(() => toast('✓ 連結已複製'));
 }
 
 function copyInvoiceText() {
