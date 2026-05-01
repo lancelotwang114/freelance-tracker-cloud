@@ -1,5 +1,52 @@
 ﻿# 版本更新歷史
 
+## v3.22.1 — 自動化 v2 → v3 匯入（2026-05-01）
+
+> 改 importData 函式，從 v2 匯出的 JSON 中**自動帶入收款帳號 + 通知偏好 + 跑 schema migration + 觸發存摺照片遷移**。使用者搬遷時間從 10-15 分縮成 3-5 分。
+
+### 自動處理的 7 件事
+1. **state.clients**：補 v11 contact{} + v13 tags[] 預設值
+2. **state.jobs**：補 v9 quantity / v13 tags[] / v6 payments[]（從舊 paid:true + paidAt 自動轉換）
+3. **state.invoiceHistory**：v2 沒有時補空陣列
+4. **config.userInfo**：top-level 個人資訊（name/phone/email/invoiceTitle 等）
+5. **config.userInfo.paymentAccounts**：v2 簡單版自動 mapping 到 v3 完整版
+   - v3 完整身分欄位（name/phone/email/invoiceTitle/taxId/address/invoiceNote）從 top-level userInfo 補
+   - showPersonalInfo / showPersonalInfoOnTop / showInvoiceInfo 套預設值
+   - bankbookImage（base64）保留、bankbookImageFileId 等遷移後填
+6. **通知與提醒**：11 個欄位（4 個天數 + 7 個 enable*Alert）自動複製
+7. **schema migration**：自動跑 runMigrations + ensurePaymentAccounts
+
+### 自動觸發的事
+- **存摺照片 base64 → Drive App Folder 個別檔**：cloudMigrateBankbookImagesCheckedAt 重置 + 立刻跑（已登入 Google 才會執行）
+- **Drive 同步 push**：save() 後 debounce 推上去
+
+### 故意不 import 的東西
+- v2 的 sheetConfig / calApiUrl / calApiToken / autoPollEnabled 等 Apps Script 中介設定 — v3 直接打 Drive / Calendar API，這些欄位無意義
+- Google 行事曆設定（calId 等）— 兩套機制完全不同，無法 mapping，仍要使用者手動
+
+### confirm 對話框升級
+- 列出將自動處理的 4-5 樣東西
+- 顯示來源 schema 版本 + 將升級到的目標版本
+- 顯示是否含存摺照片要遷移
+- 比對日期警告（保留現有邏輯）
+
+### Toast 升級
+- 顯示完整摘要：「✓ 已匯入：業主 N 位 · 案件 N 筆 · 收款帳號 N 個 · N 項偏好」
+
+### 文件更新
+- `IMPORT_FROM_V2.md` 改：Phase 5 從「5 大手動補設定」縮成「2 個無法自動的」（Calendar + 業主標籤）
+- 提示時間從「10-15 分」改成「3-5 分」
+- Phase 4「刷新讓 migration 跑」標註已不需要
+
+### 操作日誌
+- 改 `data-import-from-v2` 為通用的 `data-import`，含 sourceVersion + 各種 count
+
+### Bump
+- APP_VERSION → `v3.22.1`
+- SW CACHE_VERSION → `v3.22.1`
+
+---
+
 ## v3.22.0 — 範例資料大改（豐富 + 跨年度 + 多收款帳號）（2026-05-01）
 
 > 從 6 筆案件 / 1 收款帳號擴充到 35 筆 / 6 業主 / 3 收款帳號 / 跨 14 個月，新使用者「載入範例」就能看到所有功能的實際呈現。

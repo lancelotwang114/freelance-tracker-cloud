@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.22.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.22.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -10154,10 +10154,14 @@ function importData(e) {
         return;
       }
 
-      // 比對日期：哪份比較新？
+      // 偵測來源版本（只是給使用者看的提示）
+      const sourceVer = d.schemaVersion ? `schema v${d.schemaVersion}` : '未知 schema';
+      const hasConfig = !!(d.config && typeof d.config === 'object');
+      const hasPayAccts = !!(d.config?.userInfo?.paymentAccounts?.length);
+
+      // 比對日期
       const importedAt = d._exportedAt || null;
       const localAt = config.lastModifiedAt || null;
-      const importedCnt = (d.clients?.length || 0) + (d.jobs?.length || 0);
       const localCnt = state.clients.length + state.jobs.length;
 
       let warningMsg = '';
@@ -10179,30 +10183,162 @@ function importData(e) {
         warningMsg = '⚠️ 匯入檔沒有時間戳（可能是舊版本檔案），無法判斷新舊';
       }
 
-      const confirmMsg = `準備匯入：\n` +
-        `• 業主 ${d.clients?.length||0} 位（現有 ${state.clients.length} 位）\n` +
-        `• 案件 ${d.jobs?.length||0} 筆（現有 ${state.jobs.length} 筆）\n\n` +
-        warningMsg + `\n\n` +
+      // v3.22.1：強化 confirm 訊息，列出會自動處理的東西
+      const willImport = [
+        `• 業主 ${d.clients?.length||0} 位（現有 ${state.clients.length} 位）`,
+        `• 案件 ${d.jobs?.length||0} 筆（現有 ${state.jobs.length} 筆）`,
+      ];
+      if (hasPayAccts) willImport.push(`• 收款帳號 ${d.config.userInfo.paymentAccounts.length} 個`);
+      if (hasConfig) willImport.push('• 通知與提醒、收益目標等所有偏好設定');
+      willImport.push(`\n📋 來源：${sourceVer}（將自動升級到 v${CURRENT_SCHEMA_VERSION}）`);
+      if (hasPayAccts && d.config.userInfo.paymentAccounts.some(p => p.bankbookImage && !p.bankbookImageFileId)) {
+        willImport.push('🖼️ 存摺照片將自動上傳到 Drive App Folder');
+      }
+      const confirmMsg = `準備匯入（v3.22.1：自動升級 + 偏好設定也一起搬）：\n\n` +
+        willImport.join('\n') + `\n\n` + warningMsg + `\n\n` +
         `⚠️ 匯入會覆蓋現有資料。確定？`;
 
       if (!confirm(confirmMsg)) return;
 
-      // 第二次確認（如果現有比新）
       if (localAt && importedAt && new Date(localAt) > new Date(importedAt) && localCnt > 0) {
         if (!confirm('再次確認：你的現有資料較新，匯入後會被舊版覆蓋。\n\n真的要繼續？')) return;
       }
 
-      state.clients = d.clients || [];
-      state.jobs = (d.jobs || []).map(j => ({
-        ...j,
-        paid: j.paid ?? false,
-        cancelled: j.cancelled ?? false,
-        doneAt: j.doneAt ?? (j.done ? (j.date || todayStr()) : null),
-        paidAt: j.paidAt ?? (j.paid ? (j.date || todayStr()) : null)
+      // ===== v3.22.1：完整 import — clients / jobs / config / paymentAccounts =====
+
+      // 1. clients：補 v11 contact / v13 tags 預設值（runMigrations 也會跑一次當保險）
+      state.clients = (d.clients || []).map(c => ({
+        ...c,
+        contact: (c.contact && typeof c.contact === 'object') ? c.contact : { person: '', phone: '', email: '', address: '' },
+        tags: Array.isArray(c.tags) ? c.tags : []
       }));
-      save(); renderAll(); toast('✓ 已匯入');
+
+      // 2. jobs：補各種版本的欄位，特別是 v6 → payments[] 的轉換
+      state.jobs = (d.jobs || []).map(j => {
+        const tags = Array.isArray(j.tags) ? j.tags : (j.tag ? [j.tag] : []);
+        // v6 之前舊資料：有 paid:true + paidAt 但沒 payments[] → 自動補一筆 payment
+        let payments = Array.isArray(j.payments) ? j.payments : [];
+        if (j.paid && j.paidAt && payments.length === 0) {
+          payments = [{
+            id: uid(),
+            date: j.paidAt,
+            amount: +j.amount || 0,
+            note: '自動轉換（v2 匯入時補）'
+          }];
+        }
+        return {
+          ...j,
+          paid: j.paid ?? false,
+          cancelled: j.cancelled ?? false,
+          doneAt: j.doneAt ?? (j.done ? (j.date || todayStr()) : null),
+          paidAt: j.paidAt ?? (j.paid ? (j.date || todayStr()) : null),
+          quantity: j.quantity != null ? j.quantity : 1,
+          tags,
+          payments
+        };
+      });
+
+      // 3. invoiceHistory：v2 沒有，留空陣列；v3 → v3 之間 import 才會有值
+      state.invoiceHistory = Array.isArray(d.invoiceHistory) ? d.invoiceHistory : [];
+
+      // 4. config：完整 import（含 userInfo / paymentAccounts / 通知偏好 / 目標）
+      let importedConfigCnt = 0;
+      if (hasConfig) {
+        // 4a. userInfo top-level（個人資訊）
+        if (d.config.userInfo && typeof d.config.userInfo === 'object') {
+          config.userInfo = config.userInfo || {};
+          ['name', 'phone', 'email', 'invoiceTitle', 'note', 'invoiceNote', 'taxId', 'address']
+            .forEach(k => {
+              if (d.config.userInfo[k] !== undefined) {
+                config.userInfo[k] = d.config.userInfo[k];
+              }
+            });
+          // 4b. paymentAccounts（v2 簡單版 → v3 完整版，從 top-level userInfo 補預設）
+          if (Array.isArray(d.config.userInfo.paymentAccounts)) {
+            config.userInfo.paymentAccounts = d.config.userInfo.paymentAccounts.map(pa => ({
+              ...pa,
+              // v3 完整身分欄位（v3.2.0 v10 加的），v2 沒有就從 top-level userInfo 補
+              name: pa.name || d.config.userInfo.name || '',
+              phone: pa.phone || d.config.userInfo.phone || '',
+              email: pa.email || d.config.userInfo.email || '',
+              invoiceTitle: pa.invoiceTitle || d.config.userInfo.invoiceTitle || '',
+              taxId: pa.taxId || d.config.userInfo.taxId || '',
+              address: pa.address || d.config.userInfo.address || '',
+              invoiceNote: pa.invoiceNote || d.config.userInfo.invoiceNote || '',
+              showPersonalInfo: pa.showPersonalInfo !== false,
+              showPersonalInfoOnTop: !!pa.showPersonalInfoOnTop,
+              showInvoiceInfo: !!pa.showInvoiceInfo,
+              // v3 存摺照片新欄位（base64 留著、fileId 等遷移後填）
+              bankbookImage: pa.bankbookImage || '',
+              bankbookImageFileId: pa.bankbookImageFileId || ''
+            }));
+          }
+          if (d.config.userInfo.selectedPaymentAccountId) {
+            config.userInfo.selectedPaymentAccountId = d.config.userInfo.selectedPaymentAccountId;
+          }
+        }
+        // 4c. 通知與提醒（欄位名 v2/v3 一樣，直接複製）
+        const reminderKeys = [
+          'unpaidRemindDays', 'dueSoonDays', 'monthEndReminderDay', 'backupRemindDays',
+          'enableOverdueAlert', 'enableDueSoonAlert', 'enableUnpaidLongAlert',
+          'enableMonthEndAlert', 'enableBillingDayAlert', 'enableSlowPayAlert',
+          'enableBackupAlert'
+        ];
+        reminderKeys.forEach(k => {
+          if (d.config[k] !== undefined) {
+            config[k] = d.config[k];
+            importedConfigCnt++;
+          }
+        });
+        // 4d. v3.11 收益目標（v2 沒有，但 v3 → v3 import 會有）
+        if (d.config.goals && typeof d.config.goals === 'object') {
+          config.goals = { monthly: +d.config.goals.monthly || 0, yearly: +d.config.goals.yearly || 0 };
+        }
+        // 4e. 行事曆 follow 模式 / reminderDays 等較不常用偏好
+        ['calReminderMode'].forEach(k => {
+          if (d.config[k] !== undefined) config[k] = d.config[k];
+        });
+        // 注意：v2 的 sheetConfig / calApiUrl / calApiToken 等 Apps Script 中介設定 → 故意不 import
+        //      v3 直接打 Drive / Calendar API，這些 v2 欄位無意義
+      }
+
+      // 5. 跑 schema migration（從匯入的舊 schema 升到 v13）
+      if (typeof runMigrations === 'function') runMigrations(state);
+      // 6. 雙保險：補 paymentAccounts 任何遺漏的欄位
+      if (typeof ensurePaymentAccounts === 'function') ensurePaymentAccounts();
+
+      // 7. 寫 localStorage + 推 Drive
+      saveConfigOnly();
+      save();
+      renderAll();
+
+      // 8. 觸發存摺照片 base64 → Drive 遷移（async fire-and-forget）
+      //    強制重置 throttle 立刻跑
+      if (typeof cloudMigrateBankbookImages === 'function' && typeof isCloudSignedIn === 'function' && isCloudSignedIn()) {
+        try { cloudMigrateBankbookImagesCheckedAt = 0; } catch (_) {}
+        cloudMigrateBankbookImages().catch(e => console.warn('[bankbook-migrate] failed after import:', e));
+      }
+
+      // 9. 操作日誌
+      logAction('data-import', {
+        sourceVersion: d.schemaVersion || '?',
+        clients: state.clients.length,
+        jobs: state.jobs.length,
+        paymentAccounts: config.userInfo?.paymentAccounts?.length || 0,
+        configFields: importedConfigCnt
+      });
+
+      // 10. 詳細 toast 摘要
+      const summary = [
+        `業主 ${state.clients.length} 位`,
+        `案件 ${state.jobs.length} 筆`,
+        config.userInfo?.paymentAccounts?.length ? `收款帳號 ${config.userInfo.paymentAccounts.length} 個` : '',
+        importedConfigCnt > 0 ? `${importedConfigCnt} 項偏好` : ''
+      ].filter(Boolean).join(' · ');
+      toast(`✓ 已匯入：${summary}`, 5000);
     } catch(err) {
       alert('檔案格式錯誤：' + err.message);
+      console.error('[importData] failed:', err);
     }
   };
   r.readAsText(f);
