@@ -1535,6 +1535,299 @@ input:focus, select:focus, textarea:focus {
   font-weight: 500;
 }
 
+/* ==================== v3.21.0：5 種視圖（緊湊 / 報表 / 卡片）==================== */
+
+/* view toggle 5 個 icon button 重整 */
+.jobs-view-toggle button {
+  padding: 6px 10px;
+  font-size: 16px;
+  min-width: 38px;
+}
+
+/* hover quick action — 共用樣式（緊湊 / 卡片 / 報表 都用） */
+.row-quick-actions {
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.row-compact:hover .row-quick-actions,
+.job-card-tile:hover .row-quick-actions,
+.row:hover .row-quick-actions {
+  opacity: 1;
+}
+.row-quick-actions button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.row-quick-actions button:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* ===== 緊湊模式 ===== */
+.row-compact {
+  display: grid;
+  grid-template-columns: 12px 50px 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  cursor: pointer;
+  position: relative;
+  touch-action: pan-y;
+  transition: background 0.1s;
+}
+.row-compact:hover {
+  background: var(--bg);
+}
+.row-compact-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.row-compact-date {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.row-compact-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.row-compact-client {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+.row-compact-amount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.row-compact-status {
+  font-size: 14px;
+  min-width: 24px;
+  text-align: center;
+}
+.row-compact.state-paid { background: linear-gradient(to right, transparent 95%, var(--success-light)); }
+.row-compact.state-done-unpaid { background: linear-gradient(to right, transparent 95%, var(--warning-light)); }
+.row-compact.state-cancelled { opacity: 0.5; }
+.row-compact .row-quick-actions {
+  margin-left: 4px;
+}
+
+/* ===== 報表模式 ===== */
+.jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.jobs-table thead th {
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.jobs-table thead th.t-amount {
+  text-align: right;
+}
+.jobs-table tbody tr {
+  cursor: pointer;
+  transition: background 0.1s;
+  touch-action: pan-y;
+  position: relative;
+}
+.jobs-table tbody tr:hover {
+  background: var(--bg);
+}
+.jobs-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.jobs-table .t-date {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.jobs-table .t-client {
+  white-space: nowrap;
+  cursor: pointer;
+}
+.jobs-table .t-client:hover {
+  color: var(--primary);
+}
+.jobs-table .t-title {
+  font-weight: 500;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jobs-table .t-tags {
+  white-space: nowrap;
+}
+.jobs-table .t-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+.jobs-table .t-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.jobs-table .t-actions button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  font-size: 13px;
+  margin-left: 2px;
+  color: var(--text);
+}
+.jobs-table .t-actions button:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.jobs-table tr.state-cancelled { opacity: 0.5; }
+/* 表格 status badge */
+.t-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.t-paid { background: var(--success-light); color: var(--success); }
+.t-unpaid { background: var(--warning-light); color: var(--warning); }
+.t-partial { background: var(--warning-light); color: var(--warning); }
+.t-pending { background: var(--bg); color: var(--muted); }
+.t-cancelled { background: var(--bg); color: var(--muted); }
+.t-tag {
+  display: inline-block;
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  margin-right: 2px;
+}
+.t-empty { color: var(--muted); font-size: 11px; }
+/* 窄螢幕：藏掉 標籤欄 */
+@media (max-width: 700px) {
+  .jobs-table .t-tags, .jobs-table th:nth-child(4) { display: none; }
+}
+@media (max-width: 540px) {
+  .jobs-table .t-actions, .jobs-table th:nth-child(7) { display: none; }
+}
+
+/* ===== 卡片視圖 ===== */
+.jobs-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.job-card-tile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  touch-action: pan-y;
+  position: relative;
+}
+.job-card-tile:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  border-color: var(--primary);
+}
+.job-card-tile.state-paid { border-left: 3px solid var(--success); }
+.job-card-tile.state-done-unpaid { border-left: 3px solid var(--warning); }
+.job-card-tile.state-pending { border-left: 3px solid var(--muted); }
+.job-card-tile.state-cancelled { opacity: 0.5; }
+.job-card-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.job-card-tile-date {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+.job-card-tile-title {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-card-tile-client {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-card-tile-tags {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.job-card-tile-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.job-card-tile-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
 /* ==================== 案件 row 滑動快速 action（v3.20.0）==================== */
 /* 只在 touch 裝置才有用，桌面點擊不受影響 */
 .row {

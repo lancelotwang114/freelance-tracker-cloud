@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.20.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.21.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2891,10 +2891,17 @@ let expandedClients = new Set();
 // v3.9.0：業主分頁的 detail view 當前看哪一位（null = 列表模式）
 let detailClientId = null;
 
-// v3.13.0：案件分頁視圖模式（list / board），從 localStorage 還原
+// v3.13.0：案件分頁視圖模式
+// v3.21.0 升級：comfort / compact / table / card / board，預設 table
 const JOBS_VIEW_KEY = 'cloud-ftJobsView_v1';
 let jobsView = (function () {
-  try { return localStorage.getItem(JOBS_VIEW_KEY) || 'list'; } catch (_) { return 'list'; }
+  try {
+    const v = localStorage.getItem(JOBS_VIEW_KEY);
+    if (!v) return 'table';  // v3.21.0：新使用者預設報表模式
+    // 舊 'list' → 'comfort'
+    if (v === 'list') return 'comfort';
+    return v;
+  } catch (_) { return 'table'; }
 })();
 
 // v3.18.0：列表分組模式（none / date / client / status / tag）
@@ -4703,29 +4710,44 @@ function renderJobs() {
        </div>`
     : '';
 
-  // v3.18.0：列表模式才支援分組；看板模式跳過分組
+  // v3.21.0：依視圖選對應 render
   let jobsHtml = '';
-  if (jobsView === 'list' && jobsGroupBy !== 'none') {
-    jobsHtml = renderJobsGrouped(jobs);
-  } else {
-    jobsHtml = jobs.map(jobRow).join('');
-  }
-
-  container.innerHTML = lockBanner +
-    `<div style="padding: 8px 0 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted);">
+  const summaryHtml = `<div style="padding: 8px 0 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted);">
        共 ${jobs.length} 筆${cancelledCount ? `（含 ${cancelledCount} 筆已取消）` : ''}　已收 <b style="color:var(--success)">${fmt(paidTotal)}</b>
        ${unpaidTotal ? `· 待收 <b style="color:var(--warning)">${fmt(unpaidTotal)}</b>` : ''}
        · 計入統計 ${fmt(total)}
-     </div>` +
-    jobsHtml;
+     </div>`;
 
-  // v3.13.0：依當前 view 切換顯示 list / board
+  if (jobsView === 'board') {
+    // 看板獨立 render
+    container.innerHTML = lockBanner + summaryHtml;
+    applyJobsView();
+    renderJobsBoard(jobs);
+    return;
+  }
+
+  if (jobsView === 'table') {
+    jobsHtml = renderJobsTable(jobs);
+  } else if (jobsView === 'card') {
+    jobsHtml = `<div class="jobs-card-grid">${jobs.map(j => jobRowCard(j)).join('')}</div>`;
+  } else if (jobsView === 'compact') {
+    // 緊湊列表，分組可用
+    if (jobsGroupBy !== 'none') jobsHtml = renderJobsGrouped(jobs, 'compact');
+    else jobsHtml = jobs.map(j => jobRowCompact(j)).join('');
+  } else {
+    // comfort（完整列表，現況），分組可用
+    if (jobsGroupBy !== 'none') jobsHtml = renderJobsGrouped(jobs);
+    else jobsHtml = jobs.map(jobRow).join('');
+  }
+
+  container.innerHTML = lockBanner + summaryHtml + jobsHtml;
   applyJobsView();
-  if (jobsView === 'board') renderJobsBoard(jobs);
 }
 
 // v3.18.0：依 jobsGroupBy 把 jobs 分組顯示（含 group header 跟小計）
-function renderJobsGrouped(jobs) {
+// v3.21.0：density 參數支援 'comfort' / 'compact'
+function renderJobsGrouped(jobs, density) {
+  const rowFn = density === 'compact' ? jobRowCompact : jobRow;
   const groups = new Map();
   jobs.forEach(j => {
     let key, label;
@@ -4776,7 +4798,7 @@ function renderJobsGrouped(jobs) {
         <span class="jobs-group-label">${escapeHtml(g.label)}</span>
         <span class="jobs-group-meta">${cnt} 筆 · ${fmt(sum)}</span>
       </div>
-      <div class="jobs-group-body">${g.items.map(jobRow).join('')}</div>
+      <div class="jobs-group-body">${g.items.map(rowFn).join('')}</div>
     </div>`;
   }).join('');
 }
@@ -4789,6 +4811,123 @@ function onJobsGroupChange() {
   renderJobs();
 }
 
+// ============== v3.21.0：緊湊 row（一行解決，密度提升 3 倍）==============
+function jobRowCompact(j) {
+  const c = getClient(j.clientId);
+  const color = c ? c.color : '#ccc';
+  const name = c ? c.name : '未指定';
+  const status = jobStatus(j);
+  const dateShort = (j.date || '').slice(5);  // 只顯示 MM-DD
+  // 狀態 icon
+  const statusIcon = j.cancelled ? '🚫' :
+                     (status === 'paid' ? '✅' :
+                     (status === 'done-unpaid' ? '$' :
+                     (status === 'partial' ? '🔶' :
+                     (status === 'prepaid' ? '✓ 待做' :
+                     '🔄'))));
+  return `<div class="row-compact state-${status}" data-job-id="${j.id}"
+              onclick="editJob('${j.id}')"
+              ontouchstart="onJobRowTouchStart(event, '${j.id}')"
+              ontouchmove="onJobRowTouchMove(event)"
+              ontouchend="onJobRowTouchEnd(event)"
+              ontouchcancel="onJobRowTouchCancel()">
+    <span class="row-compact-dot" style="background:${color}" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')" title="跳到該業主"></span>
+    <span class="row-compact-date">${dateShort || '-'}</span>
+    <span class="row-compact-title">${escapeHtml(j.title || '（無標題）')}</span>
+    <span class="row-compact-client">· ${escapeHtml(name)}</span>
+    <span class="row-compact-amount">${fmt(jobFinalAmount(j)).replace('NT$', '').trim()}</span>
+    <span class="row-compact-status">${statusIcon}</span>
+    <span class="row-quick-actions">
+      <button onclick="event.stopPropagation(); toggleDone('${j.id}')" title="標完成">✓</button>
+      <button onclick="event.stopPropagation(); togglePaid('${j.id}')" title="標收款">$</button>
+    </span>
+  </div>`;
+}
+
+// ============== v3.21.0：報表模式（spreadsheet 風）==============
+function renderJobsTable(jobs) {
+  if (!jobs.length) return '';
+  const rows = jobs.map(j => {
+    const c = getClient(j.clientId);
+    const color = c ? c.color : '#ccc';
+    const name = c ? c.name : '未指定';
+    const status = jobStatus(j);
+    const statusBadge = j.cancelled ? '<span class="t-badge t-cancelled">🚫 已取消</span>' :
+                        (status === 'paid' ? '<span class="t-badge t-paid">✅ 已收</span>' :
+                        (status === 'done-unpaid' ? '<span class="t-badge t-unpaid">$ 待收</span>' :
+                        (status === 'partial' ? '<span class="t-badge t-partial">🔶 部分</span>' :
+                        (status === 'prepaid' ? '<span class="t-badge t-paid">✓ 待做</span>' :
+                        '<span class="t-badge t-pending">🔄 進行中</span>'))));
+    const tags = (Array.isArray(j.tags) && j.tags.length ? j.tags : (j.tag ? [j.tag] : []));
+    const tagsHtml = tags.length ? tags.map(t => `<span class="t-tag">${escapeHtml(t)}</span>`).join('') : '<span class="t-empty">—</span>';
+    return `<tr data-job-id="${j.id}"
+              onclick="editJob('${j.id}')"
+              ontouchstart="onJobRowTouchStart(event, '${j.id}')"
+              ontouchmove="onJobRowTouchMove(event)"
+              ontouchend="onJobRowTouchEnd(event)"
+              ontouchcancel="onJobRowTouchCancel()">
+      <td class="t-date">${j.date || '-'}</td>
+      <td class="t-client" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')">
+        <span class="row-compact-dot" style="background:${color}; vertical-align:middle;"></span>
+        ${escapeHtml(name)}
+      </td>
+      <td class="t-title">${escapeHtml(j.title || '（無標題）')}</td>
+      <td class="t-tags">${tagsHtml}</td>
+      <td class="t-amount">${fmt(jobFinalAmount(j))}</td>
+      <td class="t-status">${statusBadge}</td>
+      <td class="t-actions" onclick="event.stopPropagation();">
+        <button onclick="toggleDone('${j.id}')" title="標完成">✓</button>
+        <button onclick="togglePaid('${j.id}')" title="標收款">$</button>
+        <button onclick="editJob('${j.id}')" title="編輯">✏️</button>
+      </td>
+    </tr>`;
+  }).join('');
+  return `<table class="jobs-table">
+    <thead>
+      <tr>
+        <th>日期</th>
+        <th>業主</th>
+        <th>標題</th>
+        <th>標籤</th>
+        <th class="t-amount">金額</th>
+        <th>狀態</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ============== v3.21.0：卡片視圖（grid 排列）==============
+function jobRowCard(j) {
+  const c = getClient(j.clientId);
+  const color = c ? c.color : '#ccc';
+  const name = c ? c.name : '未指定';
+  const status = jobStatus(j);
+  const tags = (Array.isArray(j.tags) && j.tags.length ? j.tags : (j.tag ? [j.tag] : []));
+  return `<div class="job-card-tile state-${status}" data-job-id="${j.id}"
+              onclick="editJob('${j.id}')"
+              ontouchstart="onJobRowTouchStart(event, '${j.id}')"
+              ontouchmove="onJobRowTouchMove(event)"
+              ontouchend="onJobRowTouchEnd(event)"
+              ontouchcancel="onJobRowTouchCancel()">
+    <div class="job-card-tile-head">
+      <span class="row-compact-dot" style="background:${color}"></span>
+      <span class="job-card-tile-date">${j.date || '-'}</span>
+    </div>
+    <div class="job-card-tile-title">${escapeHtml(j.title || '（無標題）')}</div>
+    <div class="job-card-tile-client">${escapeHtml(name)}</div>
+    ${tags.length ? `<div class="job-card-tile-tags">${tags.map(t => `<span class="tag-chip-mini">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+    <div class="job-card-tile-bottom">
+      <span class="job-card-tile-amount">${fmt(jobFinalAmount(j))}</span>
+      <span class="row-quick-actions">
+        <button onclick="event.stopPropagation(); toggleDone('${j.id}')" title="標完成">✓</button>
+        <button onclick="event.stopPropagation(); togglePaid('${j.id}')" title="標收款">$</button>
+      </span>
+    </div>
+  </div>`;
+}
+
 // ============== v3.13.0：案件分頁 視圖切換 + 看板 ==============
 function setJobsView(view) {
   jobsView = view;
@@ -4797,18 +4936,25 @@ function setJobsView(view) {
   document.querySelectorAll('#jobs-view-toggle button').forEach(b => {
     b.classList.toggle('active', b.dataset.view === view);
   });
-  applyJobsView();
-  if (view === 'board') renderJobs();  // 重 render 才會觸發 renderJobsBoard
+  renderJobs();
 }
 
 function applyJobsView() {
   const list = document.getElementById('jobs-list');
   const board = document.getElementById('jobs-board');
-  if (list) list.classList.toggle('hidden', jobsView !== 'list');
-  if (board) board.classList.toggle('hidden', jobsView !== 'board');
-  // 切到看板時，批次按鈕暫時隱藏（看板用拖曳取代批次）
+  // 看板模式 → 顯示 #jobs-board，其他都用 #jobs-list
+  const isBoard = jobsView === 'board';
+  if (list) list.classList.toggle('hidden', isBoard);
+  if (board) board.classList.toggle('hidden', !isBoard);
+  // 看板用拖曳取代批次、分組僅 list-like view 適用
   const bulkBtn = document.getElementById('bulk-toggle');
-  if (bulkBtn) bulkBtn.style.display = jobsView === 'board' ? 'none' : '';
+  if (bulkBtn) bulkBtn.style.display = isBoard ? 'none' : '';
+  const groupCtl = document.getElementById('jobs-group-control');
+  if (groupCtl) {
+    // 只在 comfort / compact 顯示分組
+    const supportsGroup = (jobsView === 'comfort' || jobsView === 'compact');
+    groupCtl.style.display = supportsGroup ? '' : 'none';
+  }
 }
 
 // 看板的 4 個 column：用 jobInvoiceCategory 分（與請款單統計一致的分類）
@@ -10948,6 +11094,7 @@ renderActiveTimerWidget();
 
 // v3.13.0：套用案件分頁的視圖模式（依 localStorage）
 // v3.18.0：分組 select 也還原
+// v3.21.0：5 種視圖
 setTimeout(() => {
   const btns = document.querySelectorAll('#jobs-view-toggle button');
   btns.forEach(b => b.classList.toggle('active', b.dataset.view === jobsView));

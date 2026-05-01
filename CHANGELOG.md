@@ -1,5 +1,57 @@
 ﻿# 版本更新歷史
 
+## v3.21.0 — 5 種視圖切換（緊湊 / 報表 / 卡片 / 看板 / 完整）（2026-05-01）
+
+> 案件分頁從 2 種視圖（列表/看板）升級成 5 種，預設改報表模式。每種視圖都共享：點業主色塊跳業主 detail、hover 出現快速 action（✓/$/編輯）、手機滑動標完成/收款。
+
+### 5 種視圖
+- 📋 **完整**（comfort，舊 'list'）：每筆 ~80px，含完整 metadata
+- 📑 **緊湊**（compact，新）：每筆 ~30px 一行解決，密度提升 3 倍
+- 📊 **報表**（table，新，**v3.21.0 新預設**）：spreadsheet 表格，含 sticky header
+- 🎴 **卡片**（card，新）：grid 排列，響應式
+- 🗂️ **看板**（board）：4 column drag-drop（不變）
+
+### 視圖切換 UI
+- 從文字 toggle button 改成 5 個 icon button（📋📑📊🎴🗂️）
+- 每個 button 有 title tooltip 說明
+- localStorage `cloud-ftJobsView_v1` 持久化（舊 'list' 自動轉成 'comfort'）
+
+### 各視圖共享的互動
+- **點 row** → 開啟編輯 modal
+- **點業主色塊** → 跳業主 detail（v3.9.0 整合）
+- **hover** → 右側出現 quick action ✓ 完成 / $ 收款 / ✏️ 編輯
+- **手機滑動**（v3.20.0 整合）：左滑完成、右滑收款
+- **state 顏色** → row 邊框 / 背景依狀態（綠/黃/灰）
+
+### 報表模式特色
+- `<table>` 結構，欄位真對齊
+- thead sticky top（滾動時表頭固定）
+- 7 欄：日期 / 業主 / 標題 / 標籤 / 金額 / 狀態 / 動作
+- 響應式：≤700px 藏標籤欄、≤540px 藏動作欄
+- status badge 風格（成 / 黃 / 灰 pill）
+
+### 緊湊模式特色
+- grid 結構：`12px dot | 50px date | flex title | client | amount | status`
+- 每筆只 6-8px padding，月底對帳超流暢
+- 配合 v3.18 分組視圖：依日期/業主/狀態/標籤 group header + sticky
+
+### 卡片視圖特色
+- `repeat(auto-fill, minmax(220px, 1fr))` grid
+- 寬螢幕 4-5 個一排、手機 1-2 個
+- 卡片含：業主色塊 + 日期 + 標題 + 業主名 + tags + 金額 + quick action
+
+### 分組支援
+- 完整 / 緊湊：兩種視圖支援分組（依日期/業主/狀態/標籤）
+- 報表 / 卡片：暫不支援（避免 spreadsheet 拆開來變奇怪）
+- 看板：本身就是分組（依狀態 column），不需另外分組
+- 切到不支援分組的視圖時自動隱藏分組選單
+
+### Bump
+- APP_VERSION → `v3.21.0`
+- 預設 view → 'table'（新使用者 / localStorage 沒值）
+
+---
+
 ## v3.20.0 — 手機滑動快速 action（2026-05-01）
 - 案件 row 左滑 → 標完成；右滑 → 標收款（自動補餘額 payment）
 - 純 native touch event，沒加任何依賴
