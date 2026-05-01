@@ -6,7 +6,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.10.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-01-v3.11.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2865,6 +2865,12 @@ let config = {
   lastModifiedAt: null,    // 最後一次資料變動時間，用於匯入差異比對
   backupRemindDays: 14,
 
+  // v3.11.0：收益目標（月 / 年）
+  goals: {
+    monthly: 0,   // 月目標金額（NT$，0 = 未設定）
+    yearly: 0     // 年目標金額（NT$，0 = 未設定）
+  },
+
   // 初次使用引導
   onboardingDone: false
 };
@@ -5194,6 +5200,249 @@ function renderRevenue() {
   renderHourlyTrend();
   // v2.9: 收款時間軸
   renderPaymentTimeline();
+  // v3.11.0: 達成率 + 智慧分析
+  renderRevenueGoals();
+  renderRevenueInsights();
+}
+
+// ============== v3.11.0：達成率 + 預測 + 智慧分析 ==============
+function onGoalChange(period, value) {
+  const v = Math.max(0, Math.round(+value || 0));
+  config.goals = config.goals || { monthly: 0, yearly: 0 };
+  if (period === 'monthly') config.goals.monthly = v;
+  else if (period === 'yearly') config.goals.yearly = v;
+  saveConfigOnly();
+  renderRevenueGoals();
+  toast(`✓ ${period === 'monthly' ? '本月' : '本年'}目標：${v ? fmt(v) : '已清除'}`, 2500);
+}
+
+function renderRevenueGoals() {
+  const goals = (config.goals || { monthly: 0, yearly: 0 });
+  // 還原 input 值
+  const mInp = document.getElementById('goal-monthly-input');
+  const yInp = document.getElementById('goal-yearly-input');
+  if (mInp && document.activeElement !== mInp) mInp.value = goals.monthly || '';
+  if (yInp && document.activeElement !== yInp) yInp.value = goals.yearly || '';
+
+  // 算本月已收（payment.date 在本月的加總）
+  const m = thisMonth();
+  const monthPaid = activeJobs().reduce((s, j) => s + (j.payments || []).filter(p => getMonth(p.date) === m).reduce((ss, p) => ss + (+p.amount || 0), 0), 0);
+
+  // 算本年已收
+  const yr = String(new Date().getFullYear());
+  const yearPaid = activeJobs().reduce((s, j) => s + (j.payments || []).filter(p => (p.date || '').startsWith(yr)).reduce((ss, p) => ss + (+p.amount || 0), 0), 0);
+
+  // 月度目標 + 進度條
+  renderGoalProgress('monthly', monthPaid, goals.monthly, 'month');
+  // 年度目標 + 進度條
+  renderGoalProgress('yearly', yearPaid, goals.yearly, 'year');
+}
+
+function renderGoalProgress(kind, current, target, scale) {
+  const curEl = document.getElementById(`goal-${kind}-current`);
+  const pctEl = document.getElementById(`goal-${kind}-pct`);
+  const fillEl = document.getElementById(`goal-${kind}-fill`);
+  const fcEl = document.getElementById(`goal-${kind}-forecast`);
+  if (curEl) curEl.textContent = `已收 ${fmt(current)}${target > 0 ? ' / ' + fmt(target) : ''}`;
+  if (target <= 0) {
+    if (pctEl) pctEl.textContent = '尚未設定目標';
+    if (pctEl) pctEl.style.color = 'var(--muted)';
+    if (fillEl) fillEl.style.width = '0%';
+    if (fcEl) fcEl.innerHTML = '👉 點上方輸入框填入目標金額即可看達成率與預估';
+    return;
+  }
+  const pct = Math.round(current / target * 100);
+  if (pctEl) {
+    pctEl.textContent = pct + '%';
+    pctEl.style.color = pct >= 100 ? 'var(--success)' : (pct >= 70 ? 'var(--primary)' : 'var(--warning)');
+  }
+  if (fillEl) {
+    fillEl.style.width = Math.min(100, pct) + '%';
+    fillEl.style.background = pct >= 100 ? 'var(--success)' : (pct >= 70 ? 'var(--primary)' : 'var(--warning)');
+  }
+
+  // 線性預測：依「目前已過天數 / 期間總天數」推估期末值
+  const now = new Date();
+  let dayOfPeriod, totalDaysOfPeriod;
+  if (scale === 'month') {
+    dayOfPeriod = now.getDate();
+    totalDaysOfPeriod = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  } else {
+    // year
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    dayOfPeriod = Math.floor((now - startOfYear) / 86400000) + 1;
+    const endOfYear = new Date(now.getFullYear() + 1, 0, 1);
+    totalDaysOfPeriod = Math.floor((endOfYear - startOfYear) / 86400000);
+  }
+  const projected = Math.round(current / dayOfPeriod * totalDaysOfPeriod);
+  const diff = projected - target;
+  let fcHtml = '';
+  if (current === 0) {
+    fcHtml = `📅 已過 ${dayOfPeriod}/${totalDaysOfPeriod} 天，還沒收到任何款項`;
+  } else if (diff >= 0) {
+    fcHtml = `📈 依目前進度預估期末可達 <b>${fmt(projected)}</b>（<span style="color: var(--success);">超出 ${fmt(diff)}</span>）`;
+  } else {
+    fcHtml = `📈 依目前進度預估期末可達 <b>${fmt(projected)}</b>（<span style="color: var(--warning);">差 ${fmt(-diff)}</span>）`;
+  }
+  if (fcEl) fcEl.innerHTML = fcHtml;
+}
+
+function renderRevenueInsights() {
+  const box = document.getElementById('rev-insights');
+  if (!box) return;
+  const insights = [];
+  const m = thisMonth();
+  const yr = String(new Date().getFullYear());
+  const active = activeJobs();
+
+  // 1. 業主集中度警告（本月某業主佔 >= 50% / 30%）
+  const monthByClient = {};
+  let monthTotal = 0;
+  active.forEach(j => {
+    (j.payments || []).forEach(p => {
+      if (getMonth(p.date) !== m) return;
+      const v = +p.amount || 0;
+      monthByClient[j.clientId] = (monthByClient[j.clientId] || 0) + v;
+      monthTotal += v;
+    });
+  });
+  if (monthTotal > 0) {
+    const top = Object.entries(monthByClient).sort((a, b) => b[1] - a[1])[0];
+    if (top) {
+      const c = state.clients.find(x => x.id === top[0]);
+      const pct = Math.round(top[1] / monthTotal * 100);
+      if (pct >= 50) {
+        insights.push({
+          kind: 'warn',
+          icon: '⚠️',
+          title: `${c ? c.name : '某業主'}佔本月收入 ${pct}%`,
+          desc: '收入過度集中於單一業主，建議擴展客源以降低風險'
+        });
+      } else if (pct >= 35) {
+        insights.push({
+          kind: 'info',
+          icon: '📊',
+          title: `${c ? c.name : '某業主'}是本月主力業主（${pct}%）`,
+          desc: ''
+        });
+      }
+    }
+  }
+
+  // 2. 拖款指數：本月平均收款週期 vs 過去 3 個月平均
+  const cyclesAll = [];
+  active.forEach(j => {
+    if (!j.doneAt || !(j.payments || []).length) return;
+    const fp = [...j.payments].filter(p => p.date).sort((a, b) => (a.date || '').localeCompare(b.date || ''))[0];
+    if (!fp) return;
+    const days = daysBetween(j.doneAt, fp.date);
+    if (days < 0 || days > 365) return;
+    cyclesAll.push({ payDate: fp.date, days });
+  });
+  if (cyclesAll.length >= 3) {
+    const recentCycles = cyclesAll.filter(c => getMonth(c.payDate) === m).map(c => c.days);
+    const last3MonthsCycles = cyclesAll.filter(c => {
+      const d = new Date(c.payDate);
+      const diff = (new Date() - d) / 86400000;
+      return diff >= 30 && diff <= 120;
+    }).map(c => c.days);
+    if (recentCycles.length >= 1 && last3MonthsCycles.length >= 2) {
+      const avgRecent = Math.round(recentCycles.reduce((a, b) => a + b, 0) / recentCycles.length);
+      const avgPast = Math.round(last3MonthsCycles.reduce((a, b) => a + b, 0) / last3MonthsCycles.length);
+      const diff = avgRecent - avgPast;
+      if (diff >= 7) {
+        insights.push({
+          kind: 'warn',
+          icon: '🐢',
+          title: `本月平均收款 ${avgRecent} 天，比過去 3 個月（${avgPast} 天）慢 ${diff} 天`,
+          desc: '可能該主動催款'
+        });
+      } else if (diff <= -5) {
+        insights.push({
+          kind: 'good',
+          icon: '⚡',
+          title: `本月平均收款 ${avgRecent} 天，比過去 3 個月快 ${-diff} 天`,
+          desc: '收款狀況改善'
+        });
+      }
+    }
+  }
+
+  // 3. Churn 警告：找出曾經合作但 60-180 天沒新案的業主
+  const today = todayStr();
+  const churnList = [];
+  state.clients.forEach(c => {
+    const myJobs = active.filter(j => j.clientId === c.id);
+    if (myJobs.length === 0) return;
+    const lastJobDate = myJobs.map(j => j.date || '').filter(Boolean).sort().reverse()[0];
+    if (!lastJobDate) return;
+    const days = daysBetween(lastJobDate, today);
+    // 60-180 天 = 高風險區（180+ 視為已流失，可能不必再追）
+    if (days >= 60 && days <= 180) churnList.push({ client: c, days });
+  });
+  if (churnList.length) {
+    churnList.sort((a, b) => b.days - a.days);
+    const top3 = churnList.slice(0, 3);
+    const sample = top3.map(x => `${x.client.name}（${x.days} 天）`).join('、');
+    insights.push({
+      kind: 'info',
+      icon: '👋',
+      title: `${churnList.length} 位業主超過 60 天沒下單`,
+      desc: sample + (churnList.length > 3 ? `…等 ${churnList.length - 3} 位` : '') + '。可能該主動聯繫'
+    });
+  }
+
+  // 4. 待收餘額警告
+  const allUnpaid = active.filter(j => j.done).reduce((s, j) => s + jobUnpaidAmount(j), 0);
+  if (allUnpaid >= 100000) {
+    insights.push({
+      kind: 'warn',
+      icon: '💰',
+      title: `總待收金額 ${fmt(allUnpaid)}`,
+      desc: '建議集中對所有未收款業主發請款單'
+    });
+  }
+
+  // 5. 年度集中度（單一業主佔今年總收入 >=50%）
+  const yearByClient = {};
+  let yearTotal = 0;
+  active.forEach(j => {
+    (j.payments || []).forEach(p => {
+      if (!(p.date || '').startsWith(yr)) return;
+      const v = +p.amount || 0;
+      yearByClient[j.clientId] = (yearByClient[j.clientId] || 0) + v;
+      yearTotal += v;
+    });
+  });
+  if (yearTotal > 0) {
+    const yearTop = Object.entries(yearByClient).sort((a, b) => b[1] - a[1])[0];
+    if (yearTop) {
+      const c = state.clients.find(x => x.id === yearTop[0]);
+      const pct = Math.round(yearTop[1] / yearTotal * 100);
+      if (pct >= 50) {
+        insights.push({
+          kind: 'warn',
+          icon: '🎯',
+          title: `${c ? c.name : '某業主'}佔年度收入 ${pct}%`,
+          desc: '收入過度仰賴單一業主，建議拓展更多客戶降低風險'
+        });
+      }
+    }
+  }
+
+  if (!insights.length) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<h3 style="font-size: 14px; margin: 0 0 8px 0;">💡 智慧分析</h3>'
+    + insights.map(i => `
+      <div class="client-insight client-insight--${i.kind}">
+        <div class="client-insight-icon">${i.icon}</div>
+        <div class="client-insight-body">
+          <div class="client-insight-title">${escapeHtml(i.title)}</div>
+          ${i.desc ? `<div class="client-insight-desc">${escapeHtml(i.desc)}</div>` : ''}
+        </div>
+      </div>`).join('');
 }
 
 function fillEmptyBuckets(keys, mode) {

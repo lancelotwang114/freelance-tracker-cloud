@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-01-v3.10.0">
+<meta name="app-version" content="2026-05-01-v3.11.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -240,6 +240,47 @@
         </div>
 
         <div class="summary-grid" id="rev-summary"></div>
+      </div>
+
+      <!-- v3.11.0：達成率 + 智慧分析 -->
+      <div class="card" id="rev-goals-card">
+        <h3 style="font-size: 14px; margin-bottom: 12px;">🎯 達成目標</h3>
+        <div class="goals-grid">
+          <!-- 月目標 -->
+          <div class="goal-block">
+            <div class="goal-block-head">
+              <span class="goal-block-label">本月目標</span>
+              <input type="number" id="goal-monthly-input" min="0" step="1000" placeholder="未設定" onchange="onGoalChange('monthly', this.value)" class="goal-input">
+            </div>
+            <div class="goal-progress-row">
+              <span id="goal-monthly-current">NT$ 0</span>
+              <span class="goal-progress-pct" id="goal-monthly-pct">—</span>
+            </div>
+            <div class="goal-progress-bar">
+              <div class="goal-progress-fill" id="goal-monthly-fill" style="width: 0%;"></div>
+            </div>
+            <div class="goal-forecast" id="goal-monthly-forecast"></div>
+          </div>
+
+          <!-- 年目標 -->
+          <div class="goal-block">
+            <div class="goal-block-head">
+              <span class="goal-block-label">本年目標</span>
+              <input type="number" id="goal-yearly-input" min="0" step="10000" placeholder="未設定" onchange="onGoalChange('yearly', this.value)" class="goal-input">
+            </div>
+            <div class="goal-progress-row">
+              <span id="goal-yearly-current">NT$ 0</span>
+              <span class="goal-progress-pct" id="goal-yearly-pct">—</span>
+            </div>
+            <div class="goal-progress-bar">
+              <div class="goal-progress-fill" id="goal-yearly-fill" style="width: 0%;"></div>
+            </div>
+            <div class="goal-forecast" id="goal-yearly-forecast"></div>
+          </div>
+        </div>
+
+        <!-- 智慧分析 -->
+        <div id="rev-insights" style="margin-top: 16px;"></div>
       </div>
 
       <div class="card">
