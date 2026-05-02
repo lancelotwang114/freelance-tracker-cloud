@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-02-v3.22.7';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-02-v3.22.8';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6202,6 +6202,28 @@ function renderRevenue() {
   renderRevenueInsights();
 }
 
+// ============== v3.22.8：顯示偏好（設定頁 toggle）==============
+// 把 #pref-show-goals checkbox 的當前狀態同步到畫面（app 啟動時呼叫一次）
+function loadDisplayPrefUI() {
+  const cb = document.getElementById('pref-show-goals');
+  if (cb) cb.checked = !!config.showGoalsCard;
+}
+
+// 設定頁 toggle 的 onchange handler
+function onTogglePrefShowGoals(checked) {
+  config.showGoalsCard = !!checked;
+  saveConfigOnly();
+  // 立刻反映到收益頁（如果使用者目前在那）
+  if (currentTab === 'revenue') {
+    renderRevenueGoals();
+    renderRevenueInsights();
+  }
+  // 直接操作 DOM 確保即使在其他分頁也立即生效
+  const card = document.getElementById('rev-goals-card');
+  if (card) card.classList.toggle('hidden', !checked);
+  toast(checked ? '✓ 已顯示收益目標卡片' : '✓ 已隱藏收益目標卡片', 2000);
+}
+
 // ============== v3.11.0：達成率 + 預測 + 智慧分析 ==============
 function onGoalChange(period, value) {
   const v = Math.max(0, Math.round(+value || 0));
@@ -6214,6 +6236,12 @@ function onGoalChange(period, value) {
 }
 
 function renderRevenueGoals() {
+  // v3.22.8：依 config.showGoalsCard 決定要不要顯示整張 card（預設 false 隱藏）
+  const card = document.getElementById('rev-goals-card');
+  const show = !!config.showGoalsCard;
+  if (card) card.classList.toggle('hidden', !show);
+  if (!show) return;
+
   const goals = (config.goals || { monthly: 0, yearly: 0 });
   // 還原 input 值
   const mInp = document.getElementById('goal-monthly-input');
@@ -6287,6 +6315,8 @@ function renderGoalProgress(kind, current, target, scale) {
 function renderRevenueInsights() {
   const box = document.getElementById('rev-insights');
   if (!box) return;
+  // v3.22.8：跟 #rev-goals-card 同卡片，被 hidden 時就不需要算了
+  if (!config.showGoalsCard) { box.innerHTML = ''; return; }
   const insights = [];
   const m = thisMonth();
   const yr = String(new Date().getFullYear());
@@ -6546,9 +6576,9 @@ function drawRevChart(data) {
     return;
   }
 
-  // v3.5.0：月度模式 → 反轉順序（最近月在最左），年度模式維持舊→新
-  const isMonthReversed = revenueState.mode === 'month';
-  const displayData = isMonthReversed ? [...data].slice().reverse() : data;
+  // v3.22.8：統一時間順序（最舊在左、最新在右），月度 / 年度都一致
+  // 之前 v3.5.0 月度反轉成「最近月在左」，user 後來覺得不直覺改回來
+  const displayData = data;
 
   // v3.5.0：先以時間順序（舊→新）算 cumulative，之後依顯示位置 mapping
   // chronoCum[i] = data[0..i] 的累計 paid+unpaid（i 用原 data 索引）
@@ -6614,12 +6644,10 @@ function drawRevChart(data) {
     }
   });
 
-  // 累計線：用 displayData 順序映射 chronoCum
-  // displayData[i] 對應 data[origIdx]，origIdx = isMonthReversed ? data.length-1-i : i
+  // v3.22.8：displayData 即 data（時間順序，舊→新），cumPoints 直接 1:1 對應
   const cumPoints = displayData.map((d, i) => {
-    const origIdx = isMonthReversed ? data.length - 1 - i : i;
     const cx = margin.left + i * barGroupW + barGroupW/2;
-    return { x: cx, value: chronoCum[origIdx] };
+    return { x: cx, value: chronoCum[i] };
   });
   const cumMax = Math.max(...cumPoints.map(p => p.value), 1);
   cumPoints.forEach(p => {
@@ -11635,6 +11663,7 @@ function setupAutoSave() {
 load();
 loadActionLog();   // v2.9.5
 loadReminderConfigUI();   // v2.7.9: 提醒設定（取代舊的單欄）
+loadDisplayPrefUI();      // v3.22.8: 顯示偏好（隱藏目標卡片 toggle）
 // v3.3.0：移除 loadUserInfoUI（settings 「我的收款資訊」card 已搬到請款單分頁；renderInvoice 會處理收款帳號 picker）
 // v3.0.0-beta.1：移除 loadSheetConfigUI / loadCalendarConfigUI / updateSheetSyncBadge（對應 hidden 卡片，不再需要 init UI）
 loadInvoiceStatusUI();   // v2.10.4: 請款單狀態篩選

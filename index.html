@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-02-v3.22.7">
+<meta name="app-version" content="2026-05-02-v3.22.8">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -683,6 +683,25 @@
       </div>
       <div class="card-body">
         <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('invoice')">前往請款單分頁編輯</button>
+      </div>
+    </div>
+
+    <!-- v3.22.8：顯示偏好（加新功能 toggle 都放這） -->
+    <div class="card collapsible collapsed" id="card-display-pref">
+      <div class="card-head" onclick="toggleCard('card-display-pref')">
+        <h3>🎨 顯示偏好</h3>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
+          <input type="checkbox" id="pref-show-goals" onchange="onTogglePrefShowGoals(this.checked)" style="margin-top: 3px;">
+          <div>
+            <div style="font-weight: 500;">📊 顯示收益目標達成率卡片</div>
+            <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
+              在「收益 → 總覽」分頁顯示「達成目標」+「智慧分析」。預設關閉，要設目標時再開。
+            </div>
+          </div>
+        </label>
       </div>
     </div>
 
