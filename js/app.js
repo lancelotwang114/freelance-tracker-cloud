@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-01-v3.22.5';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-02-v3.22.6';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6075,23 +6075,20 @@ function renderRevenue() {
   let jobs = activeJobs();
   if (revenueState.clientId !== 'all') jobs = jobs.filter(j => j.clientId === revenueState.clientId);
 
-  // v2.8.1: 收益依「payment 日期」歸月（每筆 payment 各自歸到實際入帳月）
-  // 待收/進行中：用案件的 j.date 歸月（因為還沒收所以沒有 payment date）
+  // v3.22.6：改成 job-centric — 一律按案件所屬月（jobBelongMonth = endDate || date）歸月
+  // 「選 4 月就只看 4 月的案子」：4 月案件的已收 / 待收 / 進行中都歸 4 月，不論 payment 日期落哪
+  // 這跟下方「月度業主彙整」(jobBelongMonth) 對齊，不再出現兩個 widget 數字打架
   const buckets = {};
   const ensureKey = (k) => { if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0 }; };
 
   jobs.forEach(j => {
-    // 各筆 payment 歸入該 payment 的月份/年份
-    (j.payments || []).forEach(p => {
-      if (!p.date) return;
-      const k = revenueState.mode === 'year' ? p.date.slice(0,4) : p.date.slice(0,7);
-      ensureKey(k);
-      buckets[k].paid += (+p.amount || 0);
-    });
-    // 未收的部分（unpaid/pending）依案件 j.date 歸月
-    if (!j.date) return;
-    const key = revenueState.mode === 'year' ? j.date.slice(0,4) : j.date.slice(0,7);
+    const belongDate = j.endDate || j.date;
+    if (!belongDate) return;
+    const key = revenueState.mode === 'year' ? belongDate.slice(0,4) : belongDate.slice(0,7);
     ensureKey(key);
+    // 已收：該案件所有 payment 加總（不論 payment.date）
+    buckets[key].paid += jobPaidTotal(j);
+    // 待收 / 進行中：未收餘額（已扣折扣 + 已收 + 呆帳）
     const unpaidAmt = jobUnpaidAmount(j);
     if (unpaidAmt > 0) {
       if (j.done) buckets[key].unpaid += unpaidAmt;
@@ -6834,19 +6831,22 @@ function renderMonthlyReport() {
   }
 
   // 依業主彙整
+  // v3.22.6：partial paid 也算進「已收」，不再用 j.paid boolean 一刀切
   const byClient = {};
   monthJobs.forEach(j => {
     const c = getClient(j.clientId);
     const cid = j.clientId || 'unknown';
+    const rate = (c && c.commissionRate) || 0;
+    const ratio = 1 - rate / 100;  // 分潤後比例
     if (!byClient[cid]) {
       byClient[cid] = {
         client: c, count: 0,
         gross: 0,        // 案件總額（未扣分潤）
         commission: 0,   // 給介紹人的部分
-        net: 0,          // 實收
-        paidNet: 0,      // 已收款（實收）
-        unpaidNet: 0,    // 待收款（實收）
-        pendingNet: 0    // 進行中（實收）
+        net: 0,          // 實收（折扣後 × 分潤後）
+        paidNet: 0,      // 已收款（含 partial）
+        unpaidNet: 0,    // 待收款（已完成但還沒收齊的部分）
+        pendingNet: 0    // 進行中（未完成案件的待收）
       };
     }
     const r = byClient[cid];
@@ -6854,9 +6854,12 @@ function renderMonthlyReport() {
     r.gross += +j.amount || 0;
     r.commission += jobCommission(j);
     r.net += jobNetAmount(j);
-    if (j.paid) r.paidNet += jobNetAmount(j);
-    else if (j.done) r.unpaidNet += jobNetAmount(j);
-    else r.pendingNet += jobNetAmount(j);
+    // 已收：該案件所有 payment 加總 × 分潤比例（partial 也算）
+    r.paidNet += Math.round(jobPaidTotal(j) * ratio);
+    // 剩餘部分按案件狀態分到 待收 / 進行中
+    const unpaidNetAmt = Math.round(jobUnpaidAmount(j) * ratio);
+    if (j.done) r.unpaidNet += unpaidNetAmt;
+    else r.pendingNet += unpaidNetAmt;
   });
 
   const rows = Object.values(byClient).sort((a,b) => b.net - a.net);

@@ -1,5 +1,34 @@
 ﻿# 版本更新歷史
 
+## v3.22.6 — 收益頁兩個 widget 統一改 job-centric（2026-05-02）
+
+> 「選 4 月就只看 4 月案子」— 期間總收入 / 已收 / 待收 / 月度業主彙整全部按**案件所屬月** (`jobBelongMonth`) 歸類，不再用 payment 日期歸月。
+
+### 修了什麼
+
+**1. renderRevenue 的 buckets 邏輯**（line 6078-6093）
+- 改前：payment 用 `payment.date` 歸月、unpaid/pending 用 `j.date` 歸月（混合邏輯）
+- 改後：通通用 `jobBelongMonth(j)` (`endDate || date`)
+- 已收：該案件所有 payment 加總（不論 payment.date）
+- 待收 / 進行中：未收餘額（已扣折扣 + 已收 + 呆帳）
+
+**2. renderMonthlyReport 月度業主彙整**（line 6857-6862）
+- 改前：用 `j.paid` boolean 一刀切，partial paid 整筆被丟進「待收」
+- 改後：partial 也算進「已收」(`jobPaidTotal × ratio`)，剩餘按 `j.done` 分到 待收 / 進行中
+
+### 影響
+- 4 月案件如果還沒收 partial → 月度彙整「已收 NT$0」+ 期間總收入「已收 NT$0」（一致）
+- 4 月案件已收訂金 9000，待收 9000 → 兩邊都顯示「已收 NT$9,000、待收 NT$9,000」（一致）
+- 3 月案件 4 月才收尾款 → 不會出現在 4 月「已收」（屬於 3 月案件）
+
+### 兩 widget 對齊驗證
+- 期間總收入 = 月度業主彙整 (paidNet + unpaidNet + pendingNet)
+- 已收款 = 月度業主彙整「已收」合計
+- 待收款 = 月度業主彙整「待收」合計
+- 進行中（沒在期間總收入顯示，但內部一致）
+
+---
+
 ## v3.22.5 — 折扣全面巡修：8 大類算錯點全部對齊（2026-05-01）
 
 > 全面審視 `+j.amount` 的所有 callsite，把「該扣折扣的全部用 `jobFinalAmount(j)` / 該算待收的用 `jobUnpaidAmount(j)`」一次清乾淨。
