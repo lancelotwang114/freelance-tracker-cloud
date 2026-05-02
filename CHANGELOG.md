@@ -1,5 +1,21 @@
 ﻿# 版本更新歷史
 
+## v3.22.7 — 🚨 Hotfix：案件 modal「儲存」按了沒反應（2026-05-02）
+
+### 症狀
+案件編輯 modal 按「儲存」沒有任何反應，modal 不關、不存資料、沒 toast。
+
+### 根因
+`saveJob()` line 9668 呼叫 `getCurrentTimerMs()`，但這個函式不存在 — 正確名字是 `getActiveTimerMs()`（v3.10.0 全局計時器引入時改的）。執行到這行就 ReferenceError，後面所有程式碼（save、closeJobModal、render、toast）全部不執行 → 表現為「沒反應」。
+
+bug 推測在 v3.10.0 引入全局計時器時函式被改名，但 saveJob 內的呼叫沒同步更新，潛伏到現在。
+
+### 修法
+- 修正函式名：`getCurrentTimerMs()` → `getActiveTimerMs()`
+- 補語意：只在「該案件正是 active timer」時取最新累計值（含進行中 session）；其他情況維持既有 `j.timeSpentMs`（避免把舊計時數據意外清成 0）
+
+---
+
 ## v3.22.6 — 收益頁兩個 widget 統一改 job-centric（2026-05-02）
 
 > 「選 4 月就只看 4 月案子」— 期間總收入 / 已收 / 待收 / 月度業主彙整全部按**案件所屬月** (`jobBelongMonth`) 歸類，不再用 payment 日期歸月。

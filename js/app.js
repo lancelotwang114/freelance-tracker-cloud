@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-02-v3.22.6';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-02-v3.22.7';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -9665,7 +9665,14 @@ function saveJob() {
   const endDate = document.getElementById('job-end-date').value;
   const hoursVal = document.getElementById('job-hours').value;
   const isEstimate = document.getElementById('job-estimate').checked;
-  const timeSpentMs = getCurrentTimerMs();
+  // v3.22.7 修：原本呼叫 getCurrentTimerMs()（函式不存在 → ReferenceError 整個 saveJob 拋錯 → 按鈕沒反應）
+  // v3.10.0 起 timer 是全局狀態，startTimer/pauseTimer 已即時把累計 ms 寫回 j.timeSpentMs
+  // 這裡只在「該案件正在計時」時才取最新累計值（含目前 session 進行中的部分）；否則維持 payload 不帶
+  const editingJob = editingJobId ? state.jobs.find(x => x.id === editingJobId) : null;
+  const isCurrentlyActive = editingJobId && activeTimer && activeTimer.jobId === editingJobId;
+  const timeSpentMs = isCurrentlyActive
+    ? getActiveTimerMs()
+    : (editingJob ? (+editingJob.timeSpentMs || 0) : 0);
   // v2.8.0: 折扣 + payments
   const discountType = document.querySelector('input[name="job-discount-type"]:checked')?.value || 'none';
   const discountValue = +document.getElementById('job-discount-value').value || 0;
