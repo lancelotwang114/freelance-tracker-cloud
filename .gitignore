@@ -50,3 +50,7 @@ npm-debug.log*
 # === 暫存 ===
 *.tmp
 *.cache
+
+# === Claude / AI 協作設定 ===
+# 個人協作偏好，不公開
+CLAUDE.md
