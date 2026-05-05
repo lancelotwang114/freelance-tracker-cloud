@@ -67,6 +67,7 @@
 | **v3.22.6** | **收益頁兩個 widget 統一改 job-centric：選 4 月就只看 4 月案子，partial paid 也正確算進已收** | ✅ **完成（2026-05-02）** |
 | **v3.22.7** | **🚨 Hotfix：案件 modal「儲存」按了沒反應（getCurrentTimerMs 不存在 → ReferenceError）** | ✅ **完成（2026-05-02）** |
 | **v3.22.8** | **月度趨勢回時間順序（最右是當月）+ 達成目標卡改 toggle（設定頁→顯示偏好，預設 OFF）** | ✅ **完成（2026-05-02）** |
+| **v3.22.9** | **Top bar 加 Google 帳號 pill（頭像 + 名字 + 光暈狀態）+ sync 文字簡化（拿掉 v#N，只留時間）** | ✅ **完成（2026-05-05）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

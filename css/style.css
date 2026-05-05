@@ -2827,6 +2827,70 @@ body.view-board #jobs-group-control {
   .sync-indicator { font-size: 10px; padding: 3px 6px; }
 }
 
+/* ==================== Cloud Account Pill (v3.22.9) ==================== */
+/* Google 帳號頭像 + 名字 pill；外圍光暈反映同步狀態 */
+.cloud-account-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px 3px 3px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+  transition: all .15s;
+}
+.cloud-account-pill:hover { background: var(--bg); }
+.cloud-account-pill img,
+.cloud-account-pill .pill-icon {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+  transition: box-shadow .25s;
+}
+.cloud-account-pill .pill-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 4 種狀態光暈（粗光暈 = ring + glow） */
+.cloud-account-pill.status-synced img,
+.cloud-account-pill.status-synced .pill-icon {
+  box-shadow: 0 0 0 2px var(--success), 0 0 8px rgba(16,185,129,0.55);
+}
+.cloud-account-pill.status-syncing img,
+.cloud-account-pill.status-syncing .pill-icon {
+  box-shadow: 0 0 0 2px var(--primary), 0 0 8px rgba(37,99,235,0.55);
+}
+.cloud-account-pill.status-error img,
+.cloud-account-pill.status-error .pill-icon {
+  box-shadow: 0 0 0 2px var(--danger), 0 0 8px rgba(239,68,68,0.6);
+}
+.cloud-account-pill.status-idle img,
+.cloud-account-pill.status-idle .pill-icon {
+  box-shadow: 0 0 0 2px var(--border);
+}
+
+/* 小螢幕（手機）：藏名字只剩頭像光暈 */
+@media (max-width: 480px) {
+  .cloud-account-pill { padding: 3px; }
+  .cloud-account-pill .pill-name { display: none; }
+}
+
 /* ==================== Utilities ==================== */
 .hidden { display: none !important; }
 

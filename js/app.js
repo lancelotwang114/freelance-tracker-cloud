@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-02-v3.22.8';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-05-v3.22.9';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -486,6 +486,9 @@ function cloudFormatFullTime(iso) {
 
 function cloudUpdateSyncIndicator() {
   const el = document.getElementById('sync-indicator');
+  // v3.22.9：同時更新右側 account pill 的光暈狀態
+  cloudRenderAccountPill();
+
   if (!el) return;
 
   if (!isCloudSignedIn()) {
@@ -498,45 +501,97 @@ function cloudUpdateSyncIndicator() {
   const email = (cloudAuthState.user && cloudAuthState.user.email) || '';
   const accountLine = email ? `\n帳號：${email}` : '';
 
-  // v3.22.3：從 meta 拿目前已同步的版本號 + 時間
+  // v3.22.9：版本號搬到 hover title（debug 用），主顯示只留時間
   const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
   const syncedVer = meta.lastSyncedVersion || 0;
   const syncedAt = meta.lastSyncedAt || null;
-  const verBadge = syncedVer ? `v#${syncedVer}` : '';
   const relTime = syncedAt ? cloudFormatRelativeTime(syncedAt) : '';
   const fullTime = syncedAt ? cloudFormatFullTime(syncedAt) : '';
-  const verLine = syncedVer ? `\n版本：v#${syncedVer}` : '';
+  const verLine = syncedVer ? `\n雲端版本 #${syncedVer}` : '';
   const timeLine = syncedAt ? `\n最後同步：${fullTime}（${relTime}）` : '';
 
   switch (cloudSyncStatus) {
     case 'pending':
       el.className = 'sync-indicator sync-syncing';
-      el.innerHTML = verBadge ? `⌛ ${verBadge} → 推送…` : '⌛ 待同步…';
-      el.title = `本機有未上傳的改動，2 秒後自動推送${verLine}${timeLine}${accountLine}`;
+      el.innerHTML = '⌛ 推送中…';
+      el.title = `本機有未上傳的改動，2 秒後自動推送${timeLine}${verLine}${accountLine}`;
       break;
     case 'syncing':
       el.className = 'sync-indicator sync-syncing';
       el.innerHTML = '⏳ 同步中…';
-      el.title = `正在推送到 Drive${verLine}${timeLine}${accountLine}`;
+      el.title = `正在推送到 Drive${timeLine}${verLine}${accountLine}`;
       break;
     case 'error': {
       el.className = 'sync-indicator sync-error';
-      el.innerHTML = verBadge ? `✗ ${verBadge}（同步失敗）` : '✗ 同步失敗';
+      el.innerHTML = '✗ 同步失敗';
       const errLine = cloudLastSyncError ? `\n錯誤：${cloudLastSyncError}` : '';
-      el.title = `Drive 同步失敗，本機資料安全，下次改動會自動重試${verLine}${timeLine}${accountLine}${errLine}`;
+      el.title = `Drive 同步失敗，本機資料安全，下次改動會自動重試${timeLine}${verLine}${accountLine}${errLine}`;
       break;
     }
     case 'idle':
     default:
       el.className = 'sync-indicator sync-synced';
-      // 已同步過：顯示 v#N · 相對時間；尚未同步過：保持「✓ 已同步」
-      if (syncedVer && syncedAt) {
-        el.innerHTML = `✓ ${verBadge} · ${relTime}`;
+      // 已同步過：顯示「✓ N 分前同步」；尚未同步過：「✓ 已連線」
+      if (syncedAt) {
+        el.innerHTML = `✓ ${relTime}同步`;
       } else {
-        el.innerHTML = '✓ 已同步';
+        el.innerHTML = '✓ 已連線';
       }
-      el.title = `Google Drive 已連線、資料已同步${verLine}${timeLine}${accountLine}\n（點擊開啟設定頁）`;
+      el.title = `Google Drive 已連線、資料已同步${timeLine}${verLine}${accountLine}\n（點擊開啟設定頁）`;
   }
+}
+
+// v3.22.9：渲染右上 Google 帳號 pill（頭像 + 名字 + 光暈狀態）
+function cloudRenderAccountPill() {
+  const pill = document.getElementById('cloud-account-pill');
+  if (!pill) return;
+
+  // 未登入 → 「+ 登入」灰色 placeholder
+  if (!isCloudSignedIn() || !cloudAuthState.user) {
+    pill.classList.remove('status-synced', 'status-syncing', 'status-error');
+    pill.classList.add('status-idle');
+    pill.innerHTML = '<span class="pill-icon">＋</span><span class="pill-name">登入</span>';
+    pill.title = '尚未登入 Google Drive（點擊登入）';
+    return;
+  }
+
+  const u = cloudAuthState.user;
+  // 名字優先顯示「first name」（取空白前段）；沒名字用 email 前綴
+  const fullName = u.name || '';
+  const displayName = fullName.split(' ')[0] || (u.email || '').split('@')[0] || '已登入';
+  const picture = u.picture || '';
+
+  // 光暈狀態跟著 cloudSyncStatus
+  pill.classList.remove('status-synced', 'status-syncing', 'status-error', 'status-idle');
+  switch (cloudSyncStatus) {
+    case 'pending':
+    case 'syncing':
+      pill.classList.add('status-syncing');
+      break;
+    case 'error':
+      pill.classList.add('status-error');
+      break;
+    case 'idle':
+    default:
+      pill.classList.add('status-synced');
+  }
+
+  // 頭像：有圖用 img，沒圖用第一個字
+  const initial = (displayName[0] || '?').toUpperCase();
+  const avatarHtml = picture
+    ? `<img src="${picture}" alt="${escapeHtml(displayName)}" referrerpolicy="no-referrer">`
+    : `<span class="pill-icon">${escapeHtml(initial)}</span>`;
+
+  pill.innerHTML = `${avatarHtml}<span class="pill-name">${escapeHtml(displayName)}</span>`;
+
+  // hover title：完整 email + 同步狀態文字
+  const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
+  const syncedAt = meta.lastSyncedAt || null;
+  const relTime = syncedAt ? cloudFormatRelativeTime(syncedAt) : '';
+  const statusText = (cloudSyncStatus === 'error') ? '✗ 同步失敗'
+    : (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'pending') ? '⏳ 同步中'
+    : (relTime ? `✓ ${relTime}同步` : '✓ 已連線');
+  pill.title = `${u.email || ''}\n${statusText}\n（點擊開啟設定頁）`;
 }
 
 // v3.22.3：每 30 秒更新一次 indicator，讓相對時間「30 秒前」自動跳成「1 分前」等

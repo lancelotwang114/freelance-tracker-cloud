@@ -1,5 +1,42 @@
 ﻿# 版本更新歷史
 
+## v3.22.9 — Top bar 加 Google 帳號 pill + 同步狀態簡化（2026-05-05）
+
+### 1. Top bar 新增 Google 帳號 pill
+- 已登入 → 顯示「頭像 + 名字（first name）」pill
+- 未登入 → 顯示「＋ 登入」灰色 placeholder
+- 點擊 → 跳設定頁的「Google 登入」card
+- 名字取空白前段（"James Wang" → "James"），沒名字用 email 前綴
+- 沒大頭照 → 顯示首字母（"J"）
+
+### 2. 頭像光暈反映同步狀態
+- 綠色光暈 → 已同步（synced）
+- 藍色光暈 → 同步中 / 推送中（syncing / pending）
+- 紅色光暈 → 同步失敗（error）
+- 灰色框 → 未連雲端 / 未登入（idle）
+- 粗光暈：`box-shadow: 0 0 0 2px [color], 0 0 8px [color@55%]`
+
+### 3. Sync indicator 文字簡化
+- **拿掉版本號 v#N**（user 反映「v#2」沒意義）
+- 主顯示只剩時間 / 狀態：
+  - 改前：`✓ v#7 · 30 秒前`
+  - 改後：`✓ 30 秒前同步`
+  - pending 改前：`⌛ v#7 → 推送…` → 改後：`⌛ 推送中…`
+  - error 改前：`✗ v#7（同步失敗）` → 改後：`✗ 同步失敗`
+- 版本號 `#N` 搬到 hover title（debug 仍可看到）
+- 時間從未同步過 → 顯示「✓ 已連線」
+
+### 4. 響應式
+- 手機（< 480px）→ pill 只剩頭像光暈，名字隱藏
+- 桌面 → 頭像 + 名字並列
+
+### 工程量
+- HTML: 加一個 div
+- CSS: 加 ~50 行（pill 樣式 + 4 種狀態光暈 + media query）
+- JS: 改 cloudUpdateSyncIndicator + 新增 cloudRenderAccountPill 共 ~50 行
+
+---
+
 ## v3.22.8 — 月度趨勢回時間順序 + 達成目標卡 toggle（2026-05-02）
 
 ### 1. 月度收益趨勢順序統一
