@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-05-v3.22.9">
+<meta name="app-version" content="2026-05-05-v3.22.10">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -80,8 +80,8 @@
         <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" class="topbar-icon-btn" aria-label="操作日誌">📜</button>
         <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;">主題</button>
         <div id="sync-indicator" class="sync-indicator sync-idle" onclick="switchTab('settings')" title="點擊開啟設定頁">○ 未啟用</div>
-        <!-- v3.22.9：Google 帳號 pill（頭像 + 名字，光暈反映同步狀態） -->
-        <div id="cloud-account-pill" class="cloud-account-pill status-idle" onclick="switchTab('settings')" title="尚未登入 Google Drive（點擊登入）">
+        <!-- v3.22.9 + v3.22.10：Google 帳號 pill（頭像 + 名字，光暈反映同步狀態；error 時點擊直接重連） -->
+        <div id="cloud-account-pill" class="cloud-account-pill status-idle" onclick="cloudOnPillClick()" title="尚未登入 Google Drive（點擊登入）">
           <span class="pill-icon">＋</span><span class="pill-name">登入</span>
         </div>
       </div>

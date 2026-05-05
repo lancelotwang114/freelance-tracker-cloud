@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-05-v3.22.9';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-05-v3.22.10';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -192,25 +192,45 @@ async function cloudInitGoogleAuth() {
     cloudUpdateSyncIndicator();  // v3.0.0-alpha.1 commit 5：top-bar 顯示「○ 未連雲端」
   } else {
     // v3.22.2：從 localStorage 還原為已登入 → 排程 silent refresh
-    // 必須等 tokenClient 初始化完才能排，剛好我們現在已經 init 好了
-    _scheduleSilentRefresh();
-  }
-  // restored 的情境 cloudRenderSignedIn() 已經在前面呼叫過 cloudUpdateSyncIndicator()
-
-  // v3.22.2：分頁從背景切回前景時，檢查 token 是否快過期，必要時立刻 refresh
-  // （setTimeout 在分頁背景時可能被瀏覽器壓制，靠這個補刀）
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    if (!cloudAuthState.accessToken || !cloudAuthState.tokenExpiresAt) return;
-    const remaining = cloudAuthState.tokenExpiresAt - Date.now();
-    // 剩不到 refresh 閾值 → 立刻 refresh；否則重排計時器（覆蓋可能被壓制的舊 timer）
-    if (remaining < REFRESH_BEFORE_EXPIRY_MS) {
+    // v3.22.10：啟動時若 token 剩不到 30 分鐘，主動先 refresh 一次（不等 setTimeout）
+    // 防護「user 上次離開時 token 還有時間，但離開期間電腦睡眠 / 分頁休眠」的情境
+    const remainingOnBoot = cloudAuthState.tokenExpiresAt - Date.now();
+    const PROACTIVE_REFRESH_THRESHOLD = 30 * 60 * 1000; // 30 分鐘
+    if (remainingOnBoot < PROACTIVE_REFRESH_THRESHOLD) {
+      console.log(`[cloud-auth] boot: token has ${Math.round(remainingOnBoot/60000)}min left, refresh now`);
       _silentRefresh();
     } else {
       _scheduleSilentRefresh();
     }
-    // v3.22.3：切回前景順便刷新 indicator 的相對時間（背景時 ticker 可能被瀏覽器壓制）
+  }
+  // restored 的情境 cloudRenderSignedIn() 已經在前面呼叫過 cloudUpdateSyncIndicator()
+
+  // v3.22.2 + v3.22.10：多重事件觸發 refresh check
+  // 分頁休眠（Chrome Tab Discarding / Edge Sleeping Tabs）會讓 setTimeout 暫停，
+  // 用戶切回時 token 可能已過期。三事件並用最大化覆蓋率。
+  const _checkAndRefreshIfNeeded = (trigger) => {
+    if (!cloudAuthState.accessToken || !cloudAuthState.tokenExpiresAt) return;
+    const remaining = cloudAuthState.tokenExpiresAt - Date.now();
+    if (remaining < REFRESH_BEFORE_EXPIRY_MS) {
+      console.log(`[cloud-auth] ${trigger} → token expiring (${Math.round(remaining/60000)}min left), refresh now`);
+      _silentRefresh();
+    } else {
+      _scheduleSilentRefresh();  // 重排（覆蓋可能被休眠壓制的舊 timer）
+    }
     cloudUpdateSyncIndicator();
+  };
+
+  // 1. visibilitychange：分頁從背景切回前景
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') _checkAndRefreshIfNeeded('visibilitychange');
+  });
+
+  // 2. focus：視窗從別的 app / tab 切回（mousemove 也算）— 比 visibilitychange 更早觸發
+  window.addEventListener('focus', () => _checkAndRefreshIfNeeded('focus'));
+
+  // 3. pageshow：BFCache 恢復（瀏覽器「上一頁」回來、或從休眠喚醒）
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) _checkAndRefreshIfNeeded('pageshow-bfcache');
   });
 
   // v3.22.3：啟動 indicator ticker，讓「30 秒前」自動跳成「1 分前」「2 分前」…
@@ -227,13 +247,23 @@ function cloudSignIn() {
   cloudAuthState.tokenClient.requestAccessToken({ prompt: '' });
 }
 
-// ---------- v3.22.2：silent token refresh（無感續約）----------
+// ---------- v3.22.2 + v3.22.10：silent token refresh（無感續約 + 多重防護）----------
 // GIS 隱式流的 access token 一律 1 小時過期，且不發 refresh token。
-// 但只要 Google session 還有效，呼叫 requestAccessToken({ prompt: '' }) 就能直接拿到新 token，
-// 不會跳同意畫面。我們在過期前 5 分鐘自動跑一次，使用者完全無感。
+// 但只要 Google session 還有效，呼叫 requestAccessToken({ prompt: '' }) 就能直接拿到新 token。
+// 過期前 5 分鐘自動跑一次。
+//
+// v3.22.10 強化（解決分頁休眠 / 電腦睡眠導致 setTimeout 暫停）：
+//   1. focus / pageshow / visibilitychange 三事件都會觸發 refresh check
+//   2. 失敗 retry 1 次（5 秒後）
+//   3. 失敗時不清 cloudAuthState，避免「無預警閃登出」— 改顯示 sync error，user 主動點重登
+//   4. 加詳細 console log，方便 user F12 自己看
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 過期前 5 分鐘預先 refresh
+const REFRESH_RETRY_DELAY_MS = 5 * 1000;        // 失敗 5 秒後重試
+const MAX_REFRESH_RETRIES = 1;                  // 最多重試 1 次
 let _silentRefreshTimer = null;
-let _isSilentRefreshing = false;  // 區分手動登入 vs 背景 refresh，影響錯誤訊息呈現
+let _silentRefreshRetryTimer = null;
+let _isSilentRefreshing = false;  // 區分手動登入 vs 背景 refresh
+let _silentRefreshRetries = 0;    // 連續失敗次數（成功就歸零）
 
 function _scheduleSilentRefresh() {
   if (_silentRefreshTimer) {
@@ -244,26 +274,52 @@ function _scheduleSilentRefresh() {
   const refreshAt = cloudAuthState.tokenExpiresAt - REFRESH_BEFORE_EXPIRY_MS;
   const delay = refreshAt - Date.now();
   if (delay <= 0) {
-    // 已經過了 refresh 時點 → 立刻 refresh
+    console.log('[cloud-auth] token already expiring, refresh immediately');
     _silentRefresh();
   } else {
+    console.log('[cloud-auth] schedule next refresh in', Math.round(delay / 60000), 'min');
     _silentRefreshTimer = setTimeout(_silentRefresh, delay);
   }
 }
 
 function _silentRefresh() {
-  if (!cloudAuthState.tokenClient) return;
-  if (_isSilentRefreshing) return;  // 防重入
+  if (!cloudAuthState.tokenClient) {
+    console.warn('[cloud-auth] silent refresh skipped: tokenClient not ready');
+    return;
+  }
+  if (_isSilentRefreshing) {
+    console.log('[cloud-auth] silent refresh already in progress, skip');
+    return;
+  }
   _isSilentRefreshing = true;
+  console.log('[cloud-auth] silent refresh starting…');
   try {
-    // prompt: '' = Google session 還在就直接放行，沒在了會失敗（callback 收到 error）
     cloudAuthState.tokenClient.requestAccessToken({ prompt: '' });
   } catch (e) {
     _isSilentRefreshing = false;
-    console.warn('[cloud-auth] silent refresh failed:', e);
-    if (typeof toast === 'function') {
-      toast('⚠️ Google 連線即將過期，請點右上角重新登入', 8000);
-    }
+    console.warn('[cloud-auth] silent refresh threw:', e);
+    _handleSilentRefreshFailure(e?.message || String(e));
+  }
+}
+
+// v3.22.10：silent refresh 失敗時的處理（不清 state，retry 後仍 fail 才提示）
+function _handleSilentRefreshFailure(errMsg) {
+  if (_silentRefreshRetries < MAX_REFRESH_RETRIES) {
+    _silentRefreshRetries++;
+    console.log(`[cloud-auth] silent refresh retry #${_silentRefreshRetries} in ${REFRESH_RETRY_DELAY_MS/1000}s`);
+    if (_silentRefreshRetryTimer) clearTimeout(_silentRefreshRetryTimer);
+    _silentRefreshRetryTimer = setTimeout(_silentRefresh, REFRESH_RETRY_DELAY_MS);
+    return;
+  }
+  // 重試也失敗 → 通知 user 但不清 state（避免閃登出）
+  _silentRefreshRetries = 0;
+  console.error('[cloud-auth] silent refresh failed after retries:', errMsg);
+  if (typeof toast === 'function') {
+    toast('⚠️ Google 連線過期，請點右上角頭像重新登入', 10000);
+  }
+  // 把 sync indicator 設成 error 狀態，user 看光暈變紅就知道
+  if (typeof cloudSetSyncStatus === 'function') {
+    cloudSetSyncStatus('error', 'Google 連線過期，需要重新登入');
   }
 }
 
@@ -276,10 +332,8 @@ async function cloudOnTokenResponse(resp) {
   if (resp.error) {
     console.error('[cloud-auth] token error:', resp);
     if (wasSilentRefresh) {
-      // 背景 refresh 失敗（Google session 過期 / 撤銷授權 / 網路問題）→ 用 toast 不打擾
-      if (typeof toast === 'function') {
-        toast('⚠️ Google 連線過期，請點右上角頭像重新登入', 8000);
-      }
+      // v3.22.10：背景 refresh 失敗 → 走 retry 流程（不清 state，避免閃登出）
+      _handleSilentRefreshFailure(resp.error_description || resp.error);
     } else {
       // 手動登入失敗 → 維持原本 alert
       alert('Google 登入失敗：' + (resp.error_description || resp.error));
@@ -290,6 +344,8 @@ async function cloudOnTokenResponse(resp) {
   const expiresIn = parseInt(resp.expires_in, 10) || 3600;
   cloudAuthState.accessToken = resp.access_token;
   cloudAuthState.tokenExpiresAt = Date.now() + expiresIn * 1000;
+  // v3.22.10：成功 → retry 計數歸零
+  _silentRefreshRetries = 0;
 
   // v3.22.2：silent refresh 只更新 token + 持久化，不要重抓 userinfo / 不要重跳 calendar prompt
   if (wasSilentRefresh) {
@@ -298,6 +354,10 @@ async function cloudOnTokenResponse(resp) {
       logAction('cloud-token-refresh', { email: cloudAuthState.user && cloudAuthState.user.email });
     }
     _scheduleSilentRefresh();  // 排下一次 refresh
+    // v3.22.10：refresh 成功時若之前是 sync error 狀態，恢復為正常
+    if (cloudSyncStatus === 'error' && typeof cloudSetSyncStatus === 'function') {
+      cloudSetSyncStatus('idle');
+    }
     console.log('[cloud-auth] silent refresh ok, next refresh in ~', Math.round((expiresIn - 300) / 60), 'min');
     return;
   }
@@ -539,6 +599,17 @@ function cloudUpdateSyncIndicator() {
       }
       el.title = `Google Drive 已連線、資料已同步${timeLine}${verLine}${accountLine}\n（點擊開啟設定頁）`;
   }
+}
+
+// v3.22.10：點 pill 的行為 — 已登入 + sync error 時直接觸發重登；其他情況跳設定頁
+function cloudOnPillClick() {
+  if (isCloudSignedIn() && cloudSyncStatus === 'error') {
+    // 連線過期/出錯 → 直接觸發重新登入（最常見的 case 是 token refresh 失敗）
+    if (typeof toast === 'function') toast('正在重新連線 Google…', 3000);
+    cloudSignIn();
+    return;
+  }
+  switchTab('settings');
 }
 
 // v3.22.9：渲染右上 Google 帳號 pill（頭像 + 名字 + 光暈狀態）

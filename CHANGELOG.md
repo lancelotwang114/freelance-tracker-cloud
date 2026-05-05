@@ -1,5 +1,51 @@
 ﻿# 版本更新歷史
 
+## v3.22.10 — Token silent refresh 5 道防護（解決分頁休眠導致 1-2 hr 被登出）（2026-05-05）
+
+> User 反映「Google 帳號每 1-2 小時被登出」。根因：Chrome Tab Discarding / Edge Sleeping Tabs / 電腦睡眠會讓 setTimeout 停擺，silent refresh 沒準時跑，token 過期後 silent refresh 又因 Google session 也失效而 fail。加 5 道防護。
+
+### 5 道防護
+
+**1. App 啟動時主動 refresh**
+- 過去：cloudInitGoogleAuth → restored → 排 setTimeout 等 5 分鐘前 refresh
+- 現在：若 token 剩不到 30 分鐘 → 立刻 refresh，不等 setTimeout
+
+**2. 三事件並用觸發 refresh check**
+- `visibilitychange` → 切回前景
+- `focus` → 視窗從別 app/tab 切回（比 visibility 更早觸發）
+- `pageshow` (event.persisted) → BFCache 恢復、休眠喚醒
+- 任一事件觸發都檢查 token 並必要時 refresh
+
+**3. 失敗 retry 1 次**
+- silent refresh fail → 5 秒後 retry 1 次
+- 仍 fail → 進入「需 user 重登」狀態
+
+**4. 失敗時不清 cloudAuthState**
+- 過去：silent refresh fail → toast → user 等於被登出（accessToken 過期 → API call 失敗）
+- 現在：state 維持「已登入」UI，但 sync indicator 變紅光暈
+- User 體驗：頭像光暈紅 = 連線出問題，但帳號資訊還在；點頭像直接觸發重登（不用走設定頁）
+
+**5. Pill click 智慧路由**
+- 已登入 + sync error → 點頭像直接呼叫 cloudSignIn() 重新拿 token
+- 其他情況 → 跳設定頁
+
+### 強化的 console log（F12 可看）
+```
+[cloud-auth] schedule next refresh in 55 min
+[cloud-auth] focus → token expiring (3min left), refresh now
+[cloud-auth] silent refresh starting…
+[cloud-auth] silent refresh ok, next refresh in ~ 55 min
+[cloud-auth] silent refresh retry #1 in 5s
+[cloud-auth] silent refresh failed after retries: ...
+```
+若再次發生被登出，F12 看 console 可查到實際 fail 原因。
+
+### 不做的事（沒辦法做）
+- ❌ 把 access token 延長到 7/30 天 — Google 強制 1 hr
+- ❌ 換 refresh token 機制 — 純前端做不到（需後端 + Client Secret）
+
+---
+
 ## v3.22.9 — Top bar 加 Google 帳號 pill + 同步狀態簡化（2026-05-05）
 
 ### 1. Top bar 新增 Google 帳號 pill
