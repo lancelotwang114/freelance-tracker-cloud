@@ -54,3 +54,8 @@ npm-debug.log*
 # === Claude / AI 協作設定 ===
 # 個人協作偏好，不公開
 CLAUDE.md
+
+# === 設計素材原檔 ===
+# Mascot 原始 SVG / PNG / PSD 等素材（最終版本已 inline 進 js/app.js）
+# 原檔保留本機方便日後改色 / 改表情，但不上 GitHub
+Mascot/

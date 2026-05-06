@@ -1,5 +1,55 @@
 ﻿# 版本更新歷史
 
+## v3.23.0 — 🤖 小幫手 Mascot（2026-05-05）
+
+> 右下角浮動小機器人，事件發生時跳鼓勵文字。可愛 + 鼓勵風格，強化使用者連結。
+
+### 功能
+- **位置**：右下角固定 64×64 px（手機 52×52 px），`position: fixed`，z-index 9990
+- **動畫**：CSS-only，啟動緩慢上下浮動（`mascotIdleBob`），觸發時抖動（`mascotShake`）
+- **對話框**：圓角白底 + 主色邊框 + 三角箭頭，`mascotBubbleIn` 彈跳進入動畫
+- **5 秒自動消失**，點 ✕ 也可手動關
+- **點 mascot 本身** → 隨機說一句招呼
+
+### 12 種觸發事件
+| Event | 例句 |
+|---|---|
+| `job-create` | 「又有案件囉～」「新挑戰，加油！」 |
+| `job-done` | 「完成一筆，做得好！」「Done！下一個」 |
+| `job-paid` | 「收到錢錢囉 開心」「叮，入帳！」 |
+| `job-fully-paid` | 「結清了！這筆完美收尾」 |
+| `client-create` | 「新業主加入，加油！」 |
+| `job-delete` | 「不要了？掰掰～」 |
+| `goal-reached-monthly` | 「🎯 月目標達標了，你是神！」 |
+| `app-startup-overdue` | 「有人欠你錢喔，記得催一下」 |
+| `app-startup-quiet` | 「好久不見，最近還好嗎？」（30% 機率隨機打招呼） |
+| `timer-start/stop` | 「開始計時，專注！」「辛苦了，喝口水」 |
+| `streak-3` | 「3 連發，狀態爆棚！」（保留給未來連擊偵測） |
+| `idle-greeting` | 「我在這 ~」「叫我做什麼？」（點 mascot 本身觸發） |
+
+### 防擾人
+- **同類事件 30 秒 cooldown**：避免短時間連續 spam
+- 對話框 5 秒消失
+- 設定頁可一鍵關閉
+
+### 個人化
+- 設定頁 → 🤖 小幫手 card：
+  - **啟用 toggle**（預設 ON）
+  - **取個名字**（最多 8 字）→ 訊息會自動加前綴「小機：完成一筆…」
+  - **試試看 ▶** 按鈕：隨機隨機 demo 一句
+
+### 技術
+- **零外部依賴**：純 inline SVG（user 提供素材）+ CSS animations
+- **沒用 Lottie**：避免引入額外 ~150KB lib
+- **觸發點**：在 saveJob / saveClient / deleteJob / mascotInit 共加 ~10 行 trigger code
+
+### Schema 沒變動
+- 新增 `config.mascotEnabled`（預設 true）
+- 新增 `config.mascotName`（預設 ''）
+- 不影響舊資料 / 不需 migration
+
+---
+
 ## v3.22.10 — Token silent refresh 5 道防護（解決分頁休眠導致 1-2 hr 被登出）（2026-05-05）
 
 > User 反映「Google 帳號每 1-2 小時被登出」。根因：Chrome Tab Discarding / Edge Sleeping Tabs / 電腦睡眠會讓 setTimeout 停擺，silent refresh 沒準時跑，token 過期後 silent refresh 又因 Google session 也失效而 fail。加 5 道防護。

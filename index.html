@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-05-v3.22.10">
+<meta name="app-version" content="2026-05-05-v3.23.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -706,6 +706,34 @@
             </div>
           </div>
         </label>
+      </div>
+    </div>
+
+    <!-- v3.23.0：小幫手（mascot）設定 -->
+    <div class="card collapsible collapsed" id="card-mascot">
+      <div class="card-head" onclick="toggleCard('card-mascot')">
+        <h3>🤖 小幫手</h3>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
+          <input type="checkbox" id="pref-mascot-enabled" onchange="onMascotEnabledChange(this.checked)" checked style="margin-top: 3px;">
+          <div>
+            <div style="font-weight: 500;">啟用小幫手</div>
+            <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
+              右下角浮動的小機器人。完成案件 / 收款 / 新增案件等時候會跳鼓勵文字。
+            </div>
+          </div>
+        </label>
+        <div style="margin-top: 14px; padding: 12px; background: var(--bg); border-radius: 8px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">給它取個名字（選填）</label>
+          <input type="text" id="pref-mascot-name" placeholder="例如：小機、嘟嘟、肝寶…" maxlength="8" oninput="onMascotNameChange(this.value)" style="width: 100%; max-width: 200px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
+          <div style="margin-top: 6px; font-size: 11px; color: var(--muted);">取了名字之後，小幫手講話會自動帶上稱呼（例：「小機：完成一筆，做得好！」）</div>
+        </div>
+        <div style="margin-top: 14px;">
+          <button class="btn btn-outline btn-sm" onclick="mascotTestSay()">試試看 ▶</button>
+          <span style="margin-left: 8px; font-size: 11px; color: var(--muted);">（隨機說一句鼓勵的話）</span>
+        </div>
       </div>
     </div>
 
@@ -1508,6 +1536,13 @@
     </p>
   </div>
 </div>
+
+<!-- v3.23.0：Mascot 小幫手（位置固定右下，inline SVG 由 JS 注入） -->
+<div id="mascot-bubble" class="mascot-bubble hidden">
+  <span class="mascot-bubble-close" onclick="mascotHideBubble()" title="關閉">✕</span>
+  <span id="mascot-bubble-name" class="mascot-bubble-name"></span><span id="mascot-bubble-text"></span>
+</div>
+<div id="mascot-container" class="mascot-container hidden" onclick="mascotOnClick()" title="點擊看小幫手說話 / 設定頁可關閉"></div>
 
 <script>
   // v2.9.6: 用 meta 版號當 cache buster — 每次升版自動繞過 HTTP cache

@@ -2891,6 +2891,106 @@ body.view-board #jobs-group-control {
   .cloud-account-pill .pill-name { display: none; }
 }
 
+/* ==================== Mascot 小幫手 (v3.23.0) ==================== */
+.mascot-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 64px;
+  height: 64px;
+  cursor: pointer;
+  z-index: 9990;
+  transition: transform .2s;
+  user-select: none;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.15));
+}
+.mascot-container:hover { transform: scale(1.08); }
+.mascot-container:active { transform: scale(0.95); }
+.mascot-container svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  animation: mascotIdleBob 3s ease-in-out infinite;
+}
+@keyframes mascotIdleBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+/* 暗色模式：稍微亮一點，避免陰影吃掉細節 */
+[data-theme="dark"] .mascot-container { filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
+
+.mascot-bubble {
+  position: fixed;
+  bottom: 92px;
+  right: 16px;
+  max-width: 240px;
+  background: var(--card);
+  color: var(--text);
+  border: 2px solid var(--primary);
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  z-index: 9989;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  animation: mascotBubbleIn .3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes mascotBubbleIn {
+  from { transform: translateY(8px) scale(0.9); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+.mascot-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  right: 28px;
+  width: 0; height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 10px solid var(--primary);
+}
+.mascot-bubble::before {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  right: 30px;
+  width: 0; height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--card);
+  z-index: 1;
+}
+.mascot-bubble .mascot-bubble-name {
+  font-weight: 700;
+  color: var(--primary);
+  margin-right: 4px;
+}
+.mascot-bubble .mascot-bubble-close {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.6;
+}
+.mascot-bubble .mascot-bubble-close:hover { opacity: 1; }
+
+/* 觸發時 mascot 抖動表示有話說 */
+.mascot-container.mascot-shake svg {
+  animation: mascotShake .4s ease-in-out;
+}
+@keyframes mascotShake {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(-6px) rotate(-5deg); }
+  75% { transform: translateY(-6px) rotate(5deg); }
+}
+
+@media (max-width: 480px) {
+  .mascot-container { width: 52px; height: 52px; bottom: 80px; right: 12px; }
+  .mascot-bubble { bottom: 140px; right: 12px; max-width: 200px; font-size: 12px; }
+}
+
 /* ==================== Utilities ==================== */
 .hidden { display: none !important; }
 

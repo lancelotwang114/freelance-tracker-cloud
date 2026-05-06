@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-05-v3.22.10';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-05-v3.23.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6328,6 +6328,179 @@ function renderRevenue() {
   renderRevenueInsights();
 }
 
+// ============== v3.23.0：Mascot 小幫手 ==============
+// 純 inline SVG（user 提供素材：Mascot/下載 (2).svg），純 CSS 動畫，零外部依賴。
+// 觸發點：完成案件 / 收款 / 新增 / 達標 / 啟動有逾期 等 ~10 種事件。
+// 防擾人：同類事件 30 秒內不重複觸發；對話框 5 秒自動消失。
+
+const MASCOT_SVG = `<svg viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <ellipse cx="110" cy="185" rx="50" ry="12" fill="#000" opacity="0.1"/>
+  <rect x="40" y="60" width="140" height="110" rx="35" fill="#60A5FA"/>
+  <line x1="110" y1="30" x2="110" y2="60" stroke="#60A5FA" stroke-width="6"/>
+  <circle cx="110" cy="25" r="10" fill="#60A5FA"/>
+  <rect x="60" y="75" width="100" height="70" rx="25" fill="#fff"/>
+  <circle cx="90" cy="105" r="10" fill="#1F2937"/>
+  <circle cx="130" cy="105" r="10" fill="#1F2937"/>
+  <circle cx="87" cy="102" r="3" fill="#fff"/>
+  <circle cx="127" cy="102" r="3" fill="#fff"/>
+  <path d="M85 125 Q110 140 135 125" stroke="#1F2937" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <ellipse cx="80" cy="170" rx="15" ry="10" fill="#3B82F6"/>
+  <ellipse cx="140" cy="170" rx="15" ry="10" fill="#3B82F6"/>
+  <circle cx="85" cy="150" r="6" fill="#34D399"/>
+  <circle cx="110" cy="150" r="6" fill="#FBBF24"/>
+  <circle cx="135" cy="150" r="6" fill="#F87171"/>
+</svg>`;
+
+// 訊息池：每事件 3-6 句，可愛 + 鼓勵風格
+const MASCOT_MESSAGES = {
+  'job-create':       ['又有案件囉～', '新挑戰，加油！', '又要開始忙碌囉', '太好了，又有事做', '工作上門，衝啊！'],
+  'job-done':         ['完成一筆，做得好！', '太棒了，又解決一個', '辛苦了，繼續加油', 'Done！下一個', '產量爆棚，太強了'],
+  'job-paid':         ['收到錢錢囉 開心', '叮，入帳！', '💰 又進帳了', '錢錢拿到手，太爽', '心情大好，去喝杯咖啡吧'],
+  'job-fully-paid':   ['結清了！這筆完美收尾', '尾款收齊，超開心', '完美完美！', '一筆好結束 ✨'],
+  'client-create':    ['新業主加入，加油！', '又一個合作對象', '記得好好對待新業主', '緣分啊～'],
+  'job-cancel':       ['好可惜...下次有機會', '沒事，下一個', '別放心上'],
+  'job-delete':       ['不要了？掰掰～', '當作沒發生過', '清乾淨了'],
+  'goal-reached-monthly': ['🎯 月目標達標了，你是神！', '本月目標 ✓，太厲害了', '達標！犒賞自己一下', '神之手再現'],
+  'app-startup-overdue':  ['有人欠你錢喔，記得催一下', '提醒：有逾期未收款的案件', '別忘了去收款！', '催款時間到～'],
+  'timer-start':      ['開始計時，專注！', '加油，火力全開', '今天也要好好工作', '集中精神～'],
+  'timer-stop':       ['辛苦了，喝口水', '工時記下了！', '休息一下', '做得好～'],
+  'streak-3':         ['3 連發，狀態爆棚！', '今天手感超好', '一鼓作氣，再來幾個！'],
+  'idle-greeting':    ['我在這 ~', '有事找我嗎？', '今天也要加油喔', '叫我做什麼？', '你今天看起來不錯～', '加油加油 💪'],
+  'app-startup-quiet':['好久不見，最近還好嗎？', '回來啦～歡迎', '今天又是新的一天'],
+};
+
+const MASCOT_COOLDOWN_MS = 30 * 1000;          // 同類事件 30 秒不重複
+const MASCOT_BUBBLE_HIDE_MS = 5000;            // 對話框 5 秒消失
+const MASCOT_SHAKE_MS = 400;                   // 抖動動畫
+let mascotState = {
+  enabled: true,                               // 預設 ON
+  name: '',                                    // 個人化名字
+  lastTriggerTimes: {},                        // event → timestamp
+  hideTimer: null,
+  shakeTimer: null,
+};
+let mascotInited = false;
+
+// 啟動時呼叫一次（從 config 還原 + 注入 SVG + 看情況打招呼）
+function mascotInit() {
+  if (mascotInited) return;
+  mascotInited = true;
+  mascotState.enabled = config.mascotEnabled !== false;  // 預設 true（首次也是）
+  mascotState.name = config.mascotName || '';
+  const c = document.getElementById('mascot-container');
+  if (c) {
+    c.innerHTML = MASCOT_SVG;
+    c.classList.toggle('hidden', !mascotState.enabled);
+  }
+  // 同步設定頁 UI
+  const cb = document.getElementById('pref-mascot-enabled');
+  if (cb) cb.checked = mascotState.enabled;
+  const inp = document.getElementById('pref-mascot-name');
+  if (inp) inp.value = mascotState.name;
+
+  // 啟動 1.5 秒後看情況打招呼（避免跟 onboarding 同時跳出）
+  setTimeout(() => {
+    if (!mascotState.enabled) return;
+    if (typeof activeJobs !== 'function') return;
+    const today = todayStr();
+    // 有逾期未完成 → 提醒催收
+    const overdue = activeJobs().filter(j => !j.done && j.date && j.date < today);
+    if (overdue.length > 0) { mascotSay('app-startup-overdue'); return; }
+    // 沒事 → 30% 機率隨機打招呼，避免每次都跳很煩
+    if (Math.random() < 0.3) mascotSay('app-startup-quiet');
+  }, 1500);
+}
+
+// 觸發 mascot 講話（核心 API）
+// eventType: 'job-create' / 'job-done' / 'job-paid' / ... 任一 MASCOT_MESSAGES 的 key
+function mascotSay(eventType, customMsg) {
+  if (!mascotState.enabled) return;
+  if (!eventType && !customMsg) return;
+
+  // Cooldown：同類事件 30 秒不重複（idle-greeting 跟 customMsg 不受限）
+  if (eventType && eventType !== 'idle-greeting') {
+    const now = Date.now();
+    if (mascotState.lastTriggerTimes[eventType] && now - mascotState.lastTriggerTimes[eventType] < MASCOT_COOLDOWN_MS) return;
+    mascotState.lastTriggerTimes[eventType] = now;
+  }
+
+  // 取訊息（custom 優先；否則從 pool 隨機選）
+  let msg = customMsg;
+  if (!msg) {
+    const pool = MASCOT_MESSAGES[eventType];
+    if (!pool || !pool.length) return;
+    msg = pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // 渲染對話框
+  const bubble = document.getElementById('mascot-bubble');
+  const nameEl = document.getElementById('mascot-bubble-name');
+  const textEl = document.getElementById('mascot-bubble-text');
+  if (!bubble || !textEl) return;
+
+  // 名字前綴（有設名字才顯示）
+  if (nameEl) nameEl.textContent = mascotState.name ? `${mascotState.name}：` : '';
+  textEl.textContent = msg;
+
+  // 重啟 in 動畫
+  bubble.classList.remove('hidden');
+  bubble.style.animation = 'none';
+  void bubble.offsetWidth;  // 強制 reflow
+  bubble.style.animation = '';
+
+  // 5 秒後自動消失
+  if (mascotState.hideTimer) clearTimeout(mascotState.hideTimer);
+  mascotState.hideTimer = setTimeout(mascotHideBubble, MASCOT_BUBBLE_HIDE_MS);
+
+  // mascot 抖動表示有話要說
+  const c = document.getElementById('mascot-container');
+  if (c) {
+    c.classList.add('mascot-shake');
+    if (mascotState.shakeTimer) clearTimeout(mascotState.shakeTimer);
+    mascotState.shakeTimer = setTimeout(() => c.classList.remove('mascot-shake'), MASCOT_SHAKE_MS);
+  }
+}
+
+function mascotHideBubble() {
+  const bubble = document.getElementById('mascot-bubble');
+  if (bubble) bubble.classList.add('hidden');
+  if (mascotState.hideTimer) { clearTimeout(mascotState.hideTimer); mascotState.hideTimer = null; }
+}
+
+// 點 mascot → 隨機說一句招呼
+function mascotOnClick() {
+  mascotSay('idle-greeting');
+}
+
+// 設定頁：開關 toggle
+function onMascotEnabledChange(checked) {
+  mascotState.enabled = !!checked;
+  config.mascotEnabled = mascotState.enabled;
+  saveConfigOnly();
+  const c = document.getElementById('mascot-container');
+  if (c) c.classList.toggle('hidden', !mascotState.enabled);
+  if (!mascotState.enabled) mascotHideBubble();
+  toast(checked ? '✓ 已啟用小幫手' : '✓ 已關閉小幫手', 2000);
+}
+
+// 設定頁：取名字
+function onMascotNameChange(name) {
+  mascotState.name = (name || '').trim().slice(0, 8);
+  config.mascotName = mascotState.name;
+  saveConfigOnly();
+  // 不立刻 toast，因為 user 還在打字
+}
+
+// 設定頁：「試試看」按鈕
+function mascotTestSay() {
+  // 強制顯示一句（不受 cooldown 限制）→ 用 customMsg 繞過
+  const pool = MASCOT_MESSAGES['idle-greeting'];
+  const msg = pool[Math.floor(Math.random() * pool.length)];
+  // 暫時清掉 cooldown，直接呼叫
+  delete mascotState.lastTriggerTimes['idle-greeting'];
+  mascotSay('idle-greeting', msg);
+}
+
 // ============== v3.22.8：顯示偏好（設定頁 toggle）==============
 // 把 #pref-show-goals checkbox 的當前狀態同步到畫面（app 啟動時呼叫一次）
 function loadDisplayPrefUI() {
@@ -9862,6 +10035,10 @@ function saveJob() {
   const c = getClient(payload.clientId);
   if (editingJobId) {
     const j = state.jobs.find(x => x.id === editingJobId);
+    // v3.23.0：mascot 觸發前的對比快照
+    const wasDone = !!j.done;
+    const wasFullyPaid = jobIsFullyPaid(j);
+    const prevPaymentCount = (j.payments || []).length;
     // 完成日邏輯（保留原樣）
     if (manualDoneAt && payload.done) payload.doneAt = manualDoneAt;
     else if (!j.done && payload.done) payload.doneAt = todayStr();
@@ -9870,12 +10047,20 @@ function saveJob() {
     Object.assign(j, payload);
     recomputePaidStatus(j);
     logAction('job-edit', { jobId: editingJobId, title: payload.title, amount: payload.amount, clientId: payload.clientId, clientName: c?.name });
+    // v3.23.0：觸發 mascot — 優先級 fully-paid > done > paid（同時只取一個）
+    if (typeof mascotSay === 'function') {
+      if (!wasFullyPaid && jobIsFullyPaid(j))      mascotSay('job-fully-paid');
+      else if (!wasDone && j.done)                  mascotSay('job-done');
+      else if ((j.payments || []).length > prevPaymentCount && jobPaidTotal(j) > 0) mascotSay('job-paid');
+    }
   } else {
     payload.doneAt = payload.done ? (manualDoneAt || todayStr()) : null;
     const newJob = { id: uid(), ...payload };
     recomputePaidStatus(newJob);
     state.jobs.push(newJob);
     logAction('job-create', { jobId: newJob.id, title: payload.title, amount: payload.amount, clientId: payload.clientId, clientName: c?.name });
+    // v3.23.0：觸發 mascot
+    if (typeof mascotSay === 'function') mascotSay('job-create');
   }
   save(); closeJobModal(); render(); toast('已儲存');
 }
@@ -9891,6 +10076,8 @@ function deleteJob() {
   if (activeTimer.jobId === editingJobId) clearActiveTimer();
   state.jobs = state.jobs.filter(j => j.id !== editingJobId);
   if (j) logAction('job-delete', { jobId: editingJobId, title: j.title, amount: j.amount, clientId: j.clientId, clientName: c?.name });
+  // v3.23.0：mascot — 刪除案件
+  if (typeof mascotSay === 'function') mascotSay('job-delete');
   save(); closeJobModal(); render();
 }
 
@@ -10081,6 +10268,8 @@ function saveClient() {
     const newId = uid();
     state.clients.push({ id: newId, ...payload });
     logAction('client-create', { clientId: newId, name: payload.name });
+    // v3.23.0：mascot — 新業主
+    if (typeof mascotSay === 'function') mascotSay('client-create');
   }
   save(); closeClientModal(); render(); toast('已儲存');
 }
@@ -11790,6 +11979,7 @@ load();
 loadActionLog();   // v2.9.5
 loadReminderConfigUI();   // v2.7.9: 提醒設定（取代舊的單欄）
 loadDisplayPrefUI();      // v3.22.8: 顯示偏好（隱藏目標卡片 toggle）
+mascotInit();             // v3.23.0: 小幫手 mascot
 // v3.3.0：移除 loadUserInfoUI（settings 「我的收款資訊」card 已搬到請款單分頁；renderInvoice 會處理收款帳號 picker）
 // v3.0.0-beta.1：移除 loadSheetConfigUI / loadCalendarConfigUI / updateSheetSyncBadge（對應 hidden 卡片，不再需要 init UI）
 loadInvoiceStatusUI();   // v2.10.4: 請款單狀態篩選
