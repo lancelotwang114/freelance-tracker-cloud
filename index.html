@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-05-v3.23.2">
+<meta name="app-version" content="2026-05-05-v3.23.3">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -743,6 +743,11 @@
             <button class="btn btn-outline btn-sm" onclick="mascotSetState('thinking')">🤔 思考</button>
             <button class="btn btn-outline btn-sm" onclick="mascotSetState('success')">✅ 完成</button>
             <button class="btn btn-outline btn-sm" onclick="mascotSetState('error')">❌ 錯誤</button>
+            <!-- v3.23.3：3 個新狀態 -->
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('searching')">🔍 搜尋中</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('celebrating')">🎉 慶祝</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('sleeping')">😴 睡覺</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotWink()">😉 眨眼</button>
           </div>
         </div>
       </div>

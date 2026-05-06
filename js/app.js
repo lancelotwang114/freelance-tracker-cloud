@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-05-v3.23.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-05-v3.23.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3636,6 +3636,8 @@ function performUndo() {
   if (typeof logAction === 'function') {
     logAction('undo', { label: entry.label, remaining });
   }
+  // v3.23.3：mascot thinking
+  if (typeof mascotSay === 'function') mascotSay('undo-action');
 }
 
 function performRedo() {
@@ -6393,9 +6395,17 @@ const MASCOT_MESSAGES = {
   'app-startup-overdue':  ['有人欠你錢喔，記得催一下', '提醒：有逾期未收款的案件', '別忘了去收款！', '催款時間到～'],
   'timer-start':      ['開始計時，專注！', '加油，火力全開', '今天也要好好工作', '集中精神～'],
   'timer-stop':       ['辛苦了，喝口水', '工時記下了！', '休息一下', '做得好～'],
-  'streak-3':         ['3 連發，狀態爆棚！', '今天手感超好', '一鼓作氣，再來幾個！'],
+  'streak-3':         ['3 連發，狀態爆棚！', '今天手感超好', '一鼓作氣，再來幾個！', '一波接一波 🔥'],
   'idle-greeting':    ['我在這 ~', '有事找我嗎？', '今天也要加油喔', '叫我做什麼？', '你今天看起來不錯～', '加油加油 💪'],
   'app-startup-quiet':['好久不見，最近還好嗎？', '回來啦～歡迎', '今天又是新的一天'],
+  // v3.23.3 新增訊息池
+  'big-payment':      ['哇！大筆入帳！', '這筆好大方～', '嘩！這數字可愛 💎', '今天可以加菜了'],
+  'search-open':      ['找什麼？我幫你', '🔍 搜尋中…', '想找哪一筆？'],
+  'export-pdf':       ['排版中，等等噢', '在做請款單…', '處理中…'],
+  'import-success':   ['資料來了！歡迎回來', '匯入成功，繼續加油', '你的資料安然送達'],
+  'undo-action':      ['上一步…撤回中', '反悔了？沒事', '幫你還原～'],
+  'sleeping':         ['💤 zzZ…', '我先睡一下…', '叫我我會起來'],
+  'wake-up':          ['啊？我剛打瞌睡', '你回來啦～', '我醒了我醒了'],
 };
 
 const MASCOT_COOLDOWN_MS = 30 * 1000;          // 同類事件 30 秒不重複
@@ -6412,13 +6422,14 @@ let mascotState = {
 };
 let mascotInited = false;
 
-// v3.23.2：5 種狀態 + 4 種嘴巴（純 SVG path swap）
-const MASCOT_STATES = ['idle', 'loading', 'thinking', 'success', 'error'];
+// v3.23.2 + v3.23.3：8 種狀態 + 4 種嘴巴（純 SVG path swap）
+const MASCOT_STATES = ['idle', 'loading', 'thinking', 'success', 'error', 'searching', 'celebrating', 'sleeping'];
 const MASCOT_MOUTHS = {
   happy:   'M90 145 Q120 160 150 145',     // 😊 預設笑
-  flat:    'M95 150 L145 150',              // 😐 一條線（loading/thinking）
+  flat:    'M95 150 L145 150',              // 😐 一條線（loading/thinking/searching/sleeping）
   worried: 'M90 152 Q120 138 150 152',      // 😟 反向弧線（error）
-  big:     'M85 142 Q120 168 155 142',      // 😄 大笑（success）
+  big:     'M85 142 Q120 168 155 142',      // 😄 大笑（success/celebrating）
+  open:    'M118 148 Q120 152 122 148 Q120 144 118 148', // 😮 小 O（shocked，動作不是 state）
 };
 // state → 嘴巴 map
 const MASCOT_STATE_TO_MOUTH = {
@@ -6427,9 +6438,13 @@ const MASCOT_STATE_TO_MOUTH = {
   thinking: 'flat',
   success: 'big',
   error: 'worried',
+  searching: 'flat',
+  celebrating: 'big',
+  sleeping: 'flat',
 };
 // 哪些 state 是「暫態」(自動回 idle)
-const TRANSIENT_STATES = { success: 2500, error: 2500 };
+const TRANSIENT_STATES = { success: 2500, error: 2500, celebrating: 1800 };
+// searching / sleeping / loading / thinking 是持續狀態，要手動切回 idle
 
 function mascotSetMouth(mouthKey) {
   const m = document.querySelector('#mascot-container #mouth');
@@ -6438,8 +6453,125 @@ function mascotSetMouth(mouthKey) {
   m.setAttribute('d', d);
 }
 
-// 切換 mascot 狀態（idle/loading/thinking/success/error）
-// success / error 自動 2.5 秒後回 idle
+// v3.23.3：眼睛切換（用 SVG circle 的 r 屬性）
+// open（預設 r=10） / shocked（r=14 大眼）/ closed（r=2 變點，sleeping 用）/ wink（左眼短暫變點）
+function mascotSetEyes(mode) {
+  const l = document.querySelector('#mascot-container #eyeL');
+  const r = document.querySelector('#mascot-container #eyeR');
+  if (!l || !r) return;
+  switch (mode) {
+    case 'shocked':
+      l.setAttribute('r', '14');
+      r.setAttribute('r', '14');
+      break;
+    case 'closed':  // sleeping
+      l.setAttribute('r', '2');
+      r.setAttribute('r', '2');
+      break;
+    case 'open':
+    default:
+      l.setAttribute('r', '10');
+      r.setAttribute('r', '10');
+  }
+}
+
+// 隨機眨眼（左眼閉 250ms 再回正）
+function mascotWink() {
+  const l = document.querySelector('#mascot-container #eyeL');
+  if (!l) return;
+  const orig = l.getAttribute('r');
+  l.setAttribute('r', '2');
+  setTimeout(() => l.setAttribute('r', orig || '10'), 220);
+}
+
+// 排隨機眨眼計時器（25-45 秒一次，只在 idle 時觸發）
+let _mascotWinkTimer = null;
+function mascotScheduleWink() {
+  if (_mascotWinkTimer) clearTimeout(_mascotWinkTimer);
+  const delay = 25000 + Math.random() * 20000;  // 25~45 秒
+  _mascotWinkTimer = setTimeout(() => {
+    if (mascotState.enabled && mascotState.current === 'idle') mascotWink();
+    mascotScheduleWink();  // 排下一次
+  }, delay);
+}
+
+// Idle 5 分鐘 → sleeping
+const MASCOT_IDLE_TIMEOUT = 5 * 60 * 1000;
+let _mascotIdleTimer = null;
+let _mascotIdleListenerInited = false;
+
+function mascotResetIdleTimer() {
+  if (_mascotIdleTimer) clearTimeout(_mascotIdleTimer);
+  if (!mascotState.enabled) return;
+  _mascotIdleTimer = setTimeout(() => {
+    if (mascotState.current === 'idle') mascotSetState('sleeping');
+  }, MASCOT_IDLE_TIMEOUT);
+}
+
+function mascotInitIdleListener() {
+  if (_mascotIdleListenerInited) return;
+  _mascotIdleListenerInited = true;
+  // throttle：每 10 秒最多 reset 一次（避免 mousemove 每 ms 跑）
+  let lastReset = 0;
+  const onActivity = () => {
+    const now = Date.now();
+    // 從 sleeping 立刻甦醒
+    if (mascotState.current === 'sleeping') {
+      mascotSetState('idle');
+      mascotSay('idle-greeting', MASCOT_MESSAGES['wake-up'][Math.floor(Math.random() * MASCOT_MESSAGES['wake-up'].length)]);
+    }
+    if (now - lastReset < 10000) return;
+    lastReset = now;
+    mascotResetIdleTimer();
+  };
+  ['mousemove', 'click', 'keydown', 'scroll', 'touchstart'].forEach(ev =>
+    document.addEventListener(ev, onActivity, { passive: true })
+  );
+}
+
+// 連擊偵測（1 分鐘內 3 筆完成 → celebrating + streak-3）
+let _mascotCompletionStreak = 0;
+let _mascotLastCompletionAt = 0;
+function mascotTrackCompletion() {
+  const now = Date.now();
+  if (now - _mascotLastCompletionAt < 60 * 1000) {
+    _mascotCompletionStreak++;
+  } else {
+    _mascotCompletionStreak = 1;
+  }
+  _mascotLastCompletionAt = now;
+  if (_mascotCompletionStreak >= 3) {
+    mascotSay('streak-3');
+    mascotSetState('celebrating');
+    _mascotCompletionStreak = 0;  // 重置避免一直觸發
+  }
+}
+
+// 大筆收款偵測（單筆 ≥ 10000 → shocked 表情 + big-payment 訊息）
+const BIG_PAYMENT_THRESHOLD = 10000;
+function mascotOnPaymentAdd(amount) {
+  if (!mascotState.enabled) return;
+  const a = +amount || 0;
+  if (a < BIG_PAYMENT_THRESHOLD) return;
+  // shocked 表情（不是 state）：大眼 1 秒
+  mascotSetEyes('shocked');
+  setTimeout(() => mascotSetEyes('open'), 1100);
+  mascotSay('big-payment');
+}
+
+// 月目標達標偵測（避免每次 render 都重複觸發 — 用 localStorage 記錄最近一次達標的月份）
+function mascotCheckMonthlyGoalReached(currentPaid, target) {
+  if (!mascotState.enabled || target <= 0 || currentPaid < target) return;
+  const thisMo = thisMonth();
+  const lastReachedMo = localStorage.getItem('cloud-mascot-last-monthly-goal');
+  if (lastReachedMo === thisMo) return;  // 本月已慶祝過
+  localStorage.setItem('cloud-mascot-last-monthly-goal', thisMo);
+  mascotSay('goal-reached-monthly');
+  mascotSetState('celebrating');
+}
+
+// 切換 mascot 狀態（8 種 state）
+// success / error / celebrating 自動 2.5/2.5/1.8 秒後回 idle
 function mascotSetState(state) {
   if (!MASCOT_STATES.includes(state)) state = 'idle';
   const c = document.getElementById('mascot-container');
@@ -6450,6 +6582,8 @@ function mascotSetState(state) {
   mascotState.current = state;
   // 嘴巴跟著變
   mascotSetMouth(MASCOT_STATE_TO_MOUTH[state]);
+  // v3.23.3：眼睛跟著變（sleeping 閉眼，其他開眼）
+  mascotSetEyes(state === 'sleeping' ? 'closed' : 'open');
   // 暫態自動回 idle
   if (mascotState.stateTimer) { clearTimeout(mascotState.stateTimer); mascotState.stateTimer = null; }
   if (TRANSIENT_STATES[state]) {
@@ -6462,10 +6596,17 @@ const MASCOT_EVENT_TO_STATE = {
   'job-done': 'success',
   'job-paid': 'success',
   'job-fully-paid': 'success',
-  'goal-reached-monthly': 'success',
+  'goal-reached-monthly': 'celebrating',  // v3.23.3：升級為 celebrating（金色光暈）
+  'streak-3': 'celebrating',              // v3.23.3
+  'big-payment': 'success',               // v3.23.3
   'app-startup-overdue': 'thinking',
   'job-cancel': 'error',
-  // 其他 event 維持 idle
+  'search-open': 'searching',             // v3.23.3
+  'export-pdf': 'loading',                // v3.23.3
+  'import-success': 'success',            // v3.23.3
+  'undo-action': 'thinking',              // v3.23.3
+  'timer-start': 'loading',               // v3.23.3
+  'timer-stop': 'success',                // v3.23.3
 };
 
 // 啟動時呼叫一次（從 config 還原 + 注入 SVG + 看情況打招呼）
@@ -6480,6 +6621,10 @@ function mascotInit() {
     c.classList.toggle('hidden', !mascotState.enabled);
     // v3.23.2：啟動時 set 預設狀態 idle
     mascotSetState('idle');
+    // v3.23.3：啟動 idle 偵測 + 隨機眨眼
+    mascotInitIdleListener();
+    mascotResetIdleTimer();
+    mascotScheduleWink();
   }
   // 同步設定頁 UI
   const cb = document.getElementById('pref-mascot-enabled');
@@ -6654,6 +6799,11 @@ function renderRevenueGoals() {
   renderGoalProgress('monthly', monthPaid, goals.monthly, 'month');
   // 年度目標 + 進度條
   renderGoalProgress('yearly', yearPaid, goals.yearly, 'year');
+
+  // v3.23.3：月目標達標 mascot 慶祝（每月只觸發一次）
+  if (typeof mascotCheckMonthlyGoalReached === 'function') {
+    mascotCheckMonthlyGoalReached(monthPaid, goals.monthly);
+  }
 }
 
 function renderGoalProgress(kind, current, target, scale) {
@@ -7724,6 +7874,8 @@ function startActiveTimer(jobId) {
   startActiveTimerTick();
   renderActiveTimerWidget();
   refreshModalTimerDisplay();
+  // v3.23.3：mascot 開始計時
+  if (typeof mascotSay === 'function') mascotSay('timer-start');
 }
 
 // 暫停：保留 jobId，可按繼續接著跑
@@ -7757,6 +7909,8 @@ function finishActiveTimer() {
     j.timeSpentMs = 0;  // 已結算，歸零
   }
   toast(`✓ 已加 ${hours} 小時到 ${j ? (j.title || '案件') : '案件'} 的工時`);
+  // v3.23.3：mascot 結束計時
+  if (typeof mascotSay === 'function') mascotSay('timer-stop');
   clearActiveTimer();
   save();
   // 如果 modal 正開的就是這個案件，也同步更新工時 input
@@ -8409,6 +8563,8 @@ async function copyInvoiceImage() {
 
 async function exportInvoicePDF() {
   try {
+    // v3.23.3：mascot loading
+    if (typeof mascotSay === 'function') mascotSay('export-pdf');
     const canvas = await captureInvoiceCanvas();
     if (!canvas) return;
     toastProgress('📄 產生 PDF...');
@@ -8453,8 +8609,12 @@ async function exportInvoicePDF() {
     pdf.save(getInvoiceFilename('pdf'));
     toast('✓ 已下載 PDF');
     recordInvoiceHistory('pdf');  // v3.12.0
+    // v3.23.3：完成後切到 success
+    if (typeof mascotSetState === 'function') mascotSetState('success');
   } catch (err) {
     toast('匯出失敗：' + err.message);
+    // v3.23.3：失敗 error
+    if (typeof mascotSetState === 'function') mascotSetState('error');
   }
 }
 
@@ -10143,9 +10303,22 @@ function saveJob() {
     logAction('job-edit', { jobId: editingJobId, title: payload.title, amount: payload.amount, clientId: payload.clientId, clientName: c?.name });
     // v3.23.0：觸發 mascot — 優先級 fully-paid > done > paid（同時只取一個）
     if (typeof mascotSay === 'function') {
-      if (!wasFullyPaid && jobIsFullyPaid(j))      mascotSay('job-fully-paid');
-      else if (!wasDone && j.done)                  mascotSay('job-done');
-      else if ((j.payments || []).length > prevPaymentCount && jobPaidTotal(j) > 0) mascotSay('job-paid');
+      if (!wasFullyPaid && jobIsFullyPaid(j)) {
+        mascotSay('job-fully-paid');
+        if (typeof mascotTrackCompletion === 'function') mascotTrackCompletion();
+      } else if (!wasDone && j.done) {
+        mascotSay('job-done');
+        if (typeof mascotTrackCompletion === 'function') mascotTrackCompletion();
+      } else if ((j.payments || []).length > prevPaymentCount && jobPaidTotal(j) > 0) {
+        // v3.23.3：偵測大筆收款（取本次新增的 payment 加總）
+        const newPayments = (j.payments || []).slice(prevPaymentCount);
+        const newPaymentSum = newPayments.reduce((s, p) => s + (+p.amount || 0), 0);
+        if (newPaymentSum >= BIG_PAYMENT_THRESHOLD && typeof mascotOnPaymentAdd === 'function') {
+          mascotOnPaymentAdd(newPaymentSum);  // shocked + big-payment
+        } else {
+          mascotSay('job-paid');
+        }
+      }
     }
   } else {
     payload.doneAt = payload.done ? (manualDoneAt || todayStr()) : null;
@@ -10948,9 +11121,13 @@ function importData(e) {
         importedConfigCnt > 0 ? `${importedConfigCnt} 項偏好` : ''
       ].filter(Boolean).join(' · ');
       toast(`✓ 已匯入：${summary}`, 5000);
+      // v3.23.3：mascot 慶祝匯入成功
+      if (typeof mascotSay === 'function') mascotSay('import-success');
     } catch(err) {
       alert('檔案格式錯誤：' + err.message);
       console.error('[importData] failed:', err);
+      // v3.23.3：mascot error
+      if (typeof mascotSetState === 'function') mascotSetState('error');
     }
   };
   r.readAsText(f);
@@ -11384,10 +11561,16 @@ function toggleGlobalSearch(forceState) {
   if (willOpen) {
     bar.classList.remove('hidden');
     setTimeout(() => input?.focus(), 30);  // wait for layout
+    // v3.23.3：mascot 搜尋中
+    if (typeof mascotSay === 'function') mascotSay('search-open');
   } else {
     bar.classList.add('hidden');
     if (input) input.value = '';
     if (results) results.classList.add('hidden');
+    // v3.23.3：搜尋關閉 → 回 idle
+    if (typeof mascotSetState === 'function' && mascotState && mascotState.current === 'searching') {
+      mascotSetState('idle');
+    }
   }
 }
 

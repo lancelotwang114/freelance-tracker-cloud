@@ -1,5 +1,55 @@
 ﻿# 版本更新歷史
 
+## v3.23.3 — Mascot 三批整合：8 狀態 + 4 嘴巴 + 4 眼睛 + 11 連動點（2026-05-05）
+
+> 一次把計畫的三批（緊接做 / 看反應再做 / 趣味性）全部做完。
+
+### 新增 3 個狀態（從 5 → 8）
+| state | 動畫 | 表情 | 觸發時機 |
+|---|---|---|---|
+| `searching` | 大幅左右搖（0.9s） | 😐 一條線 | 全域搜尋打開 |
+| `celebrating` | 兩跳 + 旋轉（1.4s）| 😄 大笑 | 月目標達標 / streak-3 / 慶祝事件 |
+| `sleeping` | 緩慢呼吸（4.5s） + 💤 飄字 | 😐 + 閉眼（r=2 點）| Idle 5 分鐘 |
+
+### 新增表情變化（4 種眼睛 × 4 種嘴巴）
+- `mascotSetEyes('open' | 'shocked' | 'closed')` — 圓眼 / 大眼（r=14）/ 點點（r=2）
+- `mascotWink()` — 左眼短暫變點 220ms
+- 嘴巴 4 種：`happy / flat / worried / big`（已有）+ `open` 小 O 形（shocked 用）
+
+### 11 個新連動點
+
+| # | 觸發 | 反應 |
+|---|---|---|
+| 1 | 計時器啟動 | mascot loading + 「開始計時，加油」 |
+| 2 | 計時器結束（finishActiveTimer） | mascot success + 「辛苦了，喝口水」 |
+| 3 | 收款單筆 ≥ 10000 | 大眼 shocked 1 秒 + 「哇！大筆入帳」 |
+| 4 | 全域搜尋打開 | mascot searching + 「找什麼？我幫你」 |
+| 5 | 全域搜尋關閉 | 自動回 idle |
+| 6 | 匯出請款單 PDF | mascot loading → 完成 success / 失敗 error |
+| 7 | 匯入備份成功 | mascot success + 「資料來了！歡迎回來」 |
+| 8 | 匯入備份失敗 | mascot error |
+| 9 | 月目標達標（每月一次） | mascot celebrating + 「月目標達標了，你是神！」 |
+| 10 | 連續完成 3+ 筆案件（1 分鐘內）| mascot celebrating + 「3 連發！」 |
+| 11 | Ctrl+Z undo | mascot thinking + 「上一步…撤回中」 |
+
+### 額外趣味
+- **隨機眨眼**：25-45 秒一次，只在 idle 時觸發
+- **idle 5 分鐘自動 sleeping**：閉眼 + 呼吸 + 💤 飄字
+- **任何活動立刻甦醒**：mousemove / click / keydown / scroll / touchstart
+- **甦醒打招呼**：「啊？我剛打瞌睡」「你回來啦～」
+
+### 訊息池新增
+- `big-payment` 4 句、`search-open` 3 句、`export-pdf` 3 句、`import-success` 3 句、`undo-action` 3 句、`sleeping` 3 句、`wake-up` 3 句
+
+### 設定頁
+🤖 小幫手 card 預覽按鈕從 5 個擴充到 9 個：
+`😊 待機 / ⌛ 處理中 / 🤔 思考 / ✅ 完成 / ❌ 錯誤 / 🔍 搜尋中 / 🎉 慶祝 / 😴 睡覺 / 😉 眨眼`
+
+### Localstorage 新增 key
+- `cloud-mascot-last-monthly-goal`：記錄最後一次達標的月份（YYYY-MM），避免每次 render 都重複慶祝
+
+---
+
 ## v3.23.2 — Mascot 5 狀態 + 嘴巴表情切換（純 CSS，零依賴）（2026-05-05）
 
 > 採納 user 提案的 5 狀態系統（idle/loading/thinking/success/error），但**不引入 Lottie**（違反專案無依賴規則），改用純 CSS animation + SVG path swap 達到 80% 視覺效果。
