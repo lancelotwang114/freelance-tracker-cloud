@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-05-v3.23.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-05-v3.23.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6333,22 +6333,38 @@ function renderRevenue() {
 // 觸發點：完成案件 / 收款 / 新增 / 達標 / 啟動有逾期 等 ~10 種事件。
 // 防擾人：同類事件 30 秒內不重複觸發；對話框 5 秒自動消失。
 
-const MASCOT_SVG = `<svg viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <ellipse cx="110" cy="185" rx="50" ry="12" fill="#000" opacity="0.1"/>
-  <rect x="40" y="60" width="140" height="110" rx="35" fill="#60A5FA"/>
-  <line x1="110" y1="30" x2="110" y2="60" stroke="#60A5FA" stroke-width="6"/>
-  <circle cx="110" cy="25" r="10" fill="#60A5FA"/>
-  <rect x="60" y="75" width="100" height="70" rx="25" fill="#fff"/>
-  <circle cx="90" cy="105" r="10" fill="#1F2937"/>
-  <circle cx="130" cy="105" r="10" fill="#1F2937"/>
-  <circle cx="87" cy="102" r="3" fill="#fff"/>
-  <circle cx="127" cy="102" r="3" fill="#fff"/>
-  <path d="M85 125 Q110 140 135 125" stroke="#1F2937" stroke-width="4" fill="none" stroke-linecap="round"/>
-  <ellipse cx="80" cy="170" rx="15" ry="10" fill="#3B82F6"/>
-  <ellipse cx="140" cy="170" rx="15" ry="10" fill="#3B82F6"/>
-  <circle cx="85" cy="150" r="6" fill="#34D399"/>
-  <circle cx="110" cy="150" r="6" fill="#FBBF24"/>
-  <circle cx="135" cy="150" r="6" fill="#F87171"/>
+// v3.23.1：新版素材 (Mascot/0949.svg)，多了「手臂」造型，更立體可愛
+// 各部位加 id，未來方便用 CSS class 切換表情 / 狀態（idle/loading/thinking/success/error）
+const MASCOT_SVG = `<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <ellipse cx="120" cy="200" rx="60" ry="12" fill="#000" opacity="0.08"/>
+  <g id="robot">
+    <rect id="body" x="50" y="80" width="140" height="110" rx="35" fill="#4F8EF7"/>
+    <g id="antenna">
+      <line x1="120" y1="40" x2="120" y2="80" stroke="#4F8EF7" stroke-width="6"/>
+      <circle cx="120" cy="35" r="10" fill="#4F8EF7"/>
+    </g>
+    <rect id="face" x="70" y="95" width="100" height="70" rx="20" fill="#ffffff"/>
+    <g id="eyes">
+      <circle id="eyeL" cx="95" cy="125" r="10" fill="#1F2937"/>
+      <circle id="eyeR" cx="145" cy="125" r="10" fill="#1F2937"/>
+      <circle cx="92" cy="122" r="3" fill="#fff"/>
+      <circle cx="142" cy="122" r="3" fill="#fff"/>
+    </g>
+    <path id="mouth" d="M90 145 Q120 160 150 145" stroke="#1F2937" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <g id="arms">
+      <rect x="35" y="100" width="20" height="50" rx="10" fill="#4F8EF7"/>
+      <rect x="185" y="100" width="20" height="50" rx="10" fill="#4F8EF7"/>
+    </g>
+    <g id="legs">
+      <ellipse cx="90" cy="185" rx="18" ry="12" fill="#3B82F6"/>
+      <ellipse cx="150" cy="185" rx="18" ry="12" fill="#3B82F6"/>
+    </g>
+    <g id="buttons">
+      <circle cx="95" cy="165" r="6" fill="#34D399"/>
+      <circle cx="120" cy="165" r="6" fill="#FBBF24"/>
+      <circle cx="145" cy="165" r="6" fill="#F87171"/>
+    </g>
+  </g>
 </svg>`;
 
 // 訊息池：每事件 3-6 句，可愛 + 鼓勵風格

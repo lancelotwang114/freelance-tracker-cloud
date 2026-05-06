@@ -2891,11 +2891,12 @@ body.view-board #jobs-group-control {
   .cloud-account-pill .pill-name { display: none; }
 }
 
-/* ==================== Mascot 小幫手 (v3.23.0) ==================== */
+/* ==================== Mascot 小幫手 (v3.23.0+v3.23.1) ==================== */
+/* v3.23.1：放左下，避開 FAB（新增鈕在右下 bottom:20 right:20） */
 .mascot-container {
   position: fixed;
   bottom: 20px;
-  right: 20px;
+  left: 20px;
   width: 64px;
   height: 64px;
   cursor: pointer;
@@ -2922,7 +2923,7 @@ body.view-board #jobs-group-control {
 .mascot-bubble {
   position: fixed;
   bottom: 92px;
-  right: 16px;
+  left: 16px;
   max-width: 240px;
   background: var(--card);
   color: var(--text);
@@ -2939,11 +2940,12 @@ body.view-board #jobs-group-control {
   from { transform: translateY(8px) scale(0.9); opacity: 0; }
   to   { transform: translateY(0) scale(1); opacity: 1; }
 }
+/* v3.23.1：箭頭從右下改左下（指向左下角的 mascot） */
 .mascot-bubble::after {
   content: '';
   position: absolute;
   bottom: -10px;
-  right: 28px;
+  left: 28px;
   width: 0; height: 0;
   border-left: 9px solid transparent;
   border-right: 9px solid transparent;
@@ -2953,7 +2955,7 @@ body.view-board #jobs-group-control {
   content: '';
   position: absolute;
   bottom: -7px;
-  right: 30px;
+  left: 30px;
   width: 0; height: 0;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
@@ -2987,8 +2989,9 @@ body.view-board #jobs-group-control {
 }
 
 @media (max-width: 480px) {
-  .mascot-container { width: 52px; height: 52px; bottom: 80px; right: 12px; }
-  .mascot-bubble { bottom: 140px; right: 12px; max-width: 200px; font-size: 12px; }
+  /* 手機 mascot 改更小 + 更靠下角，避開可能的底部 navigation */
+  .mascot-container { width: 48px; height: 48px; bottom: 16px; left: 12px; }
+  .mascot-bubble { bottom: 72px; left: 12px; max-width: 200px; font-size: 12px; }
 }
 
 /* ==================== Utilities ==================== */

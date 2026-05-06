@@ -1,5 +1,20 @@
 ﻿# 版本更新歷史
 
+## v3.23.1 — Mascot 移到左下避開 FAB + 換新版 SVG（2026-05-05）
+
+### 修 bug
+- Mascot 從右下 (bottom:20 right:20) 改成**左下** (bottom:20 left:20)
+- FAB 新增鈕在右下 → 不再被擋住
+- 對話框箭頭從右側改成左側（指向左下角的 mascot）
+- 手機 media query 也對齊改成 `left`
+
+### 換 SVG 素材
+- 用 user 提供的新版 `Mascot/0949.svg`（多了「手臂」造型，更立體可愛）
+- viewBox 從 220×220 改 240×240
+- 各部位加 id（body/face/eyes/mouth/arms/legs/buttons），未來方便用 CSS class 切換表情 / 狀態
+
+---
+
 ## v3.23.0 — 🤖 小幫手 Mascot（2026-05-05）
 
 > 右下角浮動小機器人，事件發生時跳鼓勵文字。可愛 + 鼓勵風格，強化使用者連結。
