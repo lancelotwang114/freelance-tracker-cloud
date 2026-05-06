@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-05-v3.23.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-05-v3.23.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -516,9 +516,22 @@ let cloudSyncStatus = 'idle';      // idle | pending | syncing | error
 let cloudLastSyncError = null;     // 最近一次失敗訊息，用於 indicator hover
 
 function cloudSetSyncStatus(status, errMsg) {
+  const prev = cloudSyncStatus;
   cloudSyncStatus = status;
   cloudLastSyncError = errMsg || null;
   cloudUpdateSyncIndicator();
+  // v3.23.2：mascot 跟著反應
+  // syncing/pending → loading；error → error；success（從 error 恢復）→ success；其他 → 不動
+  if (typeof mascotSetState === 'function') {
+    if (status === 'error' && prev !== 'error') mascotSetState('error');
+    else if (status === 'idle' && prev === 'error') mascotSetState('success');
+    else if (status === 'syncing' || status === 'pending') {
+      // 只在 mascot 目前是 idle 時才切 loading（避免覆蓋其他事件的 success/error）
+      if (mascotState && mascotState.current === 'idle') mascotSetState('loading');
+    } else if (status === 'idle' && (mascotState && mascotState.current === 'loading')) {
+      mascotSetState('idle');
+    }
+  }
 }
 
 // v3.22.3：把 ISO 時間轉成中文相對時間（剛剛 / 30 秒前 / 5 分前 / 2 小時前 / 3 天前 / 5/1）
@@ -6394,8 +6407,66 @@ let mascotState = {
   lastTriggerTimes: {},                        // event → timestamp
   hideTimer: null,
   shakeTimer: null,
+  stateTimer: null,                            // v3.23.2：暫態狀態自動回 idle 的 timer
+  current: 'idle',                             // v3.23.2：current state
 };
 let mascotInited = false;
+
+// v3.23.2：5 種狀態 + 4 種嘴巴（純 SVG path swap）
+const MASCOT_STATES = ['idle', 'loading', 'thinking', 'success', 'error'];
+const MASCOT_MOUTHS = {
+  happy:   'M90 145 Q120 160 150 145',     // 😊 預設笑
+  flat:    'M95 150 L145 150',              // 😐 一條線（loading/thinking）
+  worried: 'M90 152 Q120 138 150 152',      // 😟 反向弧線（error）
+  big:     'M85 142 Q120 168 155 142',      // 😄 大笑（success）
+};
+// state → 嘴巴 map
+const MASCOT_STATE_TO_MOUTH = {
+  idle: 'happy',
+  loading: 'flat',
+  thinking: 'flat',
+  success: 'big',
+  error: 'worried',
+};
+// 哪些 state 是「暫態」(自動回 idle)
+const TRANSIENT_STATES = { success: 2500, error: 2500 };
+
+function mascotSetMouth(mouthKey) {
+  const m = document.querySelector('#mascot-container #mouth');
+  if (!m) return;
+  const d = MASCOT_MOUTHS[mouthKey] || MASCOT_MOUTHS.happy;
+  m.setAttribute('d', d);
+}
+
+// 切換 mascot 狀態（idle/loading/thinking/success/error）
+// success / error 自動 2.5 秒後回 idle
+function mascotSetState(state) {
+  if (!MASCOT_STATES.includes(state)) state = 'idle';
+  const c = document.getElementById('mascot-container');
+  if (!c) return;
+  // 移除所有 state class
+  MASCOT_STATES.forEach(s => c.classList.remove(`state-${s}`));
+  c.classList.add(`state-${state}`);
+  mascotState.current = state;
+  // 嘴巴跟著變
+  mascotSetMouth(MASCOT_STATE_TO_MOUTH[state]);
+  // 暫態自動回 idle
+  if (mascotState.stateTimer) { clearTimeout(mascotState.stateTimer); mascotState.stateTimer = null; }
+  if (TRANSIENT_STATES[state]) {
+    mascotState.stateTimer = setTimeout(() => mascotSetState('idle'), TRANSIENT_STATES[state]);
+  }
+}
+
+// event → state 自動 mapping（mascotSay 會自動套用）
+const MASCOT_EVENT_TO_STATE = {
+  'job-done': 'success',
+  'job-paid': 'success',
+  'job-fully-paid': 'success',
+  'goal-reached-monthly': 'success',
+  'app-startup-overdue': 'thinking',
+  'job-cancel': 'error',
+  // 其他 event 維持 idle
+};
 
 // 啟動時呼叫一次（從 config 還原 + 注入 SVG + 看情況打招呼）
 function mascotInit() {
@@ -6407,6 +6478,8 @@ function mascotInit() {
   if (c) {
     c.innerHTML = MASCOT_SVG;
     c.classList.toggle('hidden', !mascotState.enabled);
+    // v3.23.2：啟動時 set 預設狀態 idle
+    mascotSetState('idle');
   }
   // 同步設定頁 UI
   const cb = document.getElementById('pref-mascot-enabled');
@@ -6474,6 +6547,11 @@ function mascotSay(eventType, customMsg) {
     c.classList.add('mascot-shake');
     if (mascotState.shakeTimer) clearTimeout(mascotState.shakeTimer);
     mascotState.shakeTimer = setTimeout(() => c.classList.remove('mascot-shake'), MASCOT_SHAKE_MS);
+  }
+
+  // v3.23.2：根據 event 自動切 state（success / error / thinking 會自動 2.5 秒後回 idle）
+  if (eventType && MASCOT_EVENT_TO_STATE[eventType]) {
+    mascotSetState(MASCOT_EVENT_TO_STATE[eventType]);
   }
 }
 

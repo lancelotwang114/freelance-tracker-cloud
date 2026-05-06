@@ -71,6 +71,7 @@
 | **v3.22.10** | **Token refresh 5 道防護（解決分頁休眠導致 1-2 hr 被登出）：啟動主動 refresh + 三事件觸發 + 失敗 retry + 不清 state + Pill 智慧重連** | ✅ **完成（2026-05-05）** |
 | **v3.23.0** | **🤖 Mascot 小幫手：右下浮動 + 12 種事件觸發鼓勵文字 + 個人化命名 + 30s 防擾 cooldown（純 inline SVG，零依賴）** | ✅ **完成（2026-05-05）** |
 | **v3.23.1** | **Mascot 移到左下避開 FAB + 換新版 SVG（多手臂造型，加 id 方便狀態切換）** | ✅ **完成（2026-05-05）** |
+| **v3.23.2** | **Mascot 5 狀態（idle/loading/thinking/success/error）+ 4 種嘴巴表情切換 + 自動連動 mascotSay / cloudSetSyncStatus（純 CSS，零依賴）** | ✅ **完成（2026-05-05）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

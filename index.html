@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-05-v3.23.1">
+<meta name="app-version" content="2026-05-05-v3.23.2">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -733,6 +733,17 @@
         <div style="margin-top: 14px;">
           <button class="btn btn-outline btn-sm" onclick="mascotTestSay()">試試看 ▶</button>
           <span style="margin-left: 8px; font-size: 11px; color: var(--muted);">（隨機說一句鼓勵的話）</span>
+        </div>
+        <!-- v3.23.2：5 種狀態預覽 -->
+        <div style="margin-top: 14px; padding: 10px 12px; background: var(--bg); border-radius: 8px;">
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px;">預覽狀態（看左下角 mascot 反應）：</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('idle')">😊 待機</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('loading')">⌛ 處理中</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('thinking')">🤔 思考</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('success')">✅ 完成</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('error')">❌ 錯誤</button>
+          </div>
         </div>
       </div>
     </div>

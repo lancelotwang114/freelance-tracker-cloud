@@ -1,5 +1,44 @@
 ﻿# 版本更新歷史
 
+## v3.23.2 — Mascot 5 狀態 + 嘴巴表情切換（純 CSS，零依賴）（2026-05-05）
+
+> 採納 user 提案的 5 狀態系統（idle/loading/thinking/success/error），但**不引入 Lottie**（違反專案無依賴規則），改用純 CSS animation + SVG path swap 達到 80% 視覺效果。
+
+### 5 狀態 × 4 嘴巴
+
+| 狀態 | CSS 動畫 | 嘴巴 | 光暈 | 觸發時機 |
+|---|---|---|---|---|
+| `idle` | 上下浮動（mascotIdleBob，3s） | 😊 笑 | 預設陰影 | 預設 / 暫態結束後 |
+| `loading` | 左右搖擺（mascotSwing，1.2s） | 😐 一條線 | 預設 | 同步中 (sync syncing/pending) |
+| `thinking` | 歪頭（mascotTilt，2s） | 😐 一條線 | 預設 | 啟動時有逾期未收款 |
+| `success` | 跳起 + 縮放（mascotJumpGlow，0.8s） | 😄 大笑 | 綠色光暈 | 完成案件 / 收款 / 達標 |
+| `error` | 左右震動（mascotShakeError，0.5s） | 😟 反向弧 | 紅色光暈 | 同步失敗 / 取消案件 |
+
+### API
+```js
+mascotSetState('success');   // 切狀態，success/error 自動 2.5 秒回 idle
+mascotSetMouth('big');       // 單獨換嘴巴（極少用，state 會自動帶）
+```
+
+### 自動連動
+- **mascotSay(eventType)** → 對應事件自動 `mascotSetState`：
+  - `job-done / job-paid / job-fully-paid / goal-reached-monthly` → success
+  - `app-startup-overdue` → thinking
+  - `job-cancel` → error
+  - 其他 → idle（不動）
+- **cloudSetSyncStatus** → 同步狀態自動聯動：
+  - syncing/pending → loading
+  - error → error
+  - error 恢復 idle → success（短暫慶祝）
+
+### 設定頁
+🤖 小幫手 card 加「預覽狀態」5 個按鈕，點任一個立刻看 mascot 反應，方便調整 / 自訂時測試。
+
+### 為什麼不用 Lottie
+專案規則「依賴允許清單：html2canvas / jsPDF / GIS SDK，其他一律不加」。Lottie 是 ~150KB lib + 5 個 JSON 檔，違反規則。改用純 CSS + SVG path swap 達 80% 視覺效果，0 KB 額外依賴。
+
+---
+
 ## v3.23.1 — Mascot 移到左下避開 FAB + 換新版 SVG（2026-05-05）
 
 ### 修 bug

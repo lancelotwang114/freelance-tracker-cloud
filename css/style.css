@@ -2988,6 +2988,54 @@ body.view-board #jobs-group-control {
   75% { transform: translateY(-6px) rotate(5deg); }
 }
 
+/* v3.23.2：5 種狀態動畫（純 CSS，零依賴）
+   idle / loading / thinking / success / error
+   覆蓋預設的 mascotIdleBob */
+.mascot-container.state-idle svg {
+  animation: mascotIdleBob 3s ease-in-out infinite;
+}
+.mascot-container.state-loading svg {
+  animation: mascotSwing 1.2s ease-in-out infinite;
+}
+.mascot-container.state-thinking svg {
+  animation: mascotTilt 2s ease-in-out infinite;
+}
+.mascot-container.state-success svg {
+  animation: mascotJumpGlow .8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.mascot-container.state-error svg {
+  animation: mascotShakeError .5s ease-in-out;
+}
+.mascot-container.state-success {
+  filter: drop-shadow(0 0 14px rgba(16,185,129,0.7));
+}
+.mascot-container.state-error {
+  filter: drop-shadow(0 0 14px rgba(239,68,68,0.7));
+}
+
+@keyframes mascotSwing {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes mascotTilt {
+  0%, 100% { transform: rotate(0); }
+  40% { transform: rotate(10deg); }
+  60% { transform: rotate(8deg); }
+}
+@keyframes mascotJumpGlow {
+  0% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-14px) scale(1.08); }
+  70% { transform: translateY(-2px) scale(1); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes mascotShakeError {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
 @media (max-width: 480px) {
   /* 手機 mascot 改更小 + 更靠下角，避開可能的底部 navigation */
   .mascot-container { width: 48px; height: 48px; bottom: 16px; left: 12px; }
