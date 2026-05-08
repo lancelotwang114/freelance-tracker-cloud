@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.9';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.10';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6394,6 +6394,10 @@ function buildRangeOptions() {
     html += '<option value="custom">📌 自訂年份範圍</option>';
     revenueState.range = '5';
   } else {
+    // v3.24.10：加「當月」「上個月」快捷選項（最常用，放最前）
+    html += '<option value="this-month">📅 當月</option>';
+    html += '<option value="last-month">📅 上個月</option>';
+    html += '<option disabled>──────────</option>';
     html += '<option value="3">最近 3 個月</option>';
     html += '<option value="6" selected>最近 6 個月</option>';
     html += '<option value="12">最近 12 個月</option>';
@@ -6501,7 +6505,32 @@ function renderRevenue() {
   const r = String(revenueState.range);
   let displayKeys = filled;
 
-  if (r === 'all') {
+  if (r === 'this-month') {
+    // v3.24.10：當月（月度模式才有意義；年度模式 fallback 到當年）
+    if (revenueState.mode === 'month') {
+      const ym = thisMonth();
+      displayKeys = [ym];
+      if (!buckets[ym]) buckets[ym] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 };
+    } else {
+      const y = String(new Date().getFullYear());
+      displayKeys = [y];
+      if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 };
+    }
+  } else if (r === 'last-month') {
+    // v3.24.10：上個月（月度模式才有意義；年度模式 fallback 到去年）
+    if (revenueState.mode === 'month') {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      displayKeys = [ym];
+      if (!buckets[ym]) buckets[ym] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 };
+    } else {
+      const y = String(new Date().getFullYear() - 1);
+      displayKeys = [y];
+      if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 };
+    }
+  } else if (r === 'all') {
     displayKeys = filled;
   } else if (r === 'ytd') {
     // 今年至今：年度模式才有此選項
