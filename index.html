@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-08-v3.24.0">
+<meta name="app-version" content="2026-05-08-v3.24.1">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -429,8 +429,6 @@
         <div class="client-detail-title">
           <span id="client-detail-color-dot" class="client-color-dot"></span>
           <h2 id="client-detail-name">—</h2>
-          <!-- v3.24.0：業主層級 badge（含稅請款） -->
-          <span id="client-detail-tax-badge" class="client-tax-badge hidden" title="此業主含稅請款，內部對帳會自動扣 5%">📨 含稅</span>
         </div>
         <div class="client-detail-actions">
           <button class="btn btn-outline btn-sm" id="client-detail-edit-btn" onclick="editCurrentDetailClient()">編輯</button>
@@ -600,6 +598,14 @@
         </div>
       </div>
 
+      <!-- v3.24.1：本次請款扣稅 toggle（純對帳用，匯出時不顯示給業主） -->
+      <div style="margin-top: 10px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="checkbox" id="inv-tax-toggle" onchange="onInvoiceTaxToggleChange()">
+          <span>📨 本次請款扣 5% 稅（自吸收，<b>匯出時不顯示給業主</b>，只在下方對帳區算）</span>
+        </label>
+      </div>
+
       <div style="display:flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;">
         <button class="btn btn-primary" onclick="exportInvoicePDF()">📄 下載 PDF</button>
         <button class="btn btn-primary" onclick="exportInvoicePNG()">🖼️ 下載圖片</button>
@@ -609,6 +615,15 @@
       </div>
     </div>
     <div id="invoice-view"></div>
+
+    <!-- v3.24.1：請款單對帳區（業主看不到，匯出 PDF/PNG 不會包含） -->
+    <div class="card no-print" id="invoice-net-breakdown" style="margin-top: 14px;">
+      <h3 style="font-size: 15px; margin-bottom: 8px;">💰 我的對帳（業主看不到）</h3>
+      <div style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
+        本次請款的實收試算（扣稅 / 分潤 / 外包）。此區只在頁面顯示，匯出 PDF / PNG 不會包含。
+      </div>
+      <div id="invoice-net-breakdown-body" style="font-family: monospace; font-size: 13px; line-height: 1.8;"></div>
+    </div>
 
     <!-- v3.12.0：請款單歷史（每次匯出留紀錄、可改 status / 重發 / 刪除） -->
     <div class="card collapsible collapsed no-print" id="card-invoice-history">
@@ -1428,17 +1443,6 @@
         <input type="number" id="client-commission-rate" min="0" max="100" step="0.5" placeholder="0">
       </div>
     </div>
-
-    <!-- v3.24.0：含稅請款 toggle -->
-    <label style="display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 10px; background: var(--bg); border-radius: 8px; cursor: pointer;">
-      <input type="checkbox" id="client-requires-invoice" style="margin-top: 3px;">
-      <div>
-        <div style="font-weight: 500; font-size: 13px;">📨 此業主含稅請款（自吸收 5% 稅）</div>
-        <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
-          開啟後：對帳「我實收」會自動扣 5%（請款單顯示給業主的金額不變）。
-        </div>
-      </div>
-    </label>
 
     <div class="section-divider"></div>
 
