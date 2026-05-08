@@ -1,5 +1,53 @@
 ﻿# 版本更新歷史
 
+## v3.24.9 — 計時器隱藏 + Modal sticky footer + Google 登出 hotfix（2026-05-08）
+
+### 1. 案件編輯 modal 計時器隱藏
+- 工時那一排的 4 個計時器 element 加 `style="display:none"`：
+  - `#job-timer-display`（00:00:00）
+  - `#job-timer-toggle`（▶ 開始 按鈕）
+  - `#job-timer-finish`（✓ 結束 按鈕）
+  - 重設按鈕
+- 工時 input 保留可手動輸入
+- 計時器 JS 函式（toggleJobTimer / finishJobTimer / resetJobTimer / loadJobTimer）全部保留
+- 未來想用：把 `style="display:none"` 拿掉即可
+
+### 2. Modal 取消/儲存按鈕 sticky 凍結底部
+- `.modal-actions` CSS 改 `position: sticky; bottom: -20px;` + 負 margin 抵銷 .modal padding
+- 加 `border-top: 1px solid var(--border)` 視覺分隔
+- 加 `background: var(--card)` 蓋住下方內容
+- **7 個 modal 都自動受影響**（共用 .modal-actions class）：
+  - 案件編輯
+  - 業主編輯
+  - 收款帳號編輯
+  - 批次標收款日期
+  - 設折扣
+  - 確認動作
+  - Onboarding
+- 使用體驗：modal 內容捲動時，「取消」「儲存」按鈕永遠在底部
+
+### 3. 🚨 Google 登出 hotfix
+**Bug**：v3.22.10 的「啟動時主動 refresh」防護沒覆蓋「**關掉 app 過 1 hr 重開**」的情境。
+
+**根因**：`cloudLoadAuthState()` 在 token 過期時直接清掉 localStorage 並 return false → `cloudInitGoogleAuth` 看到 `restored = false` → silent refresh 不會被觸發 → user 看到「未登入」。
+
+**修法**：cloudLoadAuthState 改成「**token 過期不立刻清**」：
+- 只要 user info 還在 → 還原所有狀態（含過期 token）→ return true
+- cloudInitGoogleAuth 看到 restored = true → boot refresh 邏輯生效（remainingOnBoot < 0 → 立刻 _silentRefresh）
+- silent refresh 成功 → 補新 token → user 完全無感
+- silent refresh 失敗 → pill 變紅光暈 + toast 提示重登（user info 仍在，點頭像直接重登）
+
+**user 看到的變化**：
+- 改前：關掉 app 過 1 hr 重開 → pill 變回「+ 登入」灰色（被登出）
+- 改後：關掉 app 過 N hr 重開 → pill 立刻顯示頭像 + email → 短暫 silent refresh 後一切正常（除非 Google session 也過期）
+
+**localStorage 何時會清掉**：
+- 損壞（JSON parse fail）
+- 沒有 user info（user 主動點登出按鈕後）
+- 不會因為「token 過期」清掉
+
+---
+
 ## v3.24.8 — 帳面總收入用 jobFinalAmount + 分潤改基於未稅金額（2026-05-08）
 
 ### 1. 帳面總收入修正

@@ -930,7 +930,19 @@ input:focus, select:focus, textarea:focus {
   outline-offset: -1px;
   border-color: var(--primary);
 }
-.modal-actions { display: flex; gap: 8px; margin-top: 20px; }
+/* v3.24.9：modal 取消/儲存按鈕 sticky 凍結在底部，不用拉到底才能按
+   負 margin 讓 footer 視覺貼齊 .modal 邊緣，背景蓋住內容 */
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  position: sticky;
+  bottom: -20px;                 /* 抵銷 .modal 的 padding-bottom */
+  background: var(--card);
+  padding: 12px 20px;
+  margin: 16px -20px -20px;      /* 左右下 -20px 抵銷 .modal padding，讓 footer 全寬 */
+  border-top: 1px solid var(--border);
+  z-index: 1;
+}
 .modal-actions .btn { flex: 1; }
 
 /* ==================== Invoice ==================== */

@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.8';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.9';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -87,7 +87,9 @@ function cloudSaveAuthState() {
 }
 
 // 從 localStorage 還原 cloudAuthState（app 啟動時呼叫）
-// 回傳 true = 還原成功且 token 還沒過期；false = 沒資料或過期或損壞
+// 回傳 true = 還原成功（有 user info）；false = 沒資料 / 損壞 / 沒 user info
+// v3.24.9：token 過期不再立刻清掉 — 改成保留 user info，啟動時觸發 silent refresh 自動補新 token
+//   解決「關掉 app 過 1 hr 重開 → 看到被登出」的問題
 function cloudLoadAuthState() {
   let raw;
   try {
@@ -99,21 +101,21 @@ function cloudLoadAuthState() {
   try {
     data = JSON.parse(raw);
   } catch (_) {
-    // 損壞就清掉
     try { localStorage.removeItem(CLOUD_AUTH_KEY); } catch (_) {}
     return false;
   }
 
-  // 過期就清掉並回 false（讓使用者重新登入）
-  // 留 60 秒 buffer，避免「剛還原就過期」的競爭狀況
-  if (!data.accessToken || !data.tokenExpiresAt || Date.now() > data.tokenExpiresAt - 60_000) {
+  // v3.24.9：只要有 user info 就還原（不管 token 是否過期）
+  // user info 是 user 主動登入後才有，沒了表示 user 主動登出（cloudClearAuthState）
+  if (!data.user) {
     try { localStorage.removeItem(CLOUD_AUTH_KEY); } catch (_) {}
     return false;
   }
 
-  cloudAuthState.accessToken = data.accessToken;
-  cloudAuthState.tokenExpiresAt = data.tokenExpiresAt;
-  cloudAuthState.user = data.user || null;
+  // 還原所有狀態（即使 token 已過期也載入，讓 cloudInitGoogleAuth 的 boot refresh 接手補新 token）
+  cloudAuthState.accessToken = data.accessToken || null;
+  cloudAuthState.tokenExpiresAt = data.tokenExpiresAt || 0;
+  cloudAuthState.user = data.user;
   return true;
 }
 

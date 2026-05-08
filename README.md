@@ -82,6 +82,7 @@
 | **v3.24.6** | **算法 C：所有請款一律視為含稅 / 1.05 反推（移除 case.taxApplied + schema v17）+「實際入帳」加 ⓘ hover 算法說明** | ✅ **完成（2026-05-08）** |
 | **v3.24.7** | **回退 v3.24.6：恢復 per-case taxApplied toggle（schema v18）+ 稅算法保留 /1.05 + ⓘ hover 文字更新** | ✅ **完成（2026-05-08）** |
 | **v3.24.8** | **帳面總收入改用 jobFinalAmount（折扣後）+ 分潤改基於未稅金額算（先扣稅再算分潤）** | ✅ **完成（2026-05-08）** |
+| **v3.24.9** | **計時器 UI 隱藏（功能保留）+ Modal 取消/儲存 sticky footer + 🚨 Google 登出 hotfix（cloudLoadAuthState 過期不清，啟動時 silent refresh 補 token）** | ✅ **完成（2026-05-08）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
