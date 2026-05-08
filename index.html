@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-05-v3.23.3">
+<meta name="app-version" content="2026-05-08-v3.24.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -244,6 +244,7 @@
       <button class="active" data-subtab="overview" onclick="switchRevenueSubtab('overview')">總覽</button>
       <button data-subtab="trend" onclick="switchRevenueSubtab('trend')">趨勢</button>
       <button data-subtab="analysis" onclick="switchRevenueSubtab('analysis')">分析</button>
+      <button data-subtab="outsource" onclick="switchRevenueSubtab('outsource')">📦 外包對帳</button>
     </div>
 
     <!-- ===== 總覽子分頁：控制 + summary + 月度趨勢圖 + 業主排行 + 月度業主彙整 ===== -->
@@ -386,6 +387,19 @@
       </div>
     </div>
 
+    <!-- ===== v3.24.0 外包對帳子分頁 ===== -->
+    <div class="rev-subtab-pane hidden" data-subtab="outsource">
+      <div class="card">
+        <h3>📦 外包對帳（內部用，業主看不到）</h3>
+        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+          <label style="margin: 0;">月份：</label>
+          <select id="outsource-month" onchange="renderOutsourceReport()" class="revenue-select"></select>
+          <button class="btn btn-outline btn-sm" onclick="exportOutsourceCSV()">匯出 CSV</button>
+        </div>
+        <div id="outsource-report"></div>
+      </div>
+    </div>
+
   </section>
 
   <!-- Clients -->
@@ -415,6 +429,8 @@
         <div class="client-detail-title">
           <span id="client-detail-color-dot" class="client-color-dot"></span>
           <h2 id="client-detail-name">—</h2>
+          <!-- v3.24.0：業主層級 badge（含稅請款） -->
+          <span id="client-detail-tax-badge" class="client-tax-badge hidden" title="此業主含稅請款，內部對帳會自動扣 5%">📨 含稅</span>
         </div>
         <div class="client-detail-actions">
           <button class="btn btn-outline btn-sm" id="client-detail-edit-btn" onclick="editCurrentDetailClient()">編輯</button>
@@ -1294,6 +1310,32 @@
         </div>
       </details>
 
+      <!-- v3.24.0：派發給外包 -->
+      <details id="job-outsource-details" style="margin-top: 10px;">
+        <summary style="cursor: pointer; font-weight: 500; padding: 6px 0;">🤝 派發給外包（選填）</summary>
+        <div style="padding: 10px; background: var(--bg); border-radius: 8px; margin-top: 6px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <label style="font-size: 12px;">外包對象（名字 / 暱稱）</label>
+              <input type="text" id="job-outsource-to" placeholder="例：阿明" maxlength="30" oninput="updateJobAmountSummary()">
+            </div>
+            <div>
+              <label style="font-size: 12px;">給外包金額（NT$）</label>
+              <input type="number" id="job-outsource-cost" min="0" placeholder="0" oninput="updateJobAmountSummary()">
+            </div>
+          </div>
+          <div style="margin-top: 6px; font-size: 11px; color: var(--muted);">
+            派出去做的部分。我實收 = 業主應付 − 5% 稅（如業主含稅）− 分潤 − 外包成本。
+          </div>
+        </div>
+      </details>
+
+      <!-- v3.24.0：實收試算（業主含稅 OR 有外包時才顯示） -->
+      <div id="job-net-breakdown" class="hidden" style="margin-top: 8px; padding: 10px 12px; background: var(--bg); border: 1px dashed var(--border); border-radius: 8px;">
+        <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px;">💰 實收試算（內部對帳用，業主看不到）</div>
+        <div id="job-net-breakdown-body" style="font-family: monospace; font-size: 12px; line-height: 1.7;"></div>
+      </div>
+
       <!-- 已取消（v3.6.4：不再用紅色強調，改成低調灰底；估價單已移到標題） -->
       <label for="job-cancelled" class="checkbox-row job-cancelled-row">
         <input type="checkbox" id="job-cancelled">
@@ -1386,6 +1428,17 @@
         <input type="number" id="client-commission-rate" min="0" max="100" step="0.5" placeholder="0">
       </div>
     </div>
+
+    <!-- v3.24.0：含稅請款 toggle -->
+    <label style="display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 10px; background: var(--bg); border-radius: 8px; cursor: pointer;">
+      <input type="checkbox" id="client-requires-invoice" style="margin-top: 3px;">
+      <div>
+        <div style="font-weight: 500; font-size: 13px;">📨 此業主含稅請款（自吸收 5% 稅）</div>
+        <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
+          開啟後：對帳「我實收」會自動扣 5%（請款單顯示給業主的金額不變）。
+        </div>
+      </div>
+    </label>
 
     <div class="section-divider"></div>
 

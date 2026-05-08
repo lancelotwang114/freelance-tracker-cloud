@@ -2891,6 +2891,27 @@ body.view-board #jobs-group-control {
   .cloud-account-pill .pill-name { display: none; }
 }
 
+/* v3.24.0：業主含稅 badge */
+.client-tax-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--warning-light, #fef3c7);
+  color: var(--warning, #d97706);
+  border: 1px solid var(--warning, #d97706);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+[data-theme="dark"] .client-tax-badge {
+  background: rgba(245,158,11,0.15);
+}
+
+/* v3.24.0：負數金額（倒貼用） */
+.amount-negative { color: var(--danger) !important; }
+
 /* ==================== Mascot 小幫手 (v3.23.0+v3.23.1) ==================== */
 /* v3.23.1：放左下，避開 FAB（新增鈕在右下 bottom:20 right:20） */
 .mascot-container {

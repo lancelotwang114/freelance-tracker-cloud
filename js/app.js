@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-05-v3.23.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3215,7 +3215,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 13;  // v3.14.0：v13 業主 + 案件 加 tags[]（multi-tag），舊 tag 字串自動 backfill
+const CURRENT_SCHEMA_VERSION = 14;  // v3.24.0：client.requiresInvoice + job.outsourceTo / outsourceCost
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -3342,6 +3342,20 @@ const SCHEMA_MIGRATIONS = {
       if (j.tag && !tags.includes(j.tag)) tags = [j.tag, ...tags];
       return { ...j, tags };
     });
+  },
+  // v13 → v14：發票稅 + 派外包（v3.24.0 新增）
+  // - client.requiresInvoice：此業主含稅請款（內部扣 5% 自負稅）
+  // - job.outsourceTo / outsourceCost：派外包對象 + 給外包定額
+  13: function(state) {
+    state.clients = (state.clients || []).map(c => ({
+      ...c,
+      requiresInvoice: !!c.requiresInvoice
+    }));
+    state.jobs = (state.jobs || []).map(j => ({
+      ...j,
+      outsourceTo: j.outsourceTo || '',
+      outsourceCost: j.outsourceCost != null ? +j.outsourceCost : 0
+    }));
   }
 };
 
@@ -3927,23 +3941,68 @@ function jobBelongMonth(j) {
   return getMonth(j.endDate || j.date);
 }
 
-// 案件的「實收金額」：折扣後 × (1 - 分潤比例)
-// v3.22.4 修：先扣折扣再算分潤，避免月度報表「實收」總計沒考慮折扣
+// 案件的「實收金額」：對帳用，**允許負數**反映倒貼
+// v3.22.4：先扣折扣再算分潤
+// v3.24.0：再扣 5% 發票稅（業主 requiresInvoice）+ 外包定額成本（outsourceCost）
+//   公式：實收 = 折扣後 − 5% 稅 − 分潤 − 外包成本
+//   三個扣減項都是「獨立、平行」相加（不是串接相乘），這樣會跟 jobCommission/jobInvoiceTax 對得起來：
+//     final = jobNetAmount + jobInvoiceTax + jobCommission + outsourceCost
+//   負數合理：派外包成本超過業主應付時 user 倒貼，要顯示負以提醒
 function jobNetAmount(j) {
-  const c = getClient(j.clientId);
-  const rate = (c && c.commissionRate) || 0;
-  const final = jobFinalAmount(j);  // 已扣折扣
-  if (rate <= 0) return final;
-  return Math.round(final * (1 - rate / 100));
+  const final = jobFinalAmount(j);                       // 折扣後（業主應付）
+  const tax = jobInvoiceTax(j);                          // 5% 自吸收（如有 requiresInvoice）
+  const commission = jobCommission(j);                   // 分潤（給介紹人）
+  const outsourceCost = +j.outsourceCost || 0;           // 外包成本（定額）
+  return Math.round(final - tax - commission - outsourceCost);  // 允許負數
 }
 
-// 案件的分潤金額（給介紹人的）
-// v3.22.4 修：分潤基準改用 jobFinalAmount（折扣後），跟 net 一致
+// 案件的分潤金額（給介紹人的，給介紹人是 commissionRate 那部份）
+// v3.22.4：分潤基準改用 jobFinalAmount（折扣後），跟 net 一致
+// 注意：分潤是「給介紹人的」，跟外包成本（給做事的人）是不同概念
 function jobCommission(j) {
   const c = getClient(j.clientId);
   const rate = (c && c.commissionRate) || 0;
   if (rate <= 0) return 0;
-  return jobFinalAmount(j) - jobNetAmount(j);
+  // 注意：commission 不受 requiresInvoice 影響（分潤通常按折扣後原價算）
+  return Math.round(jobFinalAmount(j) * (rate / 100));
+}
+
+// v3.24.0：發票自吸收的稅金額（純呈現用）
+function jobInvoiceTax(j) {
+  const c = getClient(j.clientId);
+  if (!c || !c.requiresInvoice) return 0;
+  return Math.round(jobFinalAmount(j) * 0.05);
+}
+
+// v3.24.0：自我驗證 — 開 F12 console 跑 _verifyJobNet() 確認計算正確
+// 不會自動跑，純 dev 工具
+function _verifyJobNet() {
+  const cases = [
+    // [amount, discountType, discountVal, requiresInvoice, commRate, outsource, expectedNet]
+    [10000, 'none', 0, false, 0, 0, 10000],   // 基本
+    [10000, 'none', 0, true,  0, 0,  9500],   // 含稅
+    [10000, 'none', 0, false, 10, 0, 9000],   // 分潤
+    [10000, 'none', 0, true,  10, 0, 8500],   // 含稅 + 分潤
+    [10000, 'none', 0, true,  10, 5000, 3500],// 完整
+    [10000, 'none', 0, false, 0, 12000, -2000], // 倒貼
+    [10000, 'percent', 10, true, 10, 5000, 2650], // 折扣 + 完整
+  ];
+  let pass = 0, fail = 0;
+  cases.forEach(([amount, dType, dVal, ri, rate, oc, expected], i) => {
+    const fakeJ = { amount, discountType: dType, discountValue: dVal, outsourceCost: oc, payments: [], writeOff: 0 };
+    const fakeC = { requiresInvoice: ri, commissionRate: rate };
+    // 暫時注入 getClient 替代邏輯（local mock）
+    const _real = window.getClient;
+    window.getClient = () => fakeC;
+    fakeJ.clientId = '_mock_';
+    const got = jobNetAmount(fakeJ);
+    window.getClient = _real;
+    const ok = got === expected;
+    console.log(`Case ${i+1}: ${ok ? '✓' : '✗'} expected=${expected} got=${got}`, { amount, dType, dVal, ri, rate, oc });
+    if (ok) pass++; else fail++;
+  });
+  console.log(`\n=== _verifyJobNet: ${pass} pass, ${fail} fail ===`);
+  return { pass, fail };
 }
 
 // 已用過的標籤清單（補全用）
@@ -5711,6 +5770,9 @@ function renderClientDetail() {
   document.getElementById('client-detail-name').textContent = c.name;
   const dot = document.getElementById('client-detail-color-dot');
   if (dot) dot.style.background = c.color || '#888';
+  // v3.24.0：含稅 badge
+  const taxBadge = document.getElementById('client-detail-tax-badge');
+  if (taxBadge) taxBadge.classList.toggle('hidden', !c.requiresInvoice);
 
   // 該業主所有案件（含取消）
   const allJobs = state.jobs.filter(j => j.clientId === c.id);
@@ -6124,7 +6186,148 @@ function switchRevenueSubtab(key) {
   } else if (key === 'analysis') {
     if (typeof renderTagPie === 'function') renderTagPie();
     if (typeof renderHourlyTrend === 'function') renderHourlyTrend();
+  } else if (key === 'outsource') {
+    // v3.24.0：外包對帳子分頁
+    if (typeof renderOutsourceReport === 'function') renderOutsourceReport();
   }
+}
+
+// ============== v3.24.0：外包對帳子分頁 ==============
+function renderOutsourceReport() {
+  const sel = document.getElementById('outsource-month');
+  const box = document.getElementById('outsource-report');
+  if (!sel || !box) return;
+
+  // 找出有外包的月份（jobBelongMonth）
+  const allOutsourceJobs = state.jobs.filter(j => !j.cancelled && +j.outsourceCost > 0);
+  const months = [...new Set(allOutsourceJobs.map(j => jobBelongMonth(j)).filter(Boolean))].sort().reverse();
+  if (!months.length) {
+    sel.innerHTML = '<option>—</option>';
+    box.innerHTML = `<div class="empty" style="padding: 30px; text-align: center; color: var(--muted);">
+      <div style="font-size: 38px; margin-bottom: 6px;">📦</div>
+      <div style="font-size: 14px;">還沒有派外包的紀錄</div>
+      <div style="font-size: 12px; margin-top: 4px;">在案件 modal 內展開「🤝 派發給外包」就會自動加入這裡</div>
+    </div>`;
+    return;
+  }
+  // 加「全部」選項
+  const cur = sel.value;
+  sel.innerHTML = '<option value="all">全部月份</option>' + months.map(m => `<option value="${m}">${m}</option>`).join('');
+  sel.value = cur && (cur === 'all' || months.includes(cur)) ? cur : (months[0] || 'all');
+
+  const month = sel.value;
+  const jobs = (month === 'all' ? allOutsourceJobs : allOutsourceJobs.filter(j => jobBelongMonth(j) === month))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  if (!jobs.length) {
+    box.innerHTML = '<div class="empty" style="padding: 20px; text-align: center; color: var(--muted);">該月份沒有派外包紀錄</div>';
+    return;
+  }
+
+  // 計算合計
+  let totalGross = 0, totalOutsource = 0, totalNet = 0;
+  // 依外包對象分組
+  const byOutsourcer = {};
+  jobs.forEach(j => {
+    const final = jobFinalAmount(j);
+    const outCost = +j.outsourceCost || 0;
+    const net = jobNetAmount(j);
+    totalGross += final;
+    totalOutsource += outCost;
+    totalNet += net;
+    const key = (j.outsourceTo || '').trim() || '(未填名字)';
+    if (!byOutsourcer[key]) byOutsourcer[key] = { count: 0, cost: 0 };
+    byOutsourcer[key].count++;
+    byOutsourcer[key].cost += outCost;
+  });
+
+  const fmtN = (v) => v < 0 ? `<span style="color: var(--danger);">−${fmt(-v)}</span>` : fmt(v);
+
+  const tableRows = jobs.map(j => {
+    const c = getClient(j.clientId);
+    const cName = c ? c.name : '(已刪除)';
+    const cColor = c ? c.color : '#ccc';
+    const final = jobFinalAmount(j);
+    const outCost = +j.outsourceCost || 0;
+    const net = jobNetAmount(j);
+    return `<tr>
+      <td>${j.date || '-'}</td>
+      <td>${escapeHtml(j.title || '(無標題)')}</td>
+      <td><span style="display:inline-block;background:${cColor};width:8px;height:8px;border-radius:50%;margin-right:6px;"></span>${escapeHtml(cName)}</td>
+      <td>${escapeHtml(j.outsourceTo || '(未填)')}</td>
+      <td class="num">${fmt(final)}</td>
+      <td class="num" style="color: var(--warning);">−${fmt(outCost)}</td>
+      <td class="num"><b>${fmtN(net)}</b></td>
+    </tr>`;
+  }).join('');
+
+  const groupRows = Object.entries(byOutsourcer)
+    .sort((a, b) => b[1].cost - a[1].cost)
+    .map(([name, r]) => `<tr>
+      <td>${escapeHtml(name)}</td>
+      <td class="num">${r.count}</td>
+      <td class="num"><b>${fmt(r.cost)}</b></td>
+    </tr>`).join('');
+
+  box.innerHTML = `
+    <div style="overflow-x: auto; margin-bottom: 16px;">
+      <table class="report-table">
+        <thead><tr>
+          <th>日期</th><th>案件</th><th>業主</th><th>外包對象</th>
+          <th class="num">業主應付</th><th class="num">外包成本</th><th class="num">我實收</th>
+        </tr></thead>
+        <tbody>
+          ${tableRows}
+          <tr class="report-total">
+            <td colspan="4">合計（${jobs.length} 筆）</td>
+            <td class="num">${fmt(totalGross)}</td>
+            <td class="num" style="color: var(--warning);">−${fmt(totalOutsource)}</td>
+            <td class="num">${fmtN(totalNet)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-top: 12px; padding: 12px;">
+      <h4 style="font-size: 13px; margin-bottom: 8px;">依外包對象彙整</h4>
+      <table class="report-table">
+        <thead><tr><th>外包對象</th><th class="num">案件數</th><th class="num">給的總額</th></tr></thead>
+        <tbody>${groupRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function exportOutsourceCSV() {
+  const sel = document.getElementById('outsource-month');
+  if (!sel) return;
+  const month = sel.value;
+  const allJobs = state.jobs.filter(j => !j.cancelled && +j.outsourceCost > 0);
+  const jobs = (month === 'all' ? allJobs : allJobs.filter(j => jobBelongMonth(j) === month))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  if (!jobs.length) { toast('該月份沒有外包資料'); return; }
+
+  const headers = ['日期', '案件', '業主', '外包對象', '業主應付', '外包成本', '我實收'];
+  const rows = jobs.map(j => {
+    const c = getClient(j.clientId);
+    return [
+      j.date || '',
+      (j.title || '').replace(/"/g, '""'),
+      c ? c.name : '(已刪除)',
+      (j.outsourceTo || '').replace(/"/g, '""'),
+      jobFinalAmount(j),
+      +j.outsourceCost || 0,
+      jobNetAmount(j),
+    ];
+  });
+  const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `外包對帳-${month === 'all' ? '全部' : month}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('✓ 已匯出 CSV');
 }
 
 // 動態產生範圍選單
@@ -7403,34 +7606,42 @@ function renderMonthlyReport() {
 
   // 依業主彙整
   // v3.22.6：partial paid 也算進「已收」，不再用 j.paid boolean 一刀切
+  // v3.24.0：加 tax / outsourceCost 累計；paidNet/unpaidNet 改按 jobNetAmount 比例分（加總 = net）
   const byClient = {};
   monthJobs.forEach(j => {
     const c = getClient(j.clientId);
     const cid = j.clientId || 'unknown';
-    const rate = (c && c.commissionRate) || 0;
-    const ratio = 1 - rate / 100;  // 分潤後比例
     if (!byClient[cid]) {
       byClient[cid] = {
         client: c, count: 0,
-        gross: 0,        // 案件總額（未扣分潤）
-        commission: 0,   // 給介紹人的部分
-        net: 0,          // 實收（折扣後 × 分潤後）
-        paidNet: 0,      // 已收款（含 partial）
-        unpaidNet: 0,    // 待收款（已完成但還沒收齊的部分）
-        pendingNet: 0    // 進行中（未完成案件的待收）
+        gross: 0,           // 原始金額（未扣折扣 / 稅 / 分潤 / 外包）
+        commission: 0,      // 分潤（給介紹人）
+        tax: 0,             // v3.24.0：自吸 5% 稅
+        outsourceCost: 0,   // v3.24.0：外包成本
+        net: 0,             // 實收（折扣 / 稅 / 分潤 / 外包都扣）
+        paidNet: 0,         // 已收款部分按 net 比例分
+        unpaidNet: 0,       // 已完成未收齊部分按 net 比例分
+        pendingNet: 0       // 未完成部分按 net 比例分
       };
     }
     const r = byClient[cid];
     r.count++;
     r.gross += +j.amount || 0;
     r.commission += jobCommission(j);
-    r.net += jobNetAmount(j);
-    // 已收：該案件所有 payment 加總 × 分潤比例（partial 也算）
-    r.paidNet += Math.round(jobPaidTotal(j) * ratio);
-    // 剩餘部分按案件狀態分到 待收 / 進行中
-    const unpaidNetAmt = Math.round(jobUnpaidAmount(j) * ratio);
-    if (j.done) r.unpaidNet += unpaidNetAmt;
-    else r.pendingNet += unpaidNetAmt;
+    r.tax += jobInvoiceTax(j);
+    r.outsourceCost += +j.outsourceCost || 0;
+    const netAmt = jobNetAmount(j);
+    r.net += netAmt;
+
+    // partial 比例分配：paidNet + unpaid/pendingNet = netAmt（加總對齊 net）
+    const finalAmt = jobFinalAmount(j);
+    const paidTotal = jobPaidTotal(j);
+    const proportion = finalAmt > 0 ? Math.min(1, paidTotal / finalAmt) : 0;
+    const paidPart = Math.round(netAmt * proportion);
+    const remainPart = netAmt - paidPart;
+    r.paidNet += paidPart;
+    if (j.done) r.unpaidNet += remainPart;
+    else r.pendingNet += remainPart;
   });
 
   const rows = Object.values(byClient).sort((a,b) => b.net - a.net);
@@ -7440,14 +7651,20 @@ function renderMonthlyReport() {
     acc.count += r.count;
     acc.gross += r.gross;
     acc.commission += r.commission;
+    acc.tax += r.tax;
+    acc.outsourceCost += r.outsourceCost;
     acc.net += r.net;
     acc.paidNet += r.paidNet;
     acc.unpaidNet += r.unpaidNet;
     acc.pendingNet += r.pendingNet;
     return acc;
-  }, { count: 0, gross: 0, commission: 0, net: 0, paidNet: 0, unpaidNet: 0, pendingNet: 0 });
+  }, { count: 0, gross: 0, commission: 0, tax: 0, outsourceCost: 0, net: 0, paidNet: 0, unpaidNet: 0, pendingNet: 0 });
 
   const showCommission = totals.commission > 0;
+  const showTax = totals.tax > 0;            // v3.24.0
+  const showOutsource = totals.outsourceCost > 0;  // v3.24.0
+  // v3.24.0：負數金額 helper
+  const fmtN = (v) => v < 0 ? `<span style="color: var(--danger);">−${fmt(-v)}</span>` : fmt(v);
 
   box.innerHTML = `<div style="overflow-x: auto;">
     <table class="report-table">
@@ -7456,7 +7673,10 @@ function renderMonthlyReport() {
           <th>業主</th>
           <th class="num">案件</th>
           <th class="num">原始金額</th>
-          ${showCommission ? '<th class="num">分潤</th><th class="num">實收</th>' : ''}
+          ${showCommission ? '<th class="num">分潤</th>' : ''}
+          ${showTax ? '<th class="num">5% 稅</th>' : ''}
+          ${showOutsource ? '<th class="num">外包</th>' : ''}
+          ${(showCommission || showTax || showOutsource) ? '<th class="num">實收</th>' : ''}
           <th class="num">已收</th>
           <th class="num">待收</th>
           <th class="num">進行中</th>
@@ -7470,20 +7690,26 @@ function renderMonthlyReport() {
             <td><span class="dot" style="display:inline-block;background:${color};width:8px;height:8px;border-radius:50%;margin-right:6px;"></span>${escapeHtml(name)}</td>
             <td class="num">${r.count}</td>
             <td class="num">${fmt(r.gross)}</td>
-            ${showCommission ? `<td class="num" style="color: var(--warning);">${r.commission ? '-'+fmt(r.commission) : '—'}</td><td class="num"><b>${fmt(r.net)}</b></td>` : ''}
-            <td class="num" style="color: var(--success);">${fmt(r.paidNet)}</td>
-            <td class="num" style="color: var(--warning);">${fmt(r.unpaidNet)}</td>
-            <td class="num" style="color: var(--muted);">${fmt(r.pendingNet)}</td>
+            ${showCommission ? `<td class="num" style="color: var(--warning);">${r.commission ? '−'+fmt(r.commission) : '—'}</td>` : ''}
+            ${showTax ? `<td class="num" style="color: var(--warning);">${r.tax ? '−'+fmt(r.tax) : '—'}</td>` : ''}
+            ${showOutsource ? `<td class="num" style="color: var(--warning);">${r.outsourceCost ? '−'+fmt(r.outsourceCost) : '—'}</td>` : ''}
+            ${(showCommission || showTax || showOutsource) ? `<td class="num"><b>${fmtN(r.net)}</b></td>` : ''}
+            <td class="num" style="color: var(--success);">${fmtN(r.paidNet)}</td>
+            <td class="num" style="color: var(--warning);">${fmtN(r.unpaidNet)}</td>
+            <td class="num" style="color: var(--muted);">${fmtN(r.pendingNet)}</td>
           </tr>`;
         }).join('')}
         <tr class="report-total">
           <td>合計</td>
           <td class="num">${totals.count}</td>
           <td class="num">${fmt(totals.gross)}</td>
-          ${showCommission ? `<td class="num" style="color: var(--warning);">${totals.commission ? '-'+fmt(totals.commission) : '—'}</td><td class="num">${fmt(totals.net)}</td>` : ''}
-          <td class="num" style="color: var(--success);">${fmt(totals.paidNet)}</td>
-          <td class="num" style="color: var(--warning);">${fmt(totals.unpaidNet)}</td>
-          <td class="num" style="color: var(--muted);">${fmt(totals.pendingNet)}</td>
+          ${showCommission ? `<td class="num" style="color: var(--warning);">${totals.commission ? '−'+fmt(totals.commission) : '—'}</td>` : ''}
+          ${showTax ? `<td class="num" style="color: var(--warning);">${totals.tax ? '−'+fmt(totals.tax) : '—'}</td>` : ''}
+          ${showOutsource ? `<td class="num" style="color: var(--warning);">${totals.outsourceCost ? '−'+fmt(totals.outsourceCost) : '—'}</td>` : ''}
+          ${(showCommission || showTax || showOutsource) ? `<td class="num">${fmtN(totals.net)}</td>` : ''}
+          <td class="num" style="color: var(--success);">${fmtN(totals.paidNet)}</td>
+          <td class="num" style="color: var(--warning);">${fmtN(totals.unpaidNet)}</td>
+          <td class="num" style="color: var(--muted);">${fmtN(totals.pendingNet)}</td>
         </tr>
       </tbody>
     </table>
@@ -7498,26 +7724,36 @@ function exportMonthlyReportCSV() {
 
   if (!monthJobs.length) { toast('該月沒有資料'); return; }
 
-  const headers = ['業主', '案件數', '原始金額', '分潤', '實收', '已收款', '待收款', '進行中'];
+  // v3.24.0：CSV 跟月度報表表格對齊（加稅 / 外包欄、partial 比例分配）
+  const headers = ['業主', '案件數', '原始金額', '分潤', '5%稅', '外包', '實收', '已收款', '待收款', '進行中'];
 
   // 依業主彙整
   const byClient = {};
   monthJobs.forEach(j => {
     const c = getClient(j.clientId);
     const cid = j.clientId || 'unknown';
-    if (!byClient[cid]) byClient[cid] = { name: c?c.name:'(已刪除)', count: 0, gross: 0, commission: 0, net: 0, paid: 0, unpaid: 0, pending: 0 };
+    if (!byClient[cid]) byClient[cid] = { name: c?c.name:'(已刪除)', count: 0, gross: 0, commission: 0, tax: 0, outsourceCost: 0, net: 0, paid: 0, unpaid: 0, pending: 0 };
     const r = byClient[cid];
     r.count++;
     r.gross += +j.amount || 0;
     r.commission += jobCommission(j);
-    r.net += jobNetAmount(j);
-    if (j.paid) r.paid += jobNetAmount(j);
-    else if (j.done) r.unpaid += jobNetAmount(j);
-    else r.pending += jobNetAmount(j);
+    r.tax += jobInvoiceTax(j);
+    r.outsourceCost += +j.outsourceCost || 0;
+    const netAmt = jobNetAmount(j);
+    r.net += netAmt;
+    // partial 比例分配（同月度報表表格邏輯）
+    const finalAmt = jobFinalAmount(j);
+    const paidTotal = jobPaidTotal(j);
+    const proportion = finalAmt > 0 ? Math.min(1, paidTotal / finalAmt) : 0;
+    const paidPart = Math.round(netAmt * proportion);
+    const remainPart = netAmt - paidPart;
+    r.paid += paidPart;
+    if (j.done) r.unpaid += remainPart;
+    else r.pending += remainPart;
   });
 
   const rows = Object.values(byClient).sort((a,b) => b.net - a.net).map(r =>
-    [r.name, r.count, r.gross, r.commission, r.net, r.paid, r.unpaid, r.pending]);
+    [r.name, r.count, r.gross, r.commission, r.tax, r.outsourceCost, r.net, r.paid, r.unpaid, r.pending]);
 
   const csv = '﻿' + [
     headers.join(','),
@@ -9875,6 +10111,10 @@ function openJobModal() {
   document.getElementById('job-write-off').value = '';
   modalPayments = [];
   cancelAddJobPayment();
+  // v3.24.0：派外包欄位重設
+  if (document.getElementById('job-outsource-to')) document.getElementById('job-outsource-to').value = '';
+  if (document.getElementById('job-outsource-cost')) document.getElementById('job-outsource-cost').value = '';
+  if (document.getElementById('job-outsource-details')) document.getElementById('job-outsource-details').open = false;
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
   document.getElementById('job-export-estimate-btn')?.classList.add('hidden');
@@ -9998,6 +10238,51 @@ function updateJobAmountSummary() {
   summary.innerHTML = html;
   updateJobHourlyHint();
   renderJobPayments();
+  // v3.24.0：實收試算
+  updateJobNetBreakdown();
+}
+
+// v3.24.0：實收試算（業主含稅 OR 有外包時才顯示）
+function updateJobNetBreakdown() {
+  const box = document.getElementById('job-net-breakdown');
+  const body = document.getElementById('job-net-breakdown-body');
+  if (!box || !body) return;
+
+  const base = +document.getElementById('job-amount').value || 0;
+  const type = document.querySelector('input[name="job-discount-type"]:checked')?.value || 'none';
+  const dval = +document.getElementById('job-discount-value').value || 0;
+  let final = base;
+  if (type === 'fixed')   final = Math.max(0, base - Math.min(base, dval));
+  else if (type === 'percent') final = Math.max(0, Math.round(base * (1 - dval / 100)));
+
+  // 業主含稅？
+  const cid = document.getElementById('job-client').value;
+  const c = getClient(cid);
+  const requiresInvoice = !!(c && c.requiresInvoice);
+  const commissionRate = (c && c.commissionRate) || 0;
+  const tax = requiresInvoice ? Math.round(final * 0.05) : 0;
+  const commission = commissionRate > 0 ? Math.round(final * (commissionRate / 100)) : 0;
+
+  const outsourceCost = +document.getElementById('job-outsource-cost')?.value || 0;
+  const outsourceTo = (document.getElementById('job-outsource-to')?.value || '').trim();
+
+  const net = final - tax - commission - outsourceCost;
+
+  // 條件顯示：業主含稅、有分潤、或有外包，才顯示
+  if (!requiresInvoice && commission === 0 && outsourceCost === 0) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+
+  const lines = [`業主應付 <b>${fmt(final)}</b>`];
+  if (tax > 0)        lines.push(`− 5% 自吸收稅　<span style="color:var(--warning);">−${fmt(tax)}</span>`);
+  if (commission > 0) lines.push(`− 分潤 ${commissionRate}%　 <span style="color:var(--warning);">−${fmt(commission)}</span>`);
+  if (outsourceCost > 0) lines.push(`− 外包${outsourceTo ? '（' + escapeHtml(outsourceTo) + '）' : ''}　<span style="color:var(--warning);">−${fmt(outsourceCost)}</span>`);
+  const netColor = net < 0 ? 'var(--danger)' : 'var(--success)';
+  const netStr = net < 0 ? `⚠️ −${fmt(-net)}（倒貼）` : fmt(net);
+  lines.push(`<span style="border-top: 1px solid var(--border); display: inline-block; padding-top: 2px; margin-top: 2px;">我實收 <b style="color:${netColor};">${netStr}</b></span>`);
+  body.innerHTML = lines.join('<br>');
 }
 
 function renderJobPayments() {
@@ -10181,6 +10466,13 @@ function editJob(id) {
   document.getElementById('job-write-off').value = j.writeOff || '';
   modalPayments = JSON.parse(JSON.stringify(j.payments || []));
   cancelAddJobPayment();
+  // v3.24.0：載入派外包欄位
+  if (document.getElementById('job-outsource-to')) document.getElementById('job-outsource-to').value = j.outsourceTo || '';
+  if (document.getElementById('job-outsource-cost')) document.getElementById('job-outsource-cost').value = j.outsourceCost || '';
+  if (document.getElementById('job-outsource-details')) {
+    // 有外包資料時自動展開（讓使用者一眼看到）
+    document.getElementById('job-outsource-details').open = !!(j.outsourceCost > 0 || j.outsourceTo);
+  }
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.remove('hidden');
   // 估價單模式：顯示「轉正」與「估價單 PDF」按鈕
@@ -10282,9 +10574,15 @@ function saveJob() {
     discountType: discountType,
     discountValue: discountValue,
     payments: [...modalPayments],
-    writeOff: writeOff
+    writeOff: writeOff,
+    // v3.24.0：派外包欄位
+    outsourceTo: (document.getElementById('job-outsource-to')?.value || '').trim(),
+    outsourceCost: +document.getElementById('job-outsource-cost')?.value || 0
   };
   if (!payload.title) { toast('請輸入案件名稱'); return; }
+  // v3.24.0：擋負金額（0 仍允許 — 估價 / 諮詢用）
+  if (payload.amount < 0) { toast('案件金額不能是負數'); return; }
+  if (payload.outsourceCost < 0) { toast('外包金額不能是負數'); return; }
 
   const c = getClient(payload.clientId);
   if (editingJobId) {
@@ -10370,6 +10668,9 @@ function openClientModal() {
   document.getElementById('client-name').value = '';
   document.getElementById('client-note').value = '';
   document.getElementById('client-commission-rate').value = '';
+  // v3.24.0：含稅請款 toggle 預設關
+  const reqInv = document.getElementById('client-requires-invoice');
+  if (reqInv) reqInv.checked = false;
   populateBillingDayDropdown(0);
   document.getElementById('client-billing-remind-days').value = 3;
   document.getElementById('client-unpaid-override').value = '';
@@ -10388,6 +10689,9 @@ function editClient(id) {
   document.getElementById('client-name').value = c.name;
   document.getElementById('client-note').value = c.note || '';
   document.getElementById('client-commission-rate').value = c.commissionRate || '';
+  // v3.24.0：含稅請款 toggle
+  const reqInv = document.getElementById('client-requires-invoice');
+  if (reqInv) reqInv.checked = !!c.requiresInvoice;
   populateBillingDayDropdown(c.billingDay || 0);
   document.getElementById('client-billing-remind-days').value = c.billingRemindDays || 3;
   document.getElementById('client-unpaid-override').value = c.unpaidRemindDaysOverride != null ? c.unpaidRemindDaysOverride : '';
@@ -10518,6 +10822,8 @@ function saveClient() {
   const unpaidOverrideRaw = document.getElementById('client-unpaid-override').value.trim();
   const unpaidRemindDaysOverride = unpaidOverrideRaw === '' ? null : (+unpaidOverrideRaw || null);
   if (!name) { toast('請輸入業主名稱'); return; }
+  // v3.24.0：含稅請款 toggle
+  const requiresInvoice = !!document.getElementById('client-requires-invoice')?.checked;
   const payload = {
     name, note, color: pickedColor,
     commissionRate, commissionTo,
@@ -10525,7 +10831,8 @@ function saveClient() {
     prepayments: paymentMode === 'prepaid' ? modalPrepayments : [],
     billingDay,
     billingRemindDays,
-    unpaidRemindDaysOverride
+    unpaidRemindDaysOverride,
+    requiresInvoice
   };
   if (editingClientId) {
     const c = getClient(editingClientId);
