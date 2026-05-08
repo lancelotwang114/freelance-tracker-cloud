@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-08-v3.24.10">
+<meta name="app-version" content="2026-05-08-v3.24.11">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -806,6 +806,8 @@
 
         <p class="reminder-hint" style="margin: 12px 0 6px;">
           每個提醒類型可獨立決定要走哪個通道（桌面通知 / Google 行事曆）。
+          <br>
+          📅 Google 行事曆通知統一在「② 通知時間」設定（預設 09:30），到下方「Google 行事曆同步」卡調整。
           <span id="alert-cal-disabled-hint" class="hidden" style="color: var(--warning);">📅 欄位需先在下方「Google 行事曆同步」開啟 master 開關才能勾選</span>
         </p>
 
@@ -970,12 +972,12 @@
             </details>
           </div>
 
-          <!-- Step 2：每日早報時段 -->
+          <!-- Step 2：通知時間（v3.24.11：擴展為所有提醒類型統一通知時間，含早報、未收款、月底、業主請款日、拖款警告）-->
           <div class="cal-step">
-            <label class="cal-step-label">② 每日早報時段</label>
+            <label class="cal-step-label">② 通知時間</label>
             <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
               <input type="time" id="cloud-cal-morning-time" value="09:30" onchange="cloudOnCalendarConfigChange()" style="font-size: 13px;">
-              <span class="cal-hint">當日無事自動不建</span>
+              <span class="cal-hint">適用於所有 Google 行事曆提醒（早報、未收款、月底、請款日、拖款）</span>
             </div>
           </div>
 

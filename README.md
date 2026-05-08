@@ -84,6 +84,7 @@
 | **v3.24.8** | **帳面總收入改用 jobFinalAmount（折扣後）+ 分潤改基於未稅金額算（先扣稅再算分潤）** | ✅ **完成（2026-05-08）** |
 | **v3.24.9** | **計時器 UI 隱藏（功能保留）+ Modal 取消/儲存 sticky footer + 🚨 Google 登出 hotfix（cloudLoadAuthState 過期不清，啟動時 silent refresh 補 token）** | ✅ **完成（2026-05-08）** |
 | **v3.24.10** | **收益總覽月度範圍選單新增「📅 當月」「📅 上個月」快捷選項（自動處理跨年）** | ✅ **完成（2026-05-08）** |
+| **v3.24.11** | **🚨 Google 行事曆 iOS 通知修復：事件強制帶 reminders.overrides；4 種全天事件改時間事件；UI label「每日早報時段」→「通知時間」** | ✅ **完成（2026-05-08）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

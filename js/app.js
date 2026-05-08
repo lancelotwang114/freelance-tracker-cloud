@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.10';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.11';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2499,7 +2499,13 @@ function buildTargetCalendarEvents(cfg) {
   state.clients.forEach(c => { clientById[c.id] = c; });
   const today = todayStr();
 
-  // 1. 案件本身
+  // v3.24.11：所有提醒類型統一用「通知時間」（cfg.dailyMorningTime，預設 09:30）
+  // 改成時間事件後 reminders.overrides minutes:0 才能準時響（含 iOS 行事曆）
+  // 註：API 限制全天事件無法當天 X:XX 響，因此把 4 種提醒改成從 09:30 起 15 分鐘的時間事件
+  const reminderTime = cfg.dailyMorningTime || '09:30';
+  const reminderEndTime = _calendarAddMinutes(reminderTime, 15);
+
+  // 1. 案件本身（保留全天事件 → 月檢視看得到區間，提醒靠每日早報帶）
   if (cfg.syncTypes.jobs) {
     state.jobs.forEach(j => {
       if (!j.date) return;  // 沒日期的不同步
@@ -2520,8 +2526,9 @@ function buildTargetCalendarEvents(cfg) {
         summary: `🟠 ${c?.name || '?'} 完成 ${days} 天未收款 · ${j.title}`,
         // v3.22.5：顯示待收金額（折扣後 - 已收 - 呆帳）
         description: `業主：${c?.name || '?'}\n案件：${j.title}\n待收：NT$ ${jobUnpaidAmount(j).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n今天已過 ${days} 天還沒收款，可考慮發提醒。`,
-        start: { date: remindStr },
-        end: { date: _calendarDayAfter(remindStr) },
+        // v3.24.11：改成時間事件 → reminders minutes:0 準時響
+        start: { dateTime: `${remindStr}T${reminderTime}:00`, timeZone: CALENDAR_TIMEZONE },
+        end:   { dateTime: `${remindStr}T${reminderEndTime}:00`, timeZone: CALENDAR_TIMEZONE },
         colorId: '6',  // Tangerine
       });
     });
@@ -2541,8 +2548,9 @@ function buildTargetCalendarEvents(cfg) {
         ftKey: `month-end-${dateStr.slice(0, 7)}`,
         summary: '📅 月底提醒：可開始整理請款',
         description: `每月 ${startDay} 號之後可開始整理本月可請款案件。\n\n到 App 的「請款單」分頁勾選要請款的案件。`,
-        start: { date: dateStr },
-        end: { date: _calendarDayAfter(dateStr) },
+        // v3.24.11：改成時間事件
+        start: { dateTime: `${dateStr}T${reminderTime}:00`, timeZone: CALENDAR_TIMEZONE },
+        end:   { dateTime: `${dateStr}T${reminderEndTime}:00`, timeZone: CALENDAR_TIMEZONE },
         colorId: '5',  // Banana
       });
     }
@@ -2564,8 +2572,9 @@ function buildTargetCalendarEvents(cfg) {
           ftKey: `billing-${c.id}-${billingStr.slice(0, 7)}`,
           summary: `📋 ${c.name} 月 ${c.billingDay} 日請款（提前 ${remindDays} 天）`,
           description: `業主：${c.name}\n固定請款日：每月 ${c.billingDay} 號\n\n請於 ${billingStr} 前送出請款單。`,
-          start: { date: remindStr },
-          end: { date: _calendarDayAfter(remindStr) },
+          // v3.24.11：改成時間事件
+          start: { dateTime: `${remindStr}T${reminderTime}:00`, timeZone: CALENDAR_TIMEZONE },
+          end:   { dateTime: `${remindStr}T${reminderEndTime}:00`, timeZone: CALENDAR_TIMEZONE },
           colorId: '1',  // Lavender
         });
       }
@@ -2582,8 +2591,9 @@ function buildTargetCalendarEvents(cfg) {
         summary: `🐢 拖款警告：${c?.name || '?'} · ${j.title}`,
         // v3.22.5：顯示待收金額
         description: `業主：${c?.name || '?'} 平均收款 ${j.avgDays} 天\n案件：${j.title}\n待收：NT$ ${jobUnpaidAmount(j).toLocaleString('en-US')}\n完成日：${j.doneAt}\n\n已過 ${j.daysSince} 天（超過該業主平均），建議主動聯繫。`,
-        start: { date: today },
-        end: { date: _calendarDayAfter(today) },
+        // v3.24.11：改成時間事件
+        start: { dateTime: `${today}T${reminderTime}:00`, timeZone: CALENDAR_TIMEZONE },
+        end:   { dateTime: `${today}T${reminderEndTime}:00`, timeZone: CALENDAR_TIMEZONE },
         colorId: '11',  // Tomato
       });
     });
@@ -2635,13 +2645,23 @@ function buildTargetCalendarEvents(cfg) {
 }
 
 // 把 target event 物件轉成 Calendar API 需要的 event resource（補上 ftSource 標記）
+// v3.24.11：強制帶 reminders.overrides，讓 iOS 行事曆（CalDAV 同步）能收到 alarm
+//           - 時間事件：minutes: 0 → 準時通知
+//           - 全天事件（只有「案件本身」）：useDefault: false + 空 overrides → 不單獨提醒，靠每日早報帶
 function _calendarBuildEventResource(target) {
+  const isAllDay = !!(target.start && target.start.date);
   return {
     summary: target.summary,
     description: target.description,
     start: target.start,
     end: target.end,
     colorId: target.colorId,
+    reminders: {
+      useDefault: false,
+      overrides: isAllDay
+        ? []                                       // 全天事件不單獨提醒（案件本身保留視覺，靠早報帶）
+        : [{ method: 'popup', minutes: 0 }]        // 時間事件：準時通知
+    },
     extendedProperties: {
       private: {
         ftSource: FT_CALENDAR_SOURCE,
@@ -2656,12 +2676,20 @@ function _calendarEventDiffers(existing, target) {
   if ((existing.summary || '') !== target.summary) return true;
   if ((existing.description || '') !== target.description) return true;
   if ((existing.colorId || '') !== (target.colorId || '')) return true;
-  // start
-  if (target.start.date && existing.start?.date !== target.start.date) return true;
-  if (target.start.dateTime && existing.start?.dateTime !== target.start.dateTime) return true;
+  // start：v3.24.11 後可能從 date 改成 dateTime（或反之），任一邊不一致就要更新
+  if ((target.start.date || null) !== (existing.start?.date || null)) return true;
+  if ((target.start.dateTime || null) !== (existing.start?.dateTime || null)) return true;
   // end
-  if (target.end.date && existing.end?.date !== target.end.date) return true;
-  if (target.end.dateTime && existing.end?.dateTime !== target.end.dateTime) return true;
+  if ((target.end.date || null) !== (existing.end?.date || null)) return true;
+  if ((target.end.dateTime || null) !== (existing.end?.dateTime || null)) return true;
+  // v3.24.11：reminders 也要比，否則舊事件（沒帶 reminders）不會被升級成有 overrides 的版本
+  const exMins = (existing.reminders?.overrides || []).map(o => `${o.method}:${o.minutes}`).sort().join(',');
+  const tgMins = (target.reminders?.overrides || []).map(o => `${o.method}:${o.minutes}`).sort().join(',');
+  if (exMins !== tgMins) return true;
+  // useDefault：舊事件 undefined（吃預設） vs 新事件 false → 視為不同
+  const exDefault = existing.reminders?.useDefault;
+  const tgDefault = target.reminders?.useDefault;
+  if ((exDefault === undefined ? true : !!exDefault) !== !!tgDefault) return true;
   return false;
 }
 

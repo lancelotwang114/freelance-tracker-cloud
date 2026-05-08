@@ -1,5 +1,46 @@
 ﻿# 版本更新歷史
 
+## v3.24.11 — Google 行事曆通知 iOS 修復 + 通知時間統一（2026-05-08）
+
+### 🚨 Bug 修復：iOS 行事曆收不到通知
+**問題**：v3 推到 Google Calendar 的事件**完全沒帶 `reminders` 欄位**，導致：
+- Google 自家 client（網頁／Android）：吃使用者層級「預設提醒」，會跳通知 ✅
+- **iOS 內建行事曆（CalDAV 同步）**：不吃 Google 那邊的預設，只認事件本身的 `VALARM`（即 `reminders.overrides`）→ **完全不跳通知** ❌
+
+**修法**：所有 Google Calendar 事件強制帶 `reminders.overrides`：
+- 時間事件：`{method: 'popup', minutes: 0}` → 準時跳通知（含 iOS）
+- 全天事件（案件本身）：空 overrides → 不單獨提醒（靠每日早報帶）
+
+### 全天事件改成時間事件
+Google Calendar API 限制：全天事件的 `minutes` 必須 ≥ 0（事件**開始前** N 分鐘），無法在「當天 09:30」響。
+
+把以下 4 種提醒從全天事件改成從「通知時間」起 15 分鐘的**時間事件**：
+- 完成已久未收款（unpaidLong）
+- 月底提醒（monthEnd）
+- 業主固定請款日（billingDay）
+- 拖款警告（slowPay）
+
+→ 這 4 種事件現在會在 09:30 準時跳通知（手機含 iOS 都會響）
+
+「案件本身（jobs）」**保留全天事件**，不單獨提醒（要在月檢視看到案件區間），靠每日早報於 09:30 帶過。
+
+### UI 合併：「每日早報時段」改名「通知時間」
+- `index.html` Google 行事曆同步卡的 ② 欄位 label 從「每日早報時段」改成「**通知時間**」
+- 提示文字：「適用於所有 Google 行事曆提醒（早報、未收款、月底、請款日、拖款）」
+- 「通知與提醒」卡頂部加說明：📅 Google 行事曆通知統一在「② 通知時間」設定（預設 09:30）
+
+### 影響範圍
+- 修改：`_calendarBuildEventResource`（line ~2638）→ 加 `reminders.overrides`
+- 修改：`buildTargetCalendarEvents`（line ~2496）→ 4 種事件改時間事件 + 抽 `reminderTime` / `reminderEndTime` 變數
+- 修改：`index.html` Step 2 label + 「通知與提醒」卡說明文字
+- 不動 schema（`cfg.dailyMorningTime` 名稱保留，意義擴展）
+
+### 測試步驟（更新後請做）
+1. 重新整理頁面 → 設定頁 → 「Google 行事曆同步」卡 → 確認「② 通知時間」是 09:30
+2. 點「立即同步到 Google 行事曆」→ 等同步完成
+3. iPhone 上：設定 > 通知 > 行事曆 → 通知開啟（這個原本就要開，跟此版無關）
+4. 等下一個 09:30 → iOS 應該會跳通知
+
 ## v3.24.10 — 收益總覽月度加「當月／上個月」快捷（2026-05-08）
 
 ### 收益總覽月度範圍選單新增 2 個快捷選項

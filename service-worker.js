@@ -15,7 +15,7 @@
 //       lancelotwang114.github.io，Cache Storage 是 origin scope 共用，
 //       activate 時的 keys.filter(k => k !== CACHE_VERSION).delete() 會把對方的 cache 砍掉。
 //       前綴隔離後兩版互不干擾。
-const CACHE_VERSION = 'ftracker-cloud-v3.24.10';
+const CACHE_VERSION = 'ftracker-cloud-v3.24.11';
 const APP_SHELL = [
   './',
   './index.html',
