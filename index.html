@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-08-v3.24.1">
+<meta name="app-version" content="2026-05-08-v3.24.3">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -596,14 +596,6 @@
           <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-pending" onchange="onInvoiceStatusChange()"><span>🔄 進行中</span></label>
           <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-cancelled" onchange="onInvoiceStatusChange()"><span>🚫 已取消</span></label>
         </div>
-      </div>
-
-      <!-- v3.24.1：本次請款扣稅 toggle（純對帳用，匯出時不顯示給業主） -->
-      <div style="margin-top: 10px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">
-        <label class="checkbox-row" style="margin: 0;">
-          <input type="checkbox" id="inv-tax-toggle" onchange="onInvoiceTaxToggleChange()">
-          <span>📨 本次請款扣 5% 稅（自吸收，<b>匯出時不顯示給業主</b>，只在下方對帳區算）</span>
-        </label>
       </div>
 
       <div style="display:flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;">
@@ -1325,6 +1317,12 @@
         </div>
       </details>
 
+      <!-- v3.24.2：扣稅 toggle（每筆案件自己決定） -->
+      <label class="checkbox-row" style="margin-top: 10px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">
+        <input type="checkbox" id="job-tax-applied" onchange="updateJobAmountSummary()">
+        <span>📨 此案件含 5% 稅（自吸收，<b>請款單給業主看的金額不變</b>，只在對帳時扣）</span>
+      </label>
+
       <!-- v3.24.0：派發給外包 -->
       <details id="job-outsource-details" style="margin-top: 10px;">
         <summary style="cursor: pointer; font-weight: 500; padding: 6px 0;">🤝 派發給外包（選填）</summary>
@@ -1340,7 +1338,7 @@
             </div>
           </div>
           <div style="margin-top: 6px; font-size: 11px; color: var(--muted);">
-            派出去做的部分。我實收 = 業主應付 − 5% 稅（如業主含稅）− 分潤 − 外包成本。
+            派出去做的部分。我實收 = 業主應付 − 5% 稅（如有勾上方）− 分潤 − 外包成本。
           </div>
         </div>
       </details>

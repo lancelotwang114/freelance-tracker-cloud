@@ -75,6 +75,8 @@
 | **v3.23.3** | **Mascot 三批整合：8 狀態（+ searching/celebrating/sleeping）+ 4 嘴巴 + 4 眼睛（含 wink/shocked）+ 11 連動點 + idle 5 分鐘睡覺 + 隨機眨眼** | ✅ **完成（2026-05-05）** |
 | **v3.24.0** | **含稅請款 + 派外包成本：schema v14（client.requiresInvoice + case.outsourceTo/outsourceCost）+ 案件 modal 實收試算 + 月度業主彙整加稅/外包欄 + 「📦 外包對帳」子分頁 + 業主 badge** | ✅ **完成（2026-05-08）** |
 | **v3.24.1** | **扣稅 toggle 改請款單級別：schema v15（移除 client.requiresInvoice）+ 請款單頁面新增 toggle + 預覽下方加「💰 我的對帳」區（業主看不到，不會匯出）** | ✅ **完成（2026-05-08）** |
+| **v3.24.2** | **扣稅改 case 層級（schema v16）：每筆案件自己決定 taxApplied，月度 / 收益自動連動，請款單對帳區讀案件累計** | ✅ **完成（2026-05-08）** |
+| **v3.24.3** | **月度業主彙整改欄（請款金額 / 發票稅務 / 實際入帳）+ 收益總覽加「帳面總收入」卡（6 個 stat 卡並列）** | ✅ **完成（2026-05-08）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3215,7 +3215,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 15;  // v3.24.1：移除 client.requiresInvoice（扣稅改成請款單級別 toggle，不存業主屬性）
+const CURRENT_SCHEMA_VERSION = 16;  // v3.24.2：扣稅改 case 層級（case.taxApplied）— 每筆案件自己決定
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -3363,6 +3363,14 @@ const SCHEMA_MIGRATIONS = {
       }
       return c;
     });
+  },
+  // v15 → v16：扣稅改 case 層級（v3.24.2）— 每筆案件自己決定 taxApplied
+  // 預設 false（不扣），user 在案件編輯 modal 自行勾選
+  15: function(state) {
+    state.jobs = (state.jobs || []).map(j => ({
+      ...j,
+      taxApplied: !!j.taxApplied
+    }));
   }
 };
 
@@ -3951,14 +3959,16 @@ function jobBelongMonth(j) {
 // 案件的「實收金額」：對帳用，**允許負數**反映倒貼
 // v3.22.4：先扣折扣再算分潤
 // v3.24.0：加外包定額成本扣減
-// v3.24.1：拿掉稅項（稅改請款單級別 toggle，不再算在 case 上）
-//   公式：實收 = 折扣後 − 分潤 − 外包成本
+// v3.24.1：拿掉稅項（嘗試用請款單 toggle，但無法連動）
+// v3.24.2：稅改 case 層級（j.taxApplied）— 每筆案件自己決定，月度 / 收益自動連動
+//   公式：實收 = 折扣後 − 5% 稅（如有）− 分潤 − 外包成本
 //   負數合理：派外包成本超過業主應付時 user 倒貼，要顯示負以提醒
 function jobNetAmount(j) {
   const final = jobFinalAmount(j);                       // 折扣後（業主應付）
+  const tax = jobInvoiceTax(j);                          // 5% 稅（j.taxApplied 為 true 才扣）
   const commission = jobCommission(j);                   // 分潤（給介紹人）
   const outsourceCost = +j.outsourceCost || 0;           // 外包成本（定額）
-  return Math.round(final - commission - outsourceCost); // 允許負數
+  return Math.round(final - tax - commission - outsourceCost); // 允許負數
 }
 
 // 案件的分潤金額（給介紹人的）
@@ -3970,19 +3980,27 @@ function jobCommission(j) {
   return Math.round(jobFinalAmount(j) * (rate / 100));
 }
 
-// v3.24.1：自我驗證 — 開 F12 console 跑 _verifyJobNet() 確認計算正確
+// v3.24.2：扣稅金額（讀 case 層級 j.taxApplied）
+function jobInvoiceTax(j) {
+  if (!j.taxApplied) return 0;
+  return Math.round(jobFinalAmount(j) * 0.05);
+}
+
+// v3.24.2：自我驗證 — 開 F12 console 跑 _verifyJobNet() 確認計算正確
 function _verifyJobNet() {
   const cases = [
-    // [amount, discountType, discountVal, commRate, outsource, expectedNet]
-    [10000, 'none', 0, 0, 0, 10000],          // 基本
-    [10000, 'none', 0, 10, 0, 9000],          // 分潤 10%
-    [10000, 'none', 0, 10, 5000, 4000],       // 分潤 + 外包
-    [10000, 'none', 0, 0, 12000, -2000],      // 倒貼
-    [10000, 'percent', 10, 10, 5000, 3100],   // 折扣 10% + 分潤 + 外包: 9000 - 900 - 5000 = 3100
+    // [amount, discountType, discountVal, taxApplied, commRate, outsource, expectedNet]
+    [10000, 'none',    0,  false, 0,  0,     10000],   // 基本
+    [10000, 'none',    0,  true,  0,  0,      9500],   // 含稅
+    [10000, 'none',    0,  false, 10, 0,      9000],   // 分潤 10%
+    [10000, 'none',    0,  true,  10, 0,      8500],   // 含稅 + 分潤
+    [10000, 'none',    0,  true,  10, 5000,   3500],   // 完整
+    [10000, 'none',    0,  false, 0,  12000, -2000],   // 倒貼
+    [10000, 'percent', 10, true,  10, 5000,   2650],   // 折扣 10% + 含稅 + 分潤 + 外包: 9000 - 450 - 900 - 5000 = 2650
   ];
   let pass = 0, fail = 0;
-  cases.forEach(([amount, dType, dVal, rate, oc, expected], i) => {
-    const fakeJ = { amount, discountType: dType, discountValue: dVal, outsourceCost: oc, payments: [], writeOff: 0 };
+  cases.forEach(([amount, dType, dVal, taxApp, rate, oc, expected], i) => {
+    const fakeJ = { amount, discountType: dType, discountValue: dVal, taxApplied: taxApp, outsourceCost: oc, payments: [], writeOff: 0 };
     const fakeC = { commissionRate: rate };
     const _real = window.getClient;
     window.getClient = () => fakeC;
@@ -3990,7 +4008,7 @@ function _verifyJobNet() {
     const got = jobNetAmount(fakeJ);
     window.getClient = _real;
     const ok = got === expected;
-    console.log(`Case ${i+1}: ${ok ? '✓' : '✗'} expected=${expected} got=${got}`, { amount, dType, dVal, rate, oc });
+    console.log(`Case ${i+1}: ${ok ? '✓' : '✗'} expected=${expected} got=${got}`, { amount, dType, dVal, taxApp, rate, oc });
     if (ok) pass++; else fail++;
   });
   console.log(`\n=== _verifyJobNet: ${pass} pass, ${fail} fail ===`);
@@ -6412,14 +6430,15 @@ function renderRevenue() {
   // 「選 4 月就只看 4 月的案子」：4 月案件的已收 / 待收 / 進行中都歸 4 月，不論 payment 日期落哪
   // 這跟下方「月度業主彙整」(jobBelongMonth) 對齊，不再出現兩個 widget 數字打架
   const buckets = {};
-  const ensureKey = (k) => { if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0 }; };
+  // v3.24.3：bucket 加 gross（原始金額 j.amount sum）+ netAmount（jobNetAmount sum，扣完一切）
+  const ensureKey = (k) => { if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 }; };
 
   jobs.forEach(j => {
     const belongDate = j.endDate || j.date;
     if (!belongDate) return;
     const key = revenueState.mode === 'year' ? belongDate.slice(0,4) : belongDate.slice(0,7);
     ensureKey(key);
-    // 已收：該案件所有 payment 加總（不論 payment.date）
+    // 已收：該案件所有 payment 加總
     buckets[key].paid += jobPaidTotal(j);
     // 待收 / 進行中：未收餘額（已扣折扣 + 已收 + 呆帳）
     const unpaidAmt = jobUnpaidAmount(j);
@@ -6427,6 +6446,9 @@ function renderRevenue() {
       if (j.done) buckets[key].unpaid += unpaidAmt;
       else buckets[key].pending += unpaidAmt;
     }
+    // v3.24.3：帳面（原始）+ 實際（jobNetAmount，扣分潤 + 稅 + 外包）
+    buckets[key].gross += +j.amount || 0;
+    buckets[key].netAmount += jobNetAmount(j);
   });
 
   let keys = Object.keys(buckets).sort();
@@ -6434,7 +6456,7 @@ function renderRevenue() {
 
   // 補齊空月/空年
   const filled = fillEmptyBuckets(keys, revenueState.mode);
-  filled.forEach(k => { if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0 }; });
+  filled.forEach(k => { if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 }; });
 
   // 依 range 決定顯示範圍
   const r = String(revenueState.range);
@@ -6446,13 +6468,13 @@ function renderRevenue() {
     // 今年至今：年度模式才有此選項
     const y = String(new Date().getFullYear());
     displayKeys = filled.filter(k => k === y);
-    if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0 };
+    if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 };
     if (!displayKeys.length) displayKeys = [y];
   } else if (r.startsWith('year-')) {
     // 單一年度（年度模式）
     const y = r.slice(5);
     displayKeys = [y];
-    if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0 };
+    if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 };
   } else if (r === 'custom') {
     // 自訂範圍
     if (revenueState.mode === 'month') {
@@ -6480,7 +6502,7 @@ function renderRevenue() {
         // filled 中存在的部分，加上當年（即使沒資料也顯示）
         displayKeys = wantedYears;
         // 確保 buckets 有當年（沒就建空的）
-        wantedYears.forEach(y => { if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0 }; });
+        wantedYears.forEach(y => { if (!buckets[y]) buckets[y] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 }; });
       } else {
         // v3.22.4 修：以「當月」為終點往前推 N 個月（保證一定含當月，即使當月沒任何 payment / 案件）
         // 舊版 filled.slice(-n) 是「有資料的最近 N 個月」，當月若沒任何資料就會被漏掉
@@ -6490,7 +6512,7 @@ function renderRevenue() {
           const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
           const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
           wantedMonths.push(k);
-          if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0 };
+          if (!buckets[k]) buckets[k] = { paid: 0, unpaid: 0, pending: 0, gross: 0, netAmount: 0 };
         }
         displayKeys = wantedMonths;
       }
@@ -7249,13 +7271,16 @@ function renderRevSummary(data) {
   const totalUnpaid = data.reduce((s,d) => s + d.unpaid, 0);
   const totalPending = data.reduce((s,d) => s + d.pending, 0);
   const total = totalPaid + totalUnpaid + totalPending;
-  const avg = data.length ? Math.round((totalPaid + totalUnpaid) / data.length) : 0;
-  const best = data.slice().sort((a,b) => (b.paid+b.unpaid) - (a.paid+a.unpaid))[0];
+  // v3.24.3：帳面（j.amount sum）+ 實際（jobNetAmount sum，扣分潤+稅+外包）
+  const totalGross = data.reduce((s,d) => s + (d.gross || 0), 0);
+  const totalNet = data.reduce((s,d) => s + (d.netAmount || 0), 0);
+  const avg = data.length ? Math.round(totalNet / data.length) : 0;
+  const best = data.slice().sort((a,b) => (b.netAmount||0) - (a.netAmount||0))[0];
 
-  // 對比上期
+  // 對比上期（用實際）
   const half = Math.floor(data.length / 2);
-  const firstHalf = data.slice(0, half).reduce((s,d) => s + d.paid + d.unpaid, 0);
-  const secondHalf = data.slice(half).reduce((s,d) => s + d.paid + d.unpaid, 0);
+  const firstHalf = data.slice(0, half).reduce((s,d) => s + (d.netAmount || 0), 0);
+  const secondHalf = data.slice(half).reduce((s,d) => s + (d.netAmount || 0), 0);
   let delta = '';
   if (firstHalf > 0 && half > 0) {
     const pct = ((secondHalf - firstHalf) / firstHalf * 100).toFixed(0);
@@ -7263,11 +7288,22 @@ function renderRevSummary(data) {
     delta = `<div class="delta ${up?'up':'down'}">${up?'↑':'↓'} ${Math.abs(pct)}% vs 前半期</div>`;
   }
 
+  // v3.24.3：負數金額 helper（實際總收入可能為負 — 倒貼情境）
+  const fmtN = (v) => v < 0 ? `<span style="color: var(--danger);">−${fmt(-v)}</span>` : fmt(v);
+  const grossVsNetDelta = totalGross !== totalNet
+    ? `<div class="delta" style="color: var(--muted);">vs 帳面 ${fmt(totalGross)}</div>`
+    : '';
+
   document.getElementById('rev-summary').innerHTML = `
     <div class="summary-card">
-      <div class="label">期間總收入</div>
-      <div class="value">${fmt(totalPaid + totalUnpaid)}</div>
-      ${delta}
+      <div class="label">帳面總收入</div>
+      <div class="value">${fmt(totalGross)}</div>
+      <div class="delta" style="color: var(--muted);">原始金額（未扣折扣 / 稅 / 分潤 / 外包）</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">實際總收入</div>
+      <div class="value">${fmtN(totalNet)}</div>
+      ${grossVsNetDelta || delta}
     </div>
     <div class="summary-card">
       <div class="label">已收款</div>
@@ -7281,13 +7317,13 @@ function renderRevSummary(data) {
     </div>
     <div class="summary-card">
       <div class="label">每${revenueState.mode==='year'?'年':'月'}平均</div>
-      <div class="value">${fmt(avg)}</div>
-      <div class="delta" style="color: var(--muted);">共 ${data.length} ${revenueState.mode==='year'?'年':'期'}</div>
+      <div class="value">${fmtN(avg)}</div>
+      <div class="delta" style="color: var(--muted);">共 ${data.length} ${revenueState.mode==='year'?'年':'期'}（實際）</div>
     </div>
-    ${best && (best.paid+best.unpaid) ? `<div class="summary-card">
+    ${best && (best.netAmount||0) ? `<div class="summary-card">
       <div class="label">最佳${revenueState.mode==='year'?'年度':'月份'}</div>
       <div class="value" style="font-size: 16px;">${best.label}</div>
-      <div class="delta" style="color: var(--primary);">${fmt(best.paid+best.unpaid)}</div>
+      <div class="delta" style="color: var(--primary);">${fmtN(best.netAmount||0)}</div>
     </div>` : ''}
   `;
 }
@@ -7594,9 +7630,11 @@ function renderMonthlyReport() {
   }
 
   // 依業主彙整
-  // v3.22.6：partial paid 也算進「已收」，不再用 j.paid boolean 一刀切
-  // v3.24.0：加 outsourceCost 累計；paidNet/unpaidNet 改按 jobNetAmount 比例分（加總 = net）
-  // v3.24.1：拿掉「5% 稅」欄（稅改請款單級別 toggle，月度層級無法判斷哪些案件當時有扣稅）
+  // v3.24.3：欄位重整 — 業主 / 案件 / 原始 / (分潤?) / 外包 / 請款金額 / 發票稅務 / 實際入帳
+  //   請款金額 = sum(jobFinalAmount)（折扣後業主應付）
+  //   發票稅務 = sum(jobFinalAmount where j.taxApplied)（要走發票流程那部分總額）
+  //   實際入帳 = sum(jobFinalAmount where !j.taxApplied)（直接付不走發票那部分總額）
+  //   核對：請款金額 = 發票稅務 + 實際入帳
   const byClient = {};
   monthJobs.forEach(j => {
     const c = getClient(j.clientId);
@@ -7604,11 +7642,12 @@ function renderMonthlyReport() {
     if (!byClient[cid]) {
       byClient[cid] = {
         client: c, count: 0,
-        gross: 0,           // 原始金額（未扣折扣 / 分潤 / 外包）
-        commission: 0,      // 分潤（給介紹人）
-        outsourceCost: 0,   // 外包成本
-        net: 0,             // 名義實收（折扣 / 分潤 / 外包都扣，不含稅）
-        paidNet: 0, unpaidNet: 0, pendingNet: 0
+        gross: 0,           // 原始金額（j.amount sum）
+        commission: 0,      // 分潤
+        outsourceCost: 0,   // 外包
+        invoiceAmt: 0,      // 走發票部分的請款金額
+        directAmt: 0,       // 直接入帳部分的請款金額
+        requestAmt: 0       // 請款金額 = invoice + direct
       };
     }
     const r = byClient[cid];
@@ -7616,36 +7655,27 @@ function renderMonthlyReport() {
     r.gross += +j.amount || 0;
     r.commission += jobCommission(j);
     r.outsourceCost += +j.outsourceCost || 0;
-    const netAmt = jobNetAmount(j);
-    r.net += netAmt;
-
     const finalAmt = jobFinalAmount(j);
-    const paidTotal = jobPaidTotal(j);
-    const proportion = finalAmt > 0 ? Math.min(1, paidTotal / finalAmt) : 0;
-    const paidPart = Math.round(netAmt * proportion);
-    const remainPart = netAmt - paidPart;
-    r.paidNet += paidPart;
-    if (j.done) r.unpaidNet += remainPart;
-    else r.pendingNet += remainPart;
+    r.requestAmt += finalAmt;
+    if (j.taxApplied) r.invoiceAmt += finalAmt;
+    else              r.directAmt += finalAmt;
   });
 
-  const rows = Object.values(byClient).sort((a,b) => b.net - a.net);
+  const rows = Object.values(byClient).sort((a,b) => b.requestAmt - a.requestAmt);
 
   const totals = rows.reduce((acc, r) => {
     acc.count += r.count;
     acc.gross += r.gross;
     acc.commission += r.commission;
     acc.outsourceCost += r.outsourceCost;
-    acc.net += r.net;
-    acc.paidNet += r.paidNet;
-    acc.unpaidNet += r.unpaidNet;
-    acc.pendingNet += r.pendingNet;
+    acc.invoiceAmt += r.invoiceAmt;
+    acc.directAmt += r.directAmt;
+    acc.requestAmt += r.requestAmt;
     return acc;
-  }, { count: 0, gross: 0, commission: 0, outsourceCost: 0, net: 0, paidNet: 0, unpaidNet: 0, pendingNet: 0 });
+  }, { count: 0, gross: 0, commission: 0, outsourceCost: 0, invoiceAmt: 0, directAmt: 0, requestAmt: 0 });
 
   const showCommission = totals.commission > 0;
   const showOutsource = totals.outsourceCost > 0;
-  const fmtN = (v) => v < 0 ? `<span style="color: var(--danger);">−${fmt(-v)}</span>` : fmt(v);
 
   box.innerHTML = `<div style="overflow-x: auto;">
     <table class="report-table">
@@ -7656,10 +7686,9 @@ function renderMonthlyReport() {
           <th class="num">原始金額</th>
           ${showCommission ? '<th class="num">分潤</th>' : ''}
           ${showOutsource ? '<th class="num">外包</th>' : ''}
-          ${(showCommission || showOutsource) ? '<th class="num">名義實收</th>' : ''}
-          <th class="num">已收</th>
-          <th class="num">待收</th>
-          <th class="num">進行中</th>
+          <th class="num">請款金額</th>
+          <th class="num">發票稅務</th>
+          <th class="num">實際入帳</th>
         </tr>
       </thead>
       <tbody>
@@ -7672,10 +7701,9 @@ function renderMonthlyReport() {
             <td class="num">${fmt(r.gross)}</td>
             ${showCommission ? `<td class="num" style="color: var(--warning);">${r.commission ? '−'+fmt(r.commission) : '—'}</td>` : ''}
             ${showOutsource ? `<td class="num" style="color: var(--warning);">${r.outsourceCost ? '−'+fmt(r.outsourceCost) : '—'}</td>` : ''}
-            ${(showCommission || showOutsource) ? `<td class="num"><b>${fmtN(r.net)}</b></td>` : ''}
-            <td class="num" style="color: var(--success);">${fmtN(r.paidNet)}</td>
-            <td class="num" style="color: var(--warning);">${fmtN(r.unpaidNet)}</td>
-            <td class="num" style="color: var(--muted);">${fmtN(r.pendingNet)}</td>
+            <td class="num"><b>${fmt(r.requestAmt)}</b></td>
+            <td class="num" style="color: var(--primary);">${r.invoiceAmt ? fmt(r.invoiceAmt) : '—'}</td>
+            <td class="num" style="color: var(--success);">${r.directAmt ? fmt(r.directAmt) : '—'}</td>
           </tr>`;
         }).join('')}
         <tr class="report-total">
@@ -7684,15 +7712,14 @@ function renderMonthlyReport() {
           <td class="num">${fmt(totals.gross)}</td>
           ${showCommission ? `<td class="num" style="color: var(--warning);">${totals.commission ? '−'+fmt(totals.commission) : '—'}</td>` : ''}
           ${showOutsource ? `<td class="num" style="color: var(--warning);">${totals.outsourceCost ? '−'+fmt(totals.outsourceCost) : '—'}</td>` : ''}
-          ${(showCommission || showOutsource) ? `<td class="num">${fmtN(totals.net)}</td>` : ''}
-          <td class="num" style="color: var(--success);">${fmtN(totals.paidNet)}</td>
-          <td class="num" style="color: var(--warning);">${fmtN(totals.unpaidNet)}</td>
-          <td class="num" style="color: var(--muted);">${fmtN(totals.pendingNet)}</td>
+          <td class="num"><b>${fmt(totals.requestAmt)}</b></td>
+          <td class="num" style="color: var(--primary);">${fmt(totals.invoiceAmt)}</td>
+          <td class="num" style="color: var(--success);">${fmt(totals.directAmt)}</td>
         </tr>
       </tbody>
     </table>
     <div style="margin-top: 8px; font-size: 11px; color: var(--muted);">
-      💡 名義實收 = 折扣後 − 分潤 − 外包（不含稅）。要看本次扣稅後實收，請到「請款單」分頁的對帳區。
+      💡 請款金額 = 發票稅務 + 實際入帳。發票稅務 = 要走發票流程那部分；實際入帳 = 不走發票直接付那部分。
     </div>
   </div>`;
 }
@@ -7705,35 +7732,28 @@ function exportMonthlyReportCSV() {
 
   if (!monthJobs.length) { toast('該月沒有資料'); return; }
 
-  // v3.24.0：CSV 跟月度報表表格對齊（加外包欄、partial 比例分配）
-  // v3.24.1：拿掉 5% 稅欄（稅改請款單級別）
-  const headers = ['業主', '案件數', '原始金額', '分潤', '外包', '名義實收', '已收款', '待收款', '進行中'];
+  // v3.24.3：CSV 跟月度報表表格對齊（請款金額 / 發票稅務 / 實際入帳）
+  const headers = ['業主', '案件數', '原始金額', '分潤', '外包', '請款金額', '發票稅務', '實際入帳'];
 
   // 依業主彙整
   const byClient = {};
   monthJobs.forEach(j => {
     const c = getClient(j.clientId);
     const cid = j.clientId || 'unknown';
-    if (!byClient[cid]) byClient[cid] = { name: c?c.name:'(已刪除)', count: 0, gross: 0, commission: 0, outsourceCost: 0, net: 0, paid: 0, unpaid: 0, pending: 0 };
+    if (!byClient[cid]) byClient[cid] = { name: c?c.name:'(已刪除)', count: 0, gross: 0, commission: 0, outsourceCost: 0, invoiceAmt: 0, directAmt: 0, requestAmt: 0 };
     const r = byClient[cid];
     r.count++;
     r.gross += +j.amount || 0;
     r.commission += jobCommission(j);
     r.outsourceCost += +j.outsourceCost || 0;
-    const netAmt = jobNetAmount(j);
-    r.net += netAmt;
     const finalAmt = jobFinalAmount(j);
-    const paidTotal = jobPaidTotal(j);
-    const proportion = finalAmt > 0 ? Math.min(1, paidTotal / finalAmt) : 0;
-    const paidPart = Math.round(netAmt * proportion);
-    const remainPart = netAmt - paidPart;
-    r.paid += paidPart;
-    if (j.done) r.unpaid += remainPart;
-    else r.pending += remainPart;
+    r.requestAmt += finalAmt;
+    if (j.taxApplied) r.invoiceAmt += finalAmt;
+    else              r.directAmt += finalAmt;
   });
 
-  const rows = Object.values(byClient).sort((a,b) => b.net - a.net).map(r =>
-    [r.name, r.count, r.gross, r.commission, r.outsourceCost, r.net, r.paid, r.unpaid, r.pending]);
+  const rows = Object.values(byClient).sort((a,b) => b.requestAmt - a.requestAmt).map(r =>
+    [r.name, r.count, r.gross, r.commission, r.outsourceCost, r.requestAmt, r.invoiceAmt, r.directAmt]);
 
   const csv = '﻿' + [
     headers.join(','),
@@ -9945,18 +9965,18 @@ function renderInvoiceNetBreakdown() {
   // 沒案件 → 隱藏對帳區（避免空畫面）
   if (jobs.length === 0) { box.classList.add('hidden'); return; }
 
-  // 計算
-  const taxApplied = !!document.getElementById('inv-tax-toggle')?.checked;
+  // 計算（v3.24.2：稅讀 case.taxApplied 而非請款單 toggle）
   const final = jobs.reduce((s, j) => s + jobFinalAmount(j), 0);
-  const tax = taxApplied ? Math.round(final * 0.05) : 0;
+  const tax = jobs.reduce((s, j) => s + jobInvoiceTax(j), 0);
   const commission = jobs.reduce((s, j) => s + jobCommission(j), 0);
   const outsourceCost = jobs.reduce((s, j) => s + (+j.outsourceCost || 0), 0);
   const net = final - tax - commission - outsourceCost;
   const paid = jobs.reduce((s, j) => s + jobPaidTotal(j), 0);
   const unpaid = jobs.filter(j => j.done).reduce((s, j) => s + jobUnpaidAmount(j), 0);
+  const taxedJobCount = jobs.filter(j => j.taxApplied).length;
 
-  // 條件顯示：toggle ON OR 有分潤 OR 有外包 → 顯示完整對帳；否則只顯示業主應付 + 已收 / 待收
-  const hasAnyDeduction = taxApplied || commission > 0 || outsourceCost > 0;
+  // 條件顯示：有稅 OR 有分潤 OR 有外包 → 顯示完整對帳；否則只顯示業主應付 + 已收 / 待收
+  const hasAnyDeduction = tax > 0 || commission > 0 || outsourceCost > 0;
   if (!hasAnyDeduction) {
     // 都沒有扣減項 → 顯示簡版（業主應付 + 已收 / 待收）
     box.classList.remove('hidden');
@@ -9970,7 +9990,7 @@ function renderInvoiceNetBreakdown() {
 
   box.classList.remove('hidden');
   const lines = [`業主應付　　　　　　 <b>${fmt(final)}</b>`];
-  if (tax > 0) lines.push(`− 5% 自吸收稅　　　　 <span style="color: var(--warning);">−${fmt(tax)}</span>`);
+  if (tax > 0) lines.push(`− 5% 自吸收稅 (${taxedJobCount} 筆)　 <span style="color: var(--warning);">−${fmt(tax)}</span>`);
   if (commission > 0) lines.push(`− 分潤　　　　　　　 <span style="color: var(--warning);">−${fmt(commission)}</span>`);
   if (outsourceCost > 0) lines.push(`− 外包成本　　　　　 <span style="color: var(--warning);">−${fmt(outsourceCost)}</span>`);
   const netColor = net < 0 ? 'var(--danger)' : 'var(--success)';
@@ -9979,13 +9999,10 @@ function renderInvoiceNetBreakdown() {
   lines.push(`<br><span style="color: var(--muted); font-size: 11px;">───── 業主收款狀態 ─────</span>`);
   lines.push(`業主已付　　　　　　 <span style="color: var(--success);">${fmt(paid)}</span>`);
   lines.push(`業主待付　　　　　　 <span style="color: var(--warning);">${fmt(unpaid)}</span>`);
+  if (tax === 0 && (commission > 0 || outsourceCost > 0)) {
+    lines.push(`<br><span style="color: var(--muted); font-size: 11px;">💡 要扣稅請去案件編輯 modal 勾「📨 此案件含 5% 稅」</span>`);
+  }
   body.innerHTML = lines.join('<br>');
-}
-
-// v3.24.1：toggle change handler
-function onInvoiceTaxToggleChange() {
-  // 純 UI 狀態，不存任何資料
-  renderInvoiceNetBreakdown();
 }
 
 function emptyState(title, sub) {
@@ -10182,6 +10199,8 @@ function openJobModal() {
   if (document.getElementById('job-outsource-to')) document.getElementById('job-outsource-to').value = '';
   if (document.getElementById('job-outsource-cost')) document.getElementById('job-outsource-cost').value = '';
   if (document.getElementById('job-outsource-details')) document.getElementById('job-outsource-details').open = false;
+  // v3.24.2：扣稅 toggle 預設關
+  if (document.getElementById('job-tax-applied')) document.getElementById('job-tax-applied').checked = false;
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
   document.getElementById('job-export-estimate-btn')?.classList.add('hidden');
@@ -10309,7 +10328,7 @@ function updateJobAmountSummary() {
   updateJobNetBreakdown();
 }
 
-// v3.24.1：實收試算（有分潤或有外包時顯示；稅已搬到請款單頁面，這裡不算）
+// v3.24.2：實收試算（有扣稅 / 分潤 / 外包任一才顯示）
 function updateJobNetBreakdown() {
   const box = document.getElementById('job-net-breakdown');
   const body = document.getElementById('job-net-breakdown-body');
@@ -10327,24 +10346,28 @@ function updateJobNetBreakdown() {
   const commissionRate = (c && c.commissionRate) || 0;
   const commission = commissionRate > 0 ? Math.round(final * (commissionRate / 100)) : 0;
 
+  const taxApplied = !!document.getElementById('job-tax-applied')?.checked;
+  const tax = taxApplied ? Math.round(final * 0.05) : 0;
+
   const outsourceCost = +document.getElementById('job-outsource-cost')?.value || 0;
   const outsourceTo = (document.getElementById('job-outsource-to')?.value || '').trim();
 
-  const net = final - commission - outsourceCost;
+  const net = final - tax - commission - outsourceCost;
 
-  // 條件顯示：有分潤或有外包才顯示
-  if (commission === 0 && outsourceCost === 0) {
+  // 條件顯示：有扣稅 / 分潤 / 外包才顯示
+  if (!taxApplied && commission === 0 && outsourceCost === 0) {
     box.classList.add('hidden');
     return;
   }
   box.classList.remove('hidden');
 
   const lines = [`業主應付 <b>${fmt(final)}</b>`];
+  if (tax > 0) lines.push(`− 5% 自吸收稅　<span style="color:var(--warning);">−${fmt(tax)}</span>`);
   if (commission > 0) lines.push(`− 分潤 ${commissionRate}%　 <span style="color:var(--warning);">−${fmt(commission)}</span>`);
   if (outsourceCost > 0) lines.push(`− 外包${outsourceTo ? '（' + escapeHtml(outsourceTo) + '）' : ''}　<span style="color:var(--warning);">−${fmt(outsourceCost)}</span>`);
   const netColor = net < 0 ? 'var(--danger)' : 'var(--success)';
   const netStr = net < 0 ? `⚠️ −${fmt(-net)}（倒貼）` : fmt(net);
-  lines.push(`<span style="border-top: 1px solid var(--border); display: inline-block; padding-top: 2px; margin-top: 2px;">名義實收 <b style="color:${netColor};">${netStr}</b><br><span style="font-size: 11px; color: var(--muted);">（不含稅。要看本次扣稅後實收，請到「請款單」對帳區）</span></span>`);
+  lines.push(`<span style="border-top: 1px solid var(--border); display: inline-block; padding-top: 2px; margin-top: 2px;">我實收 <b style="color:${netColor};">${netStr}</b></span>`);
   body.innerHTML = lines.join('<br>');
 }
 
@@ -10536,6 +10559,8 @@ function editJob(id) {
     // 有外包資料時自動展開（讓使用者一眼看到）
     document.getElementById('job-outsource-details').open = !!(j.outsourceCost > 0 || j.outsourceTo);
   }
+  // v3.24.2：載入扣稅 toggle
+  if (document.getElementById('job-tax-applied')) document.getElementById('job-tax-applied').checked = !!j.taxApplied;
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.remove('hidden');
   // 估價單模式：顯示「轉正」與「估價單 PDF」按鈕
@@ -10640,7 +10665,9 @@ function saveJob() {
     writeOff: writeOff,
     // v3.24.0：派外包欄位
     outsourceTo: (document.getElementById('job-outsource-to')?.value || '').trim(),
-    outsourceCost: +document.getElementById('job-outsource-cost')?.value || 0
+    outsourceCost: +document.getElementById('job-outsource-cost')?.value || 0,
+    // v3.24.2：扣稅 (case 層級)
+    taxApplied: !!document.getElementById('job-tax-applied')?.checked
   };
   if (!payload.title) { toast('請輸入案件名稱'); return; }
   // v3.24.0：擋負金額（0 仍允許 — 估價 / 諮詢用）
