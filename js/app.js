@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.8';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3215,7 +3215,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 16;  // v3.24.2：扣稅改 case 層級（case.taxApplied）— 每筆案件自己決定
+const CURRENT_SCHEMA_VERSION = 18;  // v3.24.7：恢復 case.taxApplied（per-case toggle，全部預設 false）
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -3370,6 +3370,26 @@ const SCHEMA_MIGRATIONS = {
     state.jobs = (state.jobs || []).map(j => ({
       ...j,
       taxApplied: !!j.taxApplied
+    }));
+  },
+  // v16 → v17：移除 case.taxApplied（v3.24.6）— 算法改 C，全部請款都當含稅
+  // 把 taxApplied 欄位刪除（cleanup orphan 欄位）
+  16: function(state) {
+    state.jobs = (state.jobs || []).map(j => {
+      if ('taxApplied' in j) {
+        const { taxApplied, ...rest } = j;
+        return rest;
+      }
+      return j;
+    });
+  },
+  // v17 → v18：恢復 case.taxApplied（v3.24.7）— per-case toggle，預設 false
+  // ⚠️ v3.24.6 migration 已清掉舊資料，所以全部案件都從 false 開始
+  // user 之前在 v3.24.5 勾過的 taxApplied 設定無法復原，要重新勾
+  17: function(state) {
+    state.jobs = (state.jobs || []).map(j => ({
+      ...j,
+      taxApplied: !!j.taxApplied  // 沒這欄位的補 false
     }));
   }
 };
@@ -3961,51 +3981,58 @@ function jobBelongMonth(j) {
 // v3.24.0：加外包定額成本扣減
 // v3.24.1：拿掉稅項（嘗試用請款單 toggle，但無法連動）
 // v3.24.2：稅改 case 層級（j.taxApplied）— 每筆案件自己決定，月度 / 收益自動連動
-//   公式：實收 = 折扣後 − 5% 稅（如有）− 分潤 − 外包成本
-//   負數合理：派外包成本超過業主應付時 user 倒貼，要顯示負以提醒
+// v3.24.5：算法順序按 user 要求：請款 → 扣稅 → 扣外包 → 扣分潤（加法交換律結果一樣，但語意清楚）
+//   公式：實收 = 折扣後 − 5% 稅（如有）− 外包成本 − 分潤
+//   負數合理：派外包成本超過業主應付時 user 倒貼
 function jobNetAmount(j) {
-  const final = jobFinalAmount(j);                       // 折扣後（業主應付）
-  const tax = jobInvoiceTax(j);                          // 5% 稅（j.taxApplied 為 true 才扣）
-  const commission = jobCommission(j);                   // 分潤（給介紹人）
-  const outsourceCost = +j.outsourceCost || 0;           // 外包成本（定額）
-  return Math.round(final - tax - commission - outsourceCost); // 允許負數
+  const final = jobFinalAmount(j);                       // 1. 折扣後（業主應付）
+  const tax = jobInvoiceTax(j);                          // 2. 先扣 5% 稅（j.taxApplied 為 true 才扣）
+  const outsourceCost = +j.outsourceCost || 0;           // 3. 再扣外包成本（定額）
+  const commission = jobCommission(j);                   // 4. 最後扣分潤（給介紹人）
+  return Math.round(final - tax - outsourceCost - commission); // 允許負數
 }
 
 // 案件的分潤金額（給介紹人的）
 // v3.22.4：分潤基準改用 jobFinalAmount（折扣後），跟 net 一致
+// v3.24.8：分潤基於「未稅金額」算（先扣稅再算分潤，跟 user 描述的順序一致）
+//   公式：分潤 = (折扣後 − 稅) × 分潤率
+//   範例：5,700 含稅、稅 271、分潤 10% → 分潤 = (5,700 − 271) × 10% = 542.9 ≈ 543
 function jobCommission(j) {
   const c = getClient(j.clientId);
   const rate = (c && c.commissionRate) || 0;
   if (rate <= 0) return 0;
-  return Math.round(jobFinalAmount(j) * (rate / 100));
+  const final = jobFinalAmount(j);
+  const tax = jobInvoiceTax(j);
+  return Math.round((final - tax) * (rate / 100));
 }
 
-// v3.24.2：扣稅金額（讀 case 層級 j.taxApplied）
-// v3.24.4：用 /1.05 反推（業主給的是含稅金額，稅 = final − final/1.05）
-//   例：含稅 1425 → 未稅 1357 → 稅 68（之前 ×0.05 算法是 71，差幾元因為精度）
+// v3.24.2：稅讀 case 層級（j.taxApplied）— 每筆案件自己決定
+// v3.24.4：用 /1.05 反推（業主給的是含稅金額）
+// v3.24.7：回退 v3.24.6 的「全部都扣」決策，恢復 per-case toggle
+//   公式：稅 = j.taxApplied ? (final − round(final / 1.05)) : 0
+//   有勾「含稅」的案件才扣，沒勾的不扣（業主直接付，不需報稅）
 function jobInvoiceTax(j) {
   if (!j.taxApplied) return 0;
   const final = jobFinalAmount(j);
+  if (final <= 0) return 0;
   return final - Math.round(final / 1.05);
 }
 
-// v3.24.2 + v3.24.4：自我驗證 — 開 F12 console 跑 _verifyJobNet() 確認計算正確
-// v3.24.4：稅算法改 /1.05（業主給的是含稅金額），expected 重算
+// v3.24.8：分潤改基於未稅金額算（含稅+分潤情境會差幾元）
 function _verifyJobNet() {
   const cases = [
     // [amount, discountType, discountVal, taxApplied, commRate, outsource, expectedNet]
-    [10000, 'none',    0,  false, 0,  0,     10000],   // 基本
-    // 含稅：tax = 10000 - round(10000/1.05) = 10000 - 9524 = 476，net = 10000 - 476 = 9524
-    [10000, 'none',    0,  true,  0,  0,      9524],
-    [10000, 'none',    0,  false, 10, 0,      9000],   // 分潤 10%
-    // 含稅+分潤：net = 10000 - 476(稅) - 1000(分潤) = 8524
-    [10000, 'none',    0,  true,  10, 0,      8524],
-    // 完整：8524 - 5000(外包) = 3524
-    [10000, 'none',    0,  true,  10, 5000,   3524],
-    [10000, 'none',    0,  false, 0,  12000, -2000],   // 倒貼
-    // 折扣 10% → final 9000；稅 = 9000 - round(9000/1.05) = 9000-8571 = 429；分潤 900；外包 5000
-    // net = 9000 - 429 - 900 - 5000 = 2671
-    [10000, 'percent', 10, true,  10, 5000,   2671],
+    [10000, 'none',    0,  false, 0,  0,     10000],   // 基本（沒勾稅）
+    [10000, 'none',    0,  true,  0,  0,      9524],   // 含稅: 10000-476
+    [10000, 'none',    0,  false, 10, 0,      9000],   // 分潤 10%（沒勾稅；分潤=10000×10%=1000）
+    // 含稅+分潤：稅=476、未稅=9524、分潤=9524×10%=952、net=10000-476-952=8572
+    [10000, 'none',    0,  true,  10, 0,      8572],
+    // 完整：8572-5000=3572
+    [10000, 'none',    0,  true,  10, 5000,   3572],
+    [10000, 'none',    0,  false, 0,  12000, -2000],   // 倒貼（沒勾稅）
+    // 折扣 10% → final 9000；稅=429、未稅=8571、分潤=8571×10%=857、外包=5000
+    // net = 9000 - 429 - 5000 - 857 = 2714
+    [10000, 'percent', 10, true,  10, 5000,   2714],
   ];
   let pass = 0, fail = 0;
   cases.forEach(([amount, dType, dVal, taxApp, rate, oc, expected], i) => {
@@ -6455,8 +6482,9 @@ function renderRevenue() {
       if (j.done) buckets[key].unpaid += unpaidAmt;
       else buckets[key].pending += unpaidAmt;
     }
-    // v3.24.3：帳面（原始）+ 實際（jobNetAmount，扣分潤 + 稅 + 外包）
-    buckets[key].gross += +j.amount || 0;
+    // v3.24.8：帳面 = 給業主請款（折扣後 jobFinalAmount，跟「月度業主彙整」的「請款金額」對齊）
+    //          實際 = jobNetAmount（扣稅 + 分潤 + 外包後我口袋實得）
+    buckets[key].gross += jobFinalAmount(j);
     buckets[key].netAmount += jobNetAmount(j);
   });
 
@@ -7307,7 +7335,7 @@ function renderRevSummary(data) {
     <div class="summary-card">
       <div class="label">帳面總收入</div>
       <div class="value">${fmt(totalGross)}</div>
-      <div class="delta" style="color: var(--muted);">原始金額（未扣折扣 / 稅 / 分潤 / 外包）</div>
+      <div class="delta" style="color: var(--muted);">給業主請款總額（折扣後）</div>
     </div>
     <div class="summary-card">
       <div class="label">實際總收入</div>
@@ -7697,7 +7725,7 @@ function renderMonthlyReport() {
           ${showOutsource ? '<th class="num">外包</th>' : ''}
           <th class="num">請款金額</th>
           <th class="num">發票稅務</th>
-          <th class="num">實際入帳</th>
+          <th class="num">實際入帳 <span style="color: var(--muted); font-size: 11px; cursor: help;" title="算法（per-case taxApplied）：&#10;1. 有勾「📨 此案件含 5% 稅」的案件 → 視為含稅，未稅 = final / 1.05、稅金 = final − 未稅&#10;2. 沒勾的案件 → 不扣稅（業主直接付，不需報稅）&#10;3. 實際入帳 = (有勾的未稅 + 沒勾的請款) − 外包 − 分潤&#10;   等同：請款金額 − 發票稅務 − 外包 − 分潤&#10;&#10;範例（4 筆中 1 筆勾稅 4,275、其他 3 筆共 1,425；外包 1,150）：&#10;勾稅部分稅金 = 4,275 − round(4275/1.05) = 204&#10;實際入帳 = 5,700 − 204 − 1,150 = 4,346">ⓘ</span></th>
         </tr>
       </thead>
       <tbody>
@@ -7728,7 +7756,9 @@ function renderMonthlyReport() {
       </tbody>
     </table>
     <div style="margin-top: 8px; font-size: 11px; color: var(--muted);">
-      💡 請款金額：業主應付（折扣後）。發票稅務：5% 稅金本身（用 /1.05 反推）。實際入帳：扣完稅 + 分潤 + 外包後我口袋實得。
+      💡 計算順序：請款金額 → <b>先扣稅務</b> → 再扣外包 → 最後扣分潤 = 實際入帳。
+      <br>&nbsp;&nbsp;&nbsp;發票稅務只算有勾「📨 此案件含 5% 稅」的案件（業主給的視為含稅，用 /1.05 反推）。
+      <br>&nbsp;&nbsp;&nbsp;沒勾的案件：請款金額直接進實際入帳，不扣稅。
     </div>
   </div>`;
 }
@@ -10206,7 +10236,7 @@ function openJobModal() {
   if (document.getElementById('job-outsource-to')) document.getElementById('job-outsource-to').value = '';
   if (document.getElementById('job-outsource-cost')) document.getElementById('job-outsource-cost').value = '';
   if (document.getElementById('job-outsource-details')) document.getElementById('job-outsource-details').open = false;
-  // v3.24.2：扣稅 toggle 預設關
+  // v3.24.7：恢復扣稅 toggle，新案件預設關
   if (document.getElementById('job-tax-applied')) document.getElementById('job-tax-applied').checked = false;
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
@@ -10353,26 +10383,27 @@ function updateJobNetBreakdown() {
   const commissionRate = (c && c.commissionRate) || 0;
   const commission = commissionRate > 0 ? Math.round(final * (commissionRate / 100)) : 0;
 
+  // v3.24.7：恢復 per-case toggle，看 #job-tax-applied checkbox
   const taxApplied = !!document.getElementById('job-tax-applied')?.checked;
-  // v3.24.4：稅 = 含稅金額 − 未稅（用 /1.05 反推）
-  const tax = taxApplied ? (final - Math.round(final / 1.05)) : 0;
+  const tax = (taxApplied && final > 0) ? (final - Math.round(final / 1.05)) : 0;
 
   const outsourceCost = +document.getElementById('job-outsource-cost')?.value || 0;
   const outsourceTo = (document.getElementById('job-outsource-to')?.value || '').trim();
 
   const net = final - tax - commission - outsourceCost;
 
-  // 條件顯示：有扣稅 / 分潤 / 外包才顯示
+  // v3.24.7：條件顯示 — 有勾稅 / 有分潤 / 有外包才顯示
   if (!taxApplied && commission === 0 && outsourceCost === 0) {
     box.classList.add('hidden');
     return;
   }
   box.classList.remove('hidden');
 
+  // v3.24.5：順序改 稅 → 外包 → 分潤（按 user 要求）
   const lines = [`業主應付 <b>${fmt(final)}</b>`];
   if (tax > 0) lines.push(`− 5% 自吸收稅　<span style="color:var(--warning);">−${fmt(tax)}</span>`);
-  if (commission > 0) lines.push(`− 分潤 ${commissionRate}%　 <span style="color:var(--warning);">−${fmt(commission)}</span>`);
   if (outsourceCost > 0) lines.push(`− 外包${outsourceTo ? '（' + escapeHtml(outsourceTo) + '）' : ''}　<span style="color:var(--warning);">−${fmt(outsourceCost)}</span>`);
+  if (commission > 0) lines.push(`− 分潤 ${commissionRate}%　 <span style="color:var(--warning);">−${fmt(commission)}</span>`);
   const netColor = net < 0 ? 'var(--danger)' : 'var(--success)';
   const netStr = net < 0 ? `⚠️ −${fmt(-net)}（倒貼）` : fmt(net);
   lines.push(`<span style="border-top: 1px solid var(--border); display: inline-block; padding-top: 2px; margin-top: 2px;">我實收 <b style="color:${netColor};">${netStr}</b></span>`);
@@ -10567,7 +10598,7 @@ function editJob(id) {
     // 有外包資料時自動展開（讓使用者一眼看到）
     document.getElementById('job-outsource-details').open = !!(j.outsourceCost > 0 || j.outsourceTo);
   }
-  // v3.24.2：載入扣稅 toggle
+  // v3.24.7：恢復扣稅 toggle，編輯時還原案件值
   if (document.getElementById('job-tax-applied')) document.getElementById('job-tax-applied').checked = !!j.taxApplied;
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.remove('hidden');
@@ -10674,7 +10705,7 @@ function saveJob() {
     // v3.24.0：派外包欄位
     outsourceTo: (document.getElementById('job-outsource-to')?.value || '').trim(),
     outsourceCost: +document.getElementById('job-outsource-cost')?.value || 0,
-    // v3.24.2：扣稅 (case 層級)
+    // v3.24.7：恢復 case-level taxApplied（per case 自己決定）
     taxApplied: !!document.getElementById('job-tax-applied')?.checked
   };
   if (!payload.title) { toast('請輸入案件名稱'); return; }
