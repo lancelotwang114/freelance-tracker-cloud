@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3981,22 +3981,31 @@ function jobCommission(j) {
 }
 
 // v3.24.2：扣稅金額（讀 case 層級 j.taxApplied）
+// v3.24.4：用 /1.05 反推（業主給的是含稅金額，稅 = final − final/1.05）
+//   例：含稅 1425 → 未稅 1357 → 稅 68（之前 ×0.05 算法是 71，差幾元因為精度）
 function jobInvoiceTax(j) {
   if (!j.taxApplied) return 0;
-  return Math.round(jobFinalAmount(j) * 0.05);
+  const final = jobFinalAmount(j);
+  return final - Math.round(final / 1.05);
 }
 
-// v3.24.2：自我驗證 — 開 F12 console 跑 _verifyJobNet() 確認計算正確
+// v3.24.2 + v3.24.4：自我驗證 — 開 F12 console 跑 _verifyJobNet() 確認計算正確
+// v3.24.4：稅算法改 /1.05（業主給的是含稅金額），expected 重算
 function _verifyJobNet() {
   const cases = [
     // [amount, discountType, discountVal, taxApplied, commRate, outsource, expectedNet]
     [10000, 'none',    0,  false, 0,  0,     10000],   // 基本
-    [10000, 'none',    0,  true,  0,  0,      9500],   // 含稅
+    // 含稅：tax = 10000 - round(10000/1.05) = 10000 - 9524 = 476，net = 10000 - 476 = 9524
+    [10000, 'none',    0,  true,  0,  0,      9524],
     [10000, 'none',    0,  false, 10, 0,      9000],   // 分潤 10%
-    [10000, 'none',    0,  true,  10, 0,      8500],   // 含稅 + 分潤
-    [10000, 'none',    0,  true,  10, 5000,   3500],   // 完整
+    // 含稅+分潤：net = 10000 - 476(稅) - 1000(分潤) = 8524
+    [10000, 'none',    0,  true,  10, 0,      8524],
+    // 完整：8524 - 5000(外包) = 3524
+    [10000, 'none',    0,  true,  10, 5000,   3524],
     [10000, 'none',    0,  false, 0,  12000, -2000],   // 倒貼
-    [10000, 'percent', 10, true,  10, 5000,   2650],   // 折扣 10% + 含稅 + 分潤 + 外包: 9000 - 450 - 900 - 5000 = 2650
+    // 折扣 10% → final 9000；稅 = 9000 - round(9000/1.05) = 9000-8571 = 429；分潤 900；外包 5000
+    // net = 9000 - 429 - 900 - 5000 = 2671
+    [10000, 'percent', 10, true,  10, 5000,   2671],
   ];
   let pass = 0, fail = 0;
   cases.forEach(([amount, dType, dVal, taxApp, rate, oc, expected], i) => {
@@ -7630,11 +7639,11 @@ function renderMonthlyReport() {
   }
 
   // 依業主彙整
-  // v3.24.3：欄位重整 — 業主 / 案件 / 原始 / (分潤?) / 外包 / 請款金額 / 發票稅務 / 實際入帳
+  // v3.24.4：欄位重整 — 業主 / 案件 / 原始 / (分潤?) / 外包 / 請款金額 / 發票稅務 / 實際入帳
   //   請款金額 = sum(jobFinalAmount)（折扣後業主應付）
-  //   發票稅務 = sum(jobFinalAmount where j.taxApplied)（要走發票流程那部分總額）
-  //   實際入帳 = sum(jobFinalAmount where !j.taxApplied)（直接付不走發票那部分總額）
-  //   核對：請款金額 = 發票稅務 + 實際入帳
+  //   發票稅務 = sum(jobInvoiceTax)（5% 稅金本身，用 /1.05 反推）
+  //   實際入帳 = sum(jobNetAmount)（扣完稅 + 分潤 + 外包後我口袋實得）
+  //   差額 = 分潤 + 外包成本（不在三欄中重複顯示，但獨立欄已顯示）
   const byClient = {};
   monthJobs.forEach(j => {
     const c = getClient(j.clientId);
@@ -7645,9 +7654,9 @@ function renderMonthlyReport() {
         gross: 0,           // 原始金額（j.amount sum）
         commission: 0,      // 分潤
         outsourceCost: 0,   // 外包
-        invoiceAmt: 0,      // 走發票部分的請款金額
-        directAmt: 0,       // 直接入帳部分的請款金額
-        requestAmt: 0       // 請款金額 = invoice + direct
+        requestAmt: 0,      // 請款金額（業主應付，jobFinalAmount sum）
+        taxAmount: 0,       // 發票稅務（5% 稅金本身）
+        netReceived: 0      // 實際入帳（jobNetAmount sum，扣完一切）
       };
     }
     const r = byClient[cid];
@@ -7655,10 +7664,9 @@ function renderMonthlyReport() {
     r.gross += +j.amount || 0;
     r.commission += jobCommission(j);
     r.outsourceCost += +j.outsourceCost || 0;
-    const finalAmt = jobFinalAmount(j);
-    r.requestAmt += finalAmt;
-    if (j.taxApplied) r.invoiceAmt += finalAmt;
-    else              r.directAmt += finalAmt;
+    r.requestAmt += jobFinalAmount(j);
+    r.taxAmount += jobInvoiceTax(j);
+    r.netReceived += jobNetAmount(j);
   });
 
   const rows = Object.values(byClient).sort((a,b) => b.requestAmt - a.requestAmt);
@@ -7668,14 +7676,15 @@ function renderMonthlyReport() {
     acc.gross += r.gross;
     acc.commission += r.commission;
     acc.outsourceCost += r.outsourceCost;
-    acc.invoiceAmt += r.invoiceAmt;
-    acc.directAmt += r.directAmt;
     acc.requestAmt += r.requestAmt;
+    acc.taxAmount += r.taxAmount;
+    acc.netReceived += r.netReceived;
     return acc;
-  }, { count: 0, gross: 0, commission: 0, outsourceCost: 0, invoiceAmt: 0, directAmt: 0, requestAmt: 0 });
+  }, { count: 0, gross: 0, commission: 0, outsourceCost: 0, requestAmt: 0, taxAmount: 0, netReceived: 0 });
 
   const showCommission = totals.commission > 0;
   const showOutsource = totals.outsourceCost > 0;
+  const fmtN = (v) => v < 0 ? `<span style="color: var(--danger);">−${fmt(-v)}</span>` : fmt(v);
 
   box.innerHTML = `<div style="overflow-x: auto;">
     <table class="report-table">
@@ -7702,8 +7711,8 @@ function renderMonthlyReport() {
             ${showCommission ? `<td class="num" style="color: var(--warning);">${r.commission ? '−'+fmt(r.commission) : '—'}</td>` : ''}
             ${showOutsource ? `<td class="num" style="color: var(--warning);">${r.outsourceCost ? '−'+fmt(r.outsourceCost) : '—'}</td>` : ''}
             <td class="num"><b>${fmt(r.requestAmt)}</b></td>
-            <td class="num" style="color: var(--primary);">${r.invoiceAmt ? fmt(r.invoiceAmt) : '—'}</td>
-            <td class="num" style="color: var(--success);">${r.directAmt ? fmt(r.directAmt) : '—'}</td>
+            <td class="num" style="color: var(--warning);">${r.taxAmount ? '−'+fmt(r.taxAmount) : '—'}</td>
+            <td class="num" style="color: var(--success);"><b>${fmtN(r.netReceived)}</b></td>
           </tr>`;
         }).join('')}
         <tr class="report-total">
@@ -7713,13 +7722,13 @@ function renderMonthlyReport() {
           ${showCommission ? `<td class="num" style="color: var(--warning);">${totals.commission ? '−'+fmt(totals.commission) : '—'}</td>` : ''}
           ${showOutsource ? `<td class="num" style="color: var(--warning);">${totals.outsourceCost ? '−'+fmt(totals.outsourceCost) : '—'}</td>` : ''}
           <td class="num"><b>${fmt(totals.requestAmt)}</b></td>
-          <td class="num" style="color: var(--primary);">${fmt(totals.invoiceAmt)}</td>
-          <td class="num" style="color: var(--success);">${fmt(totals.directAmt)}</td>
+          <td class="num" style="color: var(--warning);">${totals.taxAmount ? '−'+fmt(totals.taxAmount) : '—'}</td>
+          <td class="num" style="color: var(--success);"><b>${fmtN(totals.netReceived)}</b></td>
         </tr>
       </tbody>
     </table>
     <div style="margin-top: 8px; font-size: 11px; color: var(--muted);">
-      💡 請款金額 = 發票稅務 + 實際入帳。發票稅務 = 要走發票流程那部分；實際入帳 = 不走發票直接付那部分。
+      💡 請款金額：業主應付（折扣後）。發票稅務：5% 稅金本身（用 /1.05 反推）。實際入帳：扣完稅 + 分潤 + 外包後我口袋實得。
     </div>
   </div>`;
 }
@@ -7732,28 +7741,26 @@ function exportMonthlyReportCSV() {
 
   if (!monthJobs.length) { toast('該月沒有資料'); return; }
 
-  // v3.24.3：CSV 跟月度報表表格對齊（請款金額 / 發票稅務 / 實際入帳）
+  // v3.24.4：CSV 對齊月度表格
   const headers = ['業主', '案件數', '原始金額', '分潤', '外包', '請款金額', '發票稅務', '實際入帳'];
 
-  // 依業主彙整
   const byClient = {};
   monthJobs.forEach(j => {
     const c = getClient(j.clientId);
     const cid = j.clientId || 'unknown';
-    if (!byClient[cid]) byClient[cid] = { name: c?c.name:'(已刪除)', count: 0, gross: 0, commission: 0, outsourceCost: 0, invoiceAmt: 0, directAmt: 0, requestAmt: 0 };
+    if (!byClient[cid]) byClient[cid] = { name: c?c.name:'(已刪除)', count: 0, gross: 0, commission: 0, outsourceCost: 0, requestAmt: 0, taxAmount: 0, netReceived: 0 };
     const r = byClient[cid];
     r.count++;
     r.gross += +j.amount || 0;
     r.commission += jobCommission(j);
     r.outsourceCost += +j.outsourceCost || 0;
-    const finalAmt = jobFinalAmount(j);
-    r.requestAmt += finalAmt;
-    if (j.taxApplied) r.invoiceAmt += finalAmt;
-    else              r.directAmt += finalAmt;
+    r.requestAmt += jobFinalAmount(j);
+    r.taxAmount += jobInvoiceTax(j);
+    r.netReceived += jobNetAmount(j);
   });
 
   const rows = Object.values(byClient).sort((a,b) => b.requestAmt - a.requestAmt).map(r =>
-    [r.name, r.count, r.gross, r.commission, r.outsourceCost, r.requestAmt, r.invoiceAmt, r.directAmt]);
+    [r.name, r.count, r.gross, r.commission, r.outsourceCost, r.requestAmt, r.taxAmount, r.netReceived]);
 
   const csv = '﻿' + [
     headers.join(','),
@@ -10347,7 +10354,8 @@ function updateJobNetBreakdown() {
   const commission = commissionRate > 0 ? Math.round(final * (commissionRate / 100)) : 0;
 
   const taxApplied = !!document.getElementById('job-tax-applied')?.checked;
-  const tax = taxApplied ? Math.round(final * 0.05) : 0;
+  // v3.24.4：稅 = 含稅金額 − 未稅（用 /1.05 反推）
+  const tax = taxApplied ? (final - Math.round(final / 1.05)) : 0;
 
   const outsourceCost = +document.getElementById('job-outsource-cost')?.value || 0;
   const outsourceTo = (document.getElementById('job-outsource-to')?.value || '').trim();
