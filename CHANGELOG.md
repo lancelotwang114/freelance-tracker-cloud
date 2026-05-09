@@ -1,5 +1,380 @@
 ﻿# 版本更新歷史
 
+## v3.24.18 — UX 視覺優化八項（2026-05-09）
+
+### 1. Dashboard stat 卡初始 flash 一致
+- HTML 預設值「`$0`」改成「`NT$0`」，跟渲染後格式一致（避免短暫 flash）
+
+### 2. stat 卡顏色語意統一
+新增 3 個 stat 樣式變體：
+- `.stat.success` 綠色左 border（已收款）
+- `.stat.info` 藍色左 border（待完成 / 進行中）
+- `.stat.year` 紫色左 border（年度，跟收益分頁累計收入 legend 同色）
+
+Dashboard 4 張 stat 卡套用語意：本月已收款=綠 / 本月待收款=黃 / 本月待完成=藍 / 年度=紫
+
+### 3. 「達成目標」card 動態 hide（修小 bug）
+- `loadDisplayPrefUI()` 啟動時也立刻同步 `rev-goals-card` 的 hidden 狀態
+- 之前若 `config.showGoalsCard=false` 但 app 啟動到第一次 renderRevenueGoals 跑完之間，card 還會短暫顯示
+
+### 4. 打勾完成 / 標收款 微動效
+- 新增 `.pulse-success`（綠光暈擴散 0.5s）、`.pulse-paid`（金色光暈 0.5s）兩個 keyframe
+- 新增 `flashRowPulse(jobId, pulseClass)` 工具函式，找所有 `[data-job-id="..."]` 加上 class
+- `toggleDone` 標完成時觸發綠光暈
+- `confirmPaidDate` 單筆收款時觸發金色光暈
+- 涵蓋 5 種視圖（comfort / compact / table / card / dashboard 近期案件）
+- 支援 `prefers-reduced-motion` — 系統偏好減動效時自動停用
+
+### 5. Dashboard 數字 CountUp 動畫
+- 新增 `countUpStat(elementId, target)` 工具函式
+- 用 `requestAnimationFrame` + ease-out cubic 緩動，280ms 滾動到目標
+- 4 張 stat 卡的 value 都套用
+- 從「上次顯示的數字」滾到新值（避免每次都從 0 開始重滾）
+- 差距 < NT$ 100 直接 set（避免無謂動畫）
+- 支援 `prefers-reduced-motion`
+
+### 6. 案件 modal 金額千分位即時 hint
+- 「總金額」input 下方加 `#job-amount-formatted` 提示
+- onInput 時 `updateJobAmountSummary()` 內順手更新顯示「≈ NT$ 18,000」
+- 不影響 input 本身（保留 type=number 上下箭頭等原生 UX）
+
+### 7. 案件 modal 日期欄位快速選擇按鈕
+- 「開始日期」下方：`今天 / 明天 / 下週一 / 清空`
+- 「截止日」下方：`今天 / +3天 / +7天 / 清空`
+- 新增 `setJobDateQuick(type, preset)` 函式
+- 新增 `.date-quick-picks` / `.date-quick-btn` 樣式
+
+### 8. Dashboard 加「⚡ 今天的重點」清單
+- 新卡片 `#today-todo-card`（在 stat-grid 上方），預設 hidden
+- 渲染條件：5 種重點任一觸發才顯示
+  - 🔴 截止當日（今天 endDate / date 命中）
+  - 🟡 即將到期 1-3 天內
+  - 🟠 完成已久未收款（沿用 `config.unpaidRemindDays` 預設 7 天，業主層級覆寫優先）
+  - 📅 月底快到（今天 ≥ `config.monthEndReminderDay` 預設 25）
+  - 🐢 拖款警告（沿用 `computeSlowPayJobs`，最多顯示 3 筆）
+- 點擊條目：跳該案件編輯 modal（如有 jobId）/ 跳請款單分頁（月底提醒）
+- 沒任何重點時整張卡 hide，不佔空間
+- `renderDashboard()` 開頭呼叫一次
+
+### 影響範圍
+- `js/app.js`：APP_VERSION、新增 `renderTodayTodo` / `setJobDateQuick` / `countUpStat` / `flashRowPulse` 共 4 個工具函式；`toggleDone` / `confirmPaidDate` / `updateJobAmountSummary` / `loadDisplayPrefUI` / `renderDashboard` 5 個既有函式改動
+- `index.html`：dashboard 加 `#today-todo-card`；stat-grid 4 張卡加 success/warning/info/year class + 預設值改 NT$0；案件 modal 加 `#job-amount-formatted` hint + 兩組日期快速選擇按鈕
+- `css/style.css`：新增 7 個 rule block（stat 顏色 / today-todo / date-quick-btn / pulse keyframes）
+- `service-worker.js`：CACHE_VERSION
+
+### 不動的部分
+- 序列化 / 同步 / merge / push / schema 邏輯：完全沒動
+- 雲端設定 / Calendar 設定：沒動
+- 沒新增 localStorage key（業務資料）
+- 異地電腦同步行為一致
+
+### 你會看到的差別
+1. dashboard 一進來看到「⚡ 今天的重點」（如果有事），點任一條跳對應 modal
+2. 4 張 stat 卡各有顏色 border：綠（已收）/ 黃（待收）/ 藍（待完成）/ 紫（年度）
+3. 數字會平滑滾動到位（不再瞬間切換）
+4. 點 ✓ 完成 → row 一閃綠光；標收款 → 一閃金色光
+5. 案件 modal 輸入金額時，下方有「≈ NT$ 18,000」千分位 hint
+6. 案件 modal 日期欄位下面有「今天 / 明天 / 下週一」快速按鈕
+7. 設定「不顯示收益目標卡片」時，整張 card 真的不見（不再留空白框）
+
+## v3.24.17 — 設定頁巡查修補（2026-05-09）
+
+巡查 v3.24.16 改動後遺留的問題，一次補齊。
+
+### 1. 修 onboarding bug（dead reference）
+- `app.js` line 13208 的 onboarding 'blank' 分支引用已刪除的 `card-myinfo` element
+- if (myinfo) 防護住不會 crash，但 toast 還是顯示「💡 建議先到『我的資料』填寫姓名與匯款資訊」（誤導 — 該卡已不存在）
+- **修法**：改成跳請款單分頁 + toast 文字更新「💡 建議先到『請款單』分頁設定收款帳號（姓名、匯款資訊）」
+
+### 2. 設定頁卡片視覺順序調整
+**之前**：雲端同步 → 顯示偏好 → Google 行事曆同步
+**現在**：雲端同步 → Google 行事曆同步 → 顯示偏好
+
+理由：「同步」相關功能放一起（雲端同步 + 行事曆同步），個人化偏好（顯示偏好）放後面。
+
+實作：用 CSS `order` 屬性，HTML 順序保持原樣（避免大塊 swap 風險）。`#tab-settings` 改為 flex column，三張卡分別給 order 1/2/3，「關於」div 加 class `settings-about` 給 order 99。
+
+### 3. 小幫手 9 個狀態預覽收進 details
+「🎨 顯示偏好」card 展開後一進去就看到 9 個狀態預覽按鈕（待機 / 處理中 / 思考 / 完成 / 錯誤 / 搜尋中 / 慶祝 / 睡覺 / 眨眼），視覺很吵。
+**修法**：把這 9 個按鈕用 `<details><summary>▸ 預覽其他狀態</summary>...</details>` 包起來，預設折疊。
+
+### 4. CSS dead code 標 deprecated
+v3.24.16 刪了「🔔 通知與提醒」card 後，CSS 有 ~15 條 rule 沒地方用：
+- `.alert-matrix` / `.alert-matrix-header` / `.alert-row` / `.alert-cell` / `.alert-name` / `.alert-config` / `.alert-na` / `.alert-row--separator` / `.cal-disabled` 等
+
+**修法**：在 `.alert-matrix` 段落上方加 `@deprecated v3.24.16` 註解，保留以備將來想恢復「提醒類型矩陣」UI 可一鍵回復。
+
+### 5. JS dead reference 標註
+兩處 getElementById 找已刪除的 element（已用 `if (el)` 防護不會 crash）：
+- `cloudUpdateMasterToggle` 內找 `alert-cal-disabled-hint` / `.alert-matrix` 等（line ~3210）
+- `updateNotifUI()` 整個函式找 `notif-status` / `notif-enable-btn` / `notif-disable-btn` / `notif-denied-help`（line ~9000）
+
+**修法**：在這兩處加 `@deprecated v3.24.16` / `v3.24.17 dead refs` 註解，標明 dead 但保留以備恢復。
+
+### 影響範圍
+- `index.html`：「關於」div 加 class `settings-about`；mascot 預覽按鈕包進 `<details>`
+- `css/style.css`：新增 5 條 `#tab-settings` flex order rules；`.alert-matrix` 段落加 deprecated 註解
+- `js/app.js`：onboarding 'blank' 分支邏輯修正；兩處 dead refs 加註解；APP_VERSION
+- `service-worker.js`：CACHE_VERSION
+
+### 不動的部分
+- 序列化 / 同步 / merge / push 邏輯：完全沒動
+- schema：沒動
+- 雲端 / Calendar / 通知時間設定：沒動
+
+## v3.24.16 — 設定頁大整理（8 卡 → 4 卡）（2026-05-09）
+
+### 背景
+設定頁累積了 8 張卡，多數內容對個人接案者沒必要，且彼此功能重疊（資料備份 vs 雲端歷史 vs Drive 同步全是「資料怎麼存」）。整理成 4 張，視覺更清爽。
+
+### 改動
+
+| 原卡片 | 處理 |
+|---|---|
+| 🔐 Google Drive 同步 | **改名「☁️ 雲端同步」** + 內含 sub-section（雲端歷史 + 離線備份） |
+| 我的收款資訊 | **整張刪除**（內容已搬到請款單分頁，這邊只剩跳轉按鈕沒實際用途） |
+| 🎨 顯示偏好 | **保留**，併入「🤖 小幫手」當 sub-section |
+| 🤖 小幫手 | **刪除獨立卡**，內容搬進「🎨 顯示偏好」 |
+| 🔔 通知與提醒 | **整張刪除**（桌面通知功能停用 + 提醒類型矩陣全部隱藏） |
+| 💾 資料備份 | **改名「💾 離線資料備份」** + 搬進「☁️ 雲端同步」當 sub-section |
+| 📅 Google 行事曆同步 | **保留獨立**（不合併到雲端同步，因概念不同） |
+| 📦 雲端備份歷史 | **改名「📦 雲端版本歷史」** + 搬進「☁️ 雲端同步」當 sub-section |
+
+### 新結構（4 張卡）
+
+```
+1. ☁️ 雲端同步
+   ├─ Google 帳號登入 / 登出 / 同步狀態 / 立即同步按鈕
+   ├─ 📦 雲端版本歷史（建備份 / 重新整理列表 / list）
+   └─ 💾 離線資料備份（匯出 JSON / 匯入 JSON / 匯出 CSV / 危險操作）
+
+2. 🎨 顯示偏好
+   ├─ 收益目標達成率 toggle
+   └─ 🤖 小幫手（啟用 / 名字 / 試試看 / 預覽 9 種狀態）
+
+3. 📅 Google 行事曆同步
+   ├─ 啟用 / 日曆選擇
+   ├─ 通知時間 09:30
+   └─ 立即同步按鈕
+
+4. （ABOUT 區塊保留）
+```
+
+### 桌面通知功能停用
+- `setTimeout(maybeFireNotifications, 4000)` 註解掉（停所有桌面通知觸發）
+- 函式（`requestNotifPermission` / `disableNotif` / `sendTestNotification` / `sendNotification` / `maybeFireNotifications` / `isNotifEnabled` / `notifSupported`）保留為 dead code，未來想恢復把那行 setTimeout 復原即可
+- 對應 config 欄位（`enableOverdueAlert` / `enableDueSoonAlert` / `enableUnpaidLongAlert` / `enableMonthEndAlert` / `enableBillingDayAlert` / `enableSlowPayAlert` / `enableBackupAlert`）保留在 schema 內（避免 migration 風險）
+
+### 提醒類型矩陣 UI 全隱藏
+- `alert-overdue-desktop` / `alert-dueSoon-days` / `alert-unpaidLong-calendar` 等 21 個 input 整段刪除
+- `loadReminderConfigUI()` 因內部都用 `if (g('id')) ...` 防護，UI 不存在不會報錯
+- `cfg.syncTypes` 預設值仍是 `{ jobs: true, unpaidLong: true, monthEnd: true, billingDay: true, slowPay: true, dailyMorning: true }` → 行事曆同步繼續按這些預設值推
+
+### Google 行事曆同步卡內提示更新
+原指向「通知與提醒」卡的「💡 要同步哪些事件 → 在『🔔 通知與提醒』卡的『📅 Google 行事曆』欄勾選」訊息更新為說明預設行為。
+
+### 影響範圍
+- `index.html`：刪除 3 張獨立 card（mascot / reminder / backup / cloud-snapshots）；改名 1 張 card（cloud-auth h3 「🔐 Google Drive 同步」→「☁️ 雲端同步」）；展開 cloud-auth body 加 2 個 sub-section
+- `js/app.js`：APP_VERSION + 註解掉 `setTimeout(maybeFireNotifications, 4000)`
+- `service-worker.js`：CACHE_VERSION
+- 不動 schema、不動 cloudCalendarConfig、不動雲端同步邏輯
+
+### 你會看到的差別
+1. 設定頁總共只有 4 張卡（少 4 張）
+2. 「我的收款資訊」、「🤖 小幫手」、「🔔 通知與提醒」、「💾 資料備份」、「📦 雲端備份歷史」這 5 張卡都不見
+3. 「🔐 Google Drive 同步」改成「☁️ 雲端同步」，展開後可以看到雲端版本歷史 + 離線資料備份
+4. 「🎨 顯示偏好」展開後可以設小幫手
+5. 「📅 Google 行事曆同步」獨立保留，通知時間照常設定
+
+## v3.24.15 — 同步防呆六項（Phase 1 + Phase 2 全做）（2026-05-09）
+
+### 背景
+v3.24.13 強化 push 失敗處理、v3.24.14 強制備份才能更新；但仍有 race condition、阻斷器、多裝置衝突等真實風險。本版一次補齊六項，覆蓋阻斷器到樂觀鎖。
+
+### 1. pollAppVersion 加 cache buster（修阻斷器）
+**問題**：service worker 是 cache-first，`fetch(location.href, { cache: 'no-store' })` 標頭沒用 — SW 攔截後直接回 cache，**v3.24.14 強制備份 modal 永遠不會被觸發**。
+
+**修法**：fetch URL 加 `?_pollver=${Date.now()}` query param，SW 的 `caches.match` 因 URL 不匹配而 miss → 走 network 拉到真新版 HTML。
+
+### 2. 啟動 init overlay 擋編輯（修 race condition）
+**問題**：app 啟動 → cloudInitTrackerFile 在跑（拉 Drive 1–3 秒）→ **使用者已經可以操作 UI** → 改完案件後 init 跑完 mergeStates 可能把剛改的當衝突或被結果蓋掉。
+
+**修法**：新增 `showInitOverlay()` / `hideInitOverlay()`：
+- cloudInitTrackerFile 開頭 → 蓋黑色半透明 overlay + spinner
+- 文字：「☁️ 從 Google Drive 載入資料中… 為避免資料衝突，請稍候 1–3 秒」
+- 所有 return 路徑（A/B/C 三種 case + error）都會 hide
+- z-index 99999、backdrop-filter blur
+
+### 3. navigator.onLine 監聽（離線提示 + 上線重推）
+**問題**：離線時 push 失敗 → 紅 banner 寫「同步失敗」但不夠精準。使用者不知道是「網路斷了」還是「token 過期」。
+
+**修法**：
+- `online` 事件 → toast「🌐 網路恢復，自動重新同步…」+ `cloudPushFailRetries=0` + 立刻 `cloudPushNow()`
+- `offline` 事件 → `cloudSetSyncStatus('error', '📵 離線中，網路恢復後自動同步')`
+- banner 訊息更精準
+
+### 4. 未同步筆數 `cloudPendingChangesCount`
+**問題**：使用者改 5 筆，看不到「目前有 5 筆等待推送」。萬一中途出狀況（瀏覽器 crash），不知道有沒有上去。
+
+**修法**：
+- `save()` 內 `cloudPendingChangesCount++`
+- `cloudPushNow` 成功時歸零
+- sync indicator 顯示「⌛ 推送中… (3)」、「⏳ 同步中… (5)」
+- title 也補「本機有 N 筆未上傳改動」
+
+### 5. 樂觀鎖 / version check on push（修兩地電腦衝突）
+**問題**：電腦 A 改了 case X → 推到 Drive (modifiedTime=T1)。電腦 B 改了 case Y → 它的 lastSyncedAt=T0 → 直接 PUT → 整份 wrapper 蓋掉雲端 → **case X 消失**。
+
+**修法**：`cloudPushNow` 進入推送前，先 `driveGetFileMeta(fileId)` 比對 modifiedTime：
+- 雲端 modifiedTime > 本機 lastSyncedAt → 表示有別的裝置剛改過
+- 不直接覆蓋 → 改成下載雲端 → `cloudResolveAndMerge` 跑三方合併（會自動處理衝突 modal 或 clean push）
+- 合併完成後標記 success，本次 push 視為已完成
+- 若 version check 本身失敗（網路、token）→ 不阻塞，繼續走原本流程（避免 push 永遠卡住）
+
+新增 logAction `cloud-push-conflict-detected`，可從操作日誌追蹤。
+
+### 6. 多 tab 偵測（BroadcastChannel）
+**問題**：同一台電腦開兩個 tab 編輯，兩 tab 的 push 互蓋（race condition）。
+
+**修法**：每個 tab 啟動時 `new BroadcastChannel('freelance-tracker-cloud-tabs')`：
+- 每 5 秒廣播 heartbeat（含 tabId、timestamp）
+- 收到別人的 heartbeat → 加入 `_otherTabsActive` Map
+- 超過 12 秒沒新 heartbeat → 視為已關閉
+- 偵測到 ≥ 1 個其他 tab → 底部顯示**黃色警告 banner**「⚠️ 偵測到此 app 在 N 個分頁同時開啟，請只在一個分頁編輯」
+- iOS Safari 14+ 支援 BroadcastChannel；不支援的瀏覽器靜默跳過（不報錯）
+- beforeunload 廣播 leaving 訊號
+
+### 影響範圍
+- `js/app.js`：
+  - `pollAppVersion()` 加 cache buster URL
+  - 新增 `showInitOverlay` / `hideInitOverlay`
+  - `cloudInitTrackerFile` 各 return 路徑加 hideInitOverlay
+  - `cloudPushNow` 加 version check 前置邏輯
+  - 新增 `online` / `offline` listener
+  - 新增 `cloudPendingChangesCount` 計數
+  - sync indicator 顯示筆數
+  - 新增 `_initTabDetection` / `_renderMultiTabWarning` / `BroadcastChannel`
+- `css/style.css`：新增 `.init-overlay` / `.init-overlay-spinner` / `.init-overlay-msg` / `.init-overlay-hint` / `.multi-tab-warning` 樣式
+- `index.html`：不動
+
+### 你會看到的差別
+1. 一開 app 看到半透明 overlay + spinner 「載入中」→ 1–3 秒後消失才能編輯
+2. 改完案件 → sync indicator 顯示「⌛ 推送中… (1)」直到雲端確認
+3. 拔網路線 → 紅 banner 變成「📵 離線中…」→ 接回網線 → toast「🌐 網路恢復…」自動重推
+4. 兩台電腦先後改同一份 → 第二台 push 前會偵測到雲端較新 → 自動觸發合併 → toast「✓ 偵測到雲端有新版，已自動合併」
+5. 同一電腦開 2 tab → 底部黃 banner 提示「請只在一個分頁編輯」
+6. 真有新版本上 GitHub Pages → polling 真的會偵測到 → 跳出 v3.24.14 強制備份 modal
+
+## v3.24.14 — 強制備份才能更新（保護資料免於新版 bug 影響）（2026-05-09）
+
+### 背景
+v3.24.x 期間發生過資料回溯 / 欄位遺失事故。即使 v3.24.13 強化了同步機制，**新版本本身仍有可能引入 bug 影響資料**。所以增加一道「更新前必須先備份」的閘門。
+
+### 1. 點「點此更新」不再直接 reload
+**之前**：`pollAppVersion()` 偵測到新版 → 顯示橫幅「點此強制更新」→ `onclick="hardReload()"` 直接清快取重整 → 萬一新版有 bug → 資料風險暴露。
+
+**現在**：
+- 橫幅文字改成「**點此更新（強制先備份）**」
+- onclick → `showUpdateConfirmModal()` 開「強制備份才能更新」modal
+
+### 2. 「強制備份才能更新」modal
+新增 `#update-confirm-modal`（在 index.html）：
+- 標題：「🆕 偵測到新版本」
+- 顯示新版本號 / 目前版本 / Google 登入狀態
+- **三個按鈕**：
+  - `📸 建立 Drive 快照並更新` — 用 `cloudCreateSnapshot('manual', ...)` 建快照，標籤帶版本號方便辨識
+  - `📥 下載 JSON 備份` — 用 `buildTrackerWrapper()` 組完整資料、瀏覽器下載 `.json` 檔到本機；下載後 modal 換成「✓ 確認備份完成，立刻更新」
+  - `⏸️ 稍後再說` — 關 modal，但下次 poll 偵測到新版會再次提示
+- **沒有「直接更新不備份」選項**
+
+### 3. 未登入情境保護
+未登入 Google 時：
+- 顯示警告「⚠️ 未登入 Google，無法建 Drive 快照」
+- Drive 快照按鈕 disabled
+- 仍可選「下載 JSON 備份」當保險
+
+### 4. Drive 備份失敗的後備方案
+建立 Drive 快照若失敗（網路錯誤、token 過期等）→ 跳 alert 明確告知，建議改用「下載 JSON 備份」或修復後再試 → 按鈕復原讓使用者選別條路。
+
+### 5. 版號 badge（header）也走 modal
+- index.html `app-version-badge` 的 onclick 從 `hardReload()` 改成 `onVersionBadgeClick()`
+- 邏輯：偵測到有新版 → 開 modal；沒新版 → 跳 confirm 問「要強制清快取嗎？」（避免誤點）
+
+### 6. logAction 追蹤備份動作
+- `update-backup` 事件（type: 'drive-snapshot' / 'json-download'，含 from / to 版本）
+- 之後若使用者再回報資料事故，可從操作日誌看是否更新前有備份
+
+### 影響範圍
+- `js/app.js`：新增 `showUpdateConfirmModal()` / `confirmUpdateWithDriveBackup()` / `confirmUpdateWithJSONDownload()` / `cancelUpdate()` / `onVersionBadgeClick()`；改 `pollAppVersion()` 內橫幅 onclick
+- `index.html`：新增 `#update-confirm-modal`；`app-version-badge` onclick 換成新函式
+- `service-worker.js` / `index.html` meta / `js/app.js` APP_VERSION：bump 三處 v3.24.14
+
+### 你會看到的差別
+- 偵測到新版 → 橫幅或版號 badge 點下去 → **不會直接更新**
+- 跳 modal 強制你選一個備份方式
+- 備份成功後才會 reload
+- 如果離線 / 未登入 / Drive 失敗 → 至少還有「下載 JSON 」這條保險
+
+## v3.24.13 — 雲端同步穩定性大補強：絕不丟資料（2026-05-09）
+
+### 背景
+使用者反映「前兩三天的修改被回溯」「外包欄位、稅務勾選沒儲存到雲端」。即使根因不易完全重現，先把同步機制全面強化，**保證未來不會再丟資料**。
+
+### 1. cloudPushNow 併發防護升級
+**之前**：`cloudPushInProgress = true` 時，後續呼叫 `cloudPushNow()` 直接 `return` → **靜默丟棄**。
+- 情境：使用者連改兩筆，第一筆推送中，第二筆被丟掉
+- 結果：localStorage 有第二筆，雲端只有第一筆 → 表面正常但實際失同步
+
+**修法**：加 `cloudPushPendingAfter` flag → 進行中的話標記，當前推送結束後立刻再推一次（不 debounce）。
+
+### 2. 失敗自動指數退避重試
+**之前**：push 失敗只 console.error → user 不知道、不會重試（要等下次 save 才再試）。
+
+**修法**：失敗後自動排程重試 — 3s → 8s → 20s → 1m → 3m，最多 5 次。失敗計數器在成功後歸零。
+
+### 3. 關 tab / 切背景前強制 flush
+**之前**：debounce 2 秒。使用者改完馬上關 tab → push 沒被觸發 → 改動只在 localStorage。
+
+**修法**：
+- `visibilitychange` 切到 hidden → 立刻 `cloudFlushPush()`（跳過 debounce）
+- `beforeunload` 關 tab 前最後一次嘗試 flush
+- 新增 `cloudFlushPush()` 公用函式（清 timer + 立刻 push）
+
+### 4. 紅色固定 banner（強提示）
+**之前**：同步失敗只有右上角小 indicator + toast 飄一下 10 秒就消失。使用者不會注意到。
+
+**修法**：新增 `cloudUpdateSyncBanner()` — 觸發條件：
+- 已登入但 sync error → 「⚠️ 資料未同步到雲端」+「立刻重試」+「重新登入」按鈕
+- 未登入但本機有資料 → 「⚠️ 未登入 Google，資料只存在本機」+「立刻登入」按鈕
+
+banner 紅底白字，position: fixed 釘在頂部，z-index 9999，body 加 `padding-top` 不擋內容。狀態恢復後自動消失。
+
+### 5. silent refresh 失敗也跳 banner
+**之前**：silent refresh 連續失敗 → 只 toast「⚠️ Google 連線過期」10 秒消失。
+
+**修法**：除了 toast，同時觸發 `cloudSetSyncStatus('error', ...)` → banner 固定在頂部，user 不點「重新登入」就不消失。
+
+### 6. 新 API：cloudRetryPush + cloudFlushPush
+- `cloudRetryPush()`：給 banner 的「立刻重試」按鈕用，重試計數歸零後立刻推
+- `cloudFlushPush()`：清 debounce timer + 立刻 push，給 visibilitychange / beforeunload 用
+
+### 7. app 啟動 1 秒後檢查 banner
+給 `cloudInitGoogleAuth` 拉完登入狀態的時間，避免「上次 token 已過期 → 重開時 banner 沒及時顯示」。
+
+### 影響範圍
+- `js/app.js`：cloudPushNow / cloudSchedulePush / cloudFlushPush / cloudRetryPush / cloudUpdateSyncBanner / cloudSetSyncStatus / _handleSilentRefreshFailure / visibilitychange + beforeunload listener / 啟動初始化
+- `css/style.css`：新增 `.sync-error-banner` 樣式（紅底白字、固定頂部）+ `body.has-sync-banner` 補 padding
+- `index.html`：不動（banner 用 JS 動態 prepend 到 body）
+
+### 序列化檢查（不需修改）
+確認 `buildTrackerWrapper()` 把整個 `state.jobs` JSON.stringify → 所有欄位（含 `taxApplied`、`outsourceCost`、`outsourceTo`）都會被帶進去。Schema 沒問題，問題在 push 觸發 / 失敗提示，已修。
+
+### 你會看到的差別
+1. 同步失敗 → 頂部固定紅 banner，**不消失直到你按重試或重新登入**
+2. token 過期 → 同樣紅 banner，user 不會在「以為登入但其實沒登入」狀態下繼續操作
+3. 改完案件馬上關 tab → 大概率還是會 flush 完才關（visibilitychange 比 beforeunload 早觸發）
+4. 兩個改動同時發生（例如改 A 案件→改 B 案件）→ 不會吃掉，B 會在 A push 完後立刻補推
+
 ## v3.24.12 — 批次模式在 5 視圖中失效修復（2026-05-09）
 
 ### 🚨 Bug 修復：批次模式 + 全選 / 反選失效

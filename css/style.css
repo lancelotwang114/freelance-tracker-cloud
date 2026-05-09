@@ -256,6 +256,10 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .stat .delta { font-size: 12px; color: var(--success); margin-top: 2px; }
 .stat.warning { border-left: 3px solid var(--warning); }
 .stat.danger { border-left: 3px solid var(--danger); }
+/* v3.24.18：stat 卡顏色語意統一（已收款=綠 / 待完成=藍 / 年度=紫，跟現有 warning=黃 / danger=紅 對齊） */
+.stat.success { border-left: 3px solid var(--success); }
+.stat.info { border-left: 3px solid var(--primary); }
+.stat.year { border-left: 3px solid #a855f7; }  /* 紫色，跟收益分頁累計收入 legend 一致 */
 /* v3.6.0：可點擊的 stat（hover 提示可互動）*/
 .stat.clickable { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
 .stat.clickable:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.05); border-color: var(--primary); }
@@ -372,6 +376,187 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 }
 .bulk-checkbox.checked::after { content: "✓"; }
 .bulk-checkbox:hover { border-color: var(--primary); }
+
+/* v3.24.18：dashboard 「今天的重點」卡 — 列出截止當日 / 即將到期 / 拖款 / 月底快到等 */
+.today-todo-card {
+  border-left: 3px solid var(--primary);
+  background: var(--primary-light);
+}
+.today-todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 2px;
+  transition: background 0.12s;
+}
+.today-todo-item[onclick]:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+[data-theme="dark"] .today-todo-item[onclick]:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.today-todo-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.today-todo-text {
+  flex: 1;
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* v3.24.18：日期欄位快速選擇按鈕（案件 modal 內） */
+.date-quick-picks {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.date-quick-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.date-quick-btn:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.date-quick-btn:active {
+  transform: scale(0.95);
+}
+
+/* v3.24.18：打勾完成微動效 — 點 ✓ 後 row 加 .pulse-success class 觸發綠光暈擴散 0.4s */
+@keyframes pulse-success {
+  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+  60%  { box-shadow: 0 0 0 12px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.pulse-success {
+  animation: pulse-success 0.5s ease-out;
+}
+/* v3.24.18：標收款也有對應的金色光暈 */
+@keyframes pulse-paid {
+  0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
+  60%  { box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+.pulse-paid {
+  animation: pulse-paid 0.5s ease-out;
+}
+/* 偏好減動效 → 直接停掉 */
+@media (prefers-reduced-motion: reduce) {
+  .pulse-success, .pulse-paid { animation: none; }
+}
+
+/* v3.24.17：設定頁卡片視覺順序（用 order 屬性，避免直接 swap HTML 範圍太大）
+   實際 DOM 順序：cloud-auth → display-pref → calendar → about
+   視覺順序：cloud-auth → calendar → display-pref → about
+   理由：「同步」相關（雲端 + 行事曆）放一起，個人化偏好放後面 */
+#tab-settings {
+  display: flex;
+  flex-direction: column;
+}
+#tab-settings > #card-cloud-auth { order: 1; }
+#tab-settings > #card-calendar { order: 2; }
+#tab-settings > #card-display-pref { order: 3; }
+#tab-settings > .settings-about { order: 99; }
+/* 註解 / 空白 div / placeholder 都用 order: 50 排最後 card 之後（顯示為間距） */
+#tab-settings > *:not(#card-cloud-auth):not(#card-calendar):not(#card-display-pref):not(.settings-about) { order: 50; }
+
+/* v3.24.15：cloud init 期間的 loading overlay（防止 race condition） */
+.init-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 14px;
+  gap: 14px;
+  backdrop-filter: blur(2px);
+}
+.init-overlay-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: init-spin 0.8s linear infinite;
+}
+.init-overlay-msg { font-weight: 600; }
+.init-overlay-hint { font-size: 12px; opacity: 0.75; max-width: 320px; text-align: center; }
+@keyframes init-spin { to { transform: rotate(360deg); } }
+
+/* v3.24.15：多 tab 警告 banner（黃色，pos: fixed bottom） */
+.multi-tab-warning {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  background: #f59e0b;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 9998;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  max-width: calc(100vw - 32px);
+}
+
+/* v3.24.13：頂部紅色固定 banner — 同步失敗 / 未登入強提示 */
+.sync-error-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 9999;
+  background: #dc2626;
+  color: #fff;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  flex-wrap: wrap;
+}
+.sync-banner-msg { flex: 1; min-width: 200px; }
+.sync-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.sync-banner-btn {
+  background: #fff;
+  color: #dc2626;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.sync-banner-btn:hover { opacity: 0.85; }
+.sync-banner-btn-outline {
+  background: transparent;
+  color: #fff;
+  border: 1px solid #fff;
+}
+/* banner 出現時把整個內容往下推（避免擋住 header）*/
+body.has-sync-banner { padding-top: 48px; }
+@media (max-width: 600px) {
+  body.has-sync-banner { padding-top: 76px; }   /* 手機 banner 換行可能變兩行 */
+}
 
 /* v3.24.12：table 視圖批次模式 — 第一格放 checkbox，selected row 加底色 */
 .jobs-table.bulk-mode tr { cursor: pointer; }
@@ -2346,6 +2531,8 @@ body.view-board #jobs-group-control {
 }
 
 /* ==================== 提醒類型矩陣（v3.8.0：每類自帶 desktop + calendar 兩 channel）==================== */
+/* @deprecated v3.24.16 — 「🔔 通知與提醒」card 已整段刪除，下面 alert-matrix / reminder-* 樣式都不再被任何 HTML 使用。
+   保留以備將來想恢復「提醒類型矩陣」UI 時可一鍵回復；如確定永不恢復可整段刪除。 */
 .alert-matrix {
   display: grid;
   grid-template-columns: 1fr 60px 80px;

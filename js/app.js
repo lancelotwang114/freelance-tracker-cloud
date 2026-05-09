@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.12';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-09-v3.24.18';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -224,7 +224,12 @@ async function cloudInitGoogleAuth() {
 
   // 1. visibilitychange：分頁從背景切回前景
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') _checkAndRefreshIfNeeded('visibilitychange');
+    if (document.visibilityState === 'visible') {
+      _checkAndRefreshIfNeeded('visibilitychange');
+    } else {
+      // v3.24.13：切到背景前 → 立刻 flush 還沒推送的資料（不等 debounce）
+      if (typeof cloudFlushPush === 'function') cloudFlushPush();
+    }
   });
 
   // 2. focus：視窗從別的 app / tab 切回（mousemove 也算）— 比 visibilitychange 更早觸發
@@ -233,6 +238,27 @@ async function cloudInitGoogleAuth() {
   // 3. pageshow：BFCache 恢復（瀏覽器「上一頁」回來、或從休眠喚醒）
   window.addEventListener('pageshow', (event) => {
     if (event.persisted) _checkAndRefreshIfNeeded('pageshow-bfcache');
+  });
+
+  // v3.24.13：beforeunload — 關 tab 前最後一次嘗試 flush（不一定能跑完，但盡力）
+  window.addEventListener('beforeunload', () => {
+    if (typeof cloudFlushPush === 'function') cloudFlushPush();
+  });
+
+  // v3.24.15：navigator.onLine 變化 — 離線標記 banner、上線立刻重推
+  window.addEventListener('online', () => {
+    console.log('[network] 網路恢復');
+    if (typeof toast === 'function') toast('🌐 網路恢復，自動重新同步…', 3000);
+    cloudPushFailRetries = 0;  // 歸零，立刻重試（不等指數退避）
+    if (typeof cloudPushNow === 'function') {
+      cloudPushNow().catch(() => {});
+    }
+  });
+  window.addEventListener('offline', () => {
+    console.log('[network] 離線');
+    if (typeof cloudSetSyncStatus === 'function') {
+      cloudSetSyncStatus('error', '📵 離線中，網路恢復後自動同步');
+    }
   });
 
   // v3.22.3：啟動 indicator ticker，讓「30 秒前」自動跳成「1 分前」「2 分前」…
@@ -316,12 +342,12 @@ function _handleSilentRefreshFailure(errMsg) {
   // 重試也失敗 → 通知 user 但不清 state（避免閃登出）
   _silentRefreshRetries = 0;
   console.error('[cloud-auth] silent refresh failed after retries:', errMsg);
-  if (typeof toast === 'function') {
-    toast('⚠️ Google 連線過期，請點右上角頭像重新登入', 10000);
-  }
-  // 把 sync indicator 設成 error 狀態，user 看光暈變紅就知道
+  // v3.24.13：toast 飄一下不夠醒目 → 觸發 banner（cloudSetSyncStatus 會連動 banner）
   if (typeof cloudSetSyncStatus === 'function') {
-    cloudSetSyncStatus('error', 'Google 連線過期，需要重新登入');
+    cloudSetSyncStatus('error', 'Google 連線過期，請點右上角「重新登入」');
+  }
+  if (typeof toast === 'function') {
+    toast('⚠️ Google 連線過期，請點頂部紅條重新登入（資料未同步）', 10000);
   }
 }
 
@@ -522,6 +548,8 @@ function cloudSetSyncStatus(status, errMsg) {
   cloudSyncStatus = status;
   cloudLastSyncError = errMsg || null;
   cloudUpdateSyncIndicator();
+  // v3.24.13：error / 未登入 → 顯示頂部紅色固定 banner（強提示）
+  if (typeof cloudUpdateSyncBanner === 'function') cloudUpdateSyncBanner();
   // v3.23.2：mascot 跟著反應
   // syncing/pending → loading；error → error；success（從 error 恢復）→ success；其他 → 不動
   if (typeof mascotSetState === 'function') {
@@ -534,6 +562,80 @@ function cloudSetSyncStatus(status, errMsg) {
       mascotSetState('idle');
     }
   }
+}
+
+// v3.24.15：cloud init 期間的 loading overlay
+// 防止使用者在 mergeStates 跑完之前編輯資料 — race condition 會讓使用者剛改的東西被合併結果蓋掉
+function showInitOverlay() {
+  let o = document.getElementById('init-overlay');
+  if (!o) {
+    o = document.createElement('div');
+    o.id = 'init-overlay';
+    o.className = 'init-overlay';
+    o.innerHTML = `
+      <div class="init-overlay-spinner"></div>
+      <div class="init-overlay-msg">☁️ 從 Google Drive 載入資料中…</div>
+      <div class="init-overlay-hint">為避免資料衝突，請稍候 1–3 秒，這段時間先不要編輯</div>
+    `;
+    document.body.appendChild(o);
+  } else {
+    o.style.display = 'flex';
+  }
+}
+function hideInitOverlay() {
+  const o = document.getElementById('init-overlay');
+  if (o) o.remove();
+}
+
+// v3.24.13：頂部紅色固定 banner — 同步失敗 / 未登入時強提示
+// 出現條件：
+//   1. 已登入但 sync error → 「⚠️ 資料未同步到雲端」+ 立刻重試 + 重新登入按鈕
+//   2. 未登入但 localStorage 有資料 → 「⚠️ 未登入 Google，資料只在本機」+ 登入按鈕
+function cloudUpdateSyncBanner() {
+  let banner = document.getElementById('sync-error-banner');
+  const signedIn = typeof isCloudSignedIn === 'function' && isCloudSignedIn();
+  const hasLocalData = (state && (state.jobs || []).length > 0) || (state && (state.clients || []).length > 0);
+
+  // 決定要不要顯示
+  let show = false;
+  let mode = '';   // 'sync-fail' / 'not-signed-in'
+  let message = '';
+
+  if (signedIn && cloudSyncStatus === 'error') {
+    show = true;
+    mode = 'sync-fail';
+    const errLine = cloudLastSyncError ? `（${cloudLastSyncError}）` : '';
+    message = `⚠️ 資料未同步到雲端${errLine}　本機資料安全，但兩地電腦不會即時一致`;
+  } else if (!signedIn && hasLocalData) {
+    show = true;
+    mode = 'not-signed-in';
+    message = '⚠️ 未登入 Google，資料只存在本機（其他電腦看不到最新版）';
+  }
+
+  if (!show) {
+    if (banner) banner.remove();
+    document.body.classList.remove('has-sync-banner');
+    return;
+  }
+
+  // 建 banner（如果沒有）或更新現有
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'sync-error-banner';
+    banner.className = 'sync-error-banner';
+    document.body.prepend(banner);
+    document.body.classList.add('has-sync-banner');
+  }
+
+  const btnHtml = mode === 'sync-fail'
+    ? `<button class="sync-banner-btn" onclick="cloudRetryPush()">立刻重試</button>
+       <button class="sync-banner-btn sync-banner-btn-outline" onclick="cloudSignIn()">重新登入</button>`
+    : `<button class="sync-banner-btn" onclick="cloudSignIn()">立刻登入</button>`;
+
+  banner.innerHTML = `
+    <span class="sync-banner-msg">${message}</span>
+    <span class="sync-banner-actions">${btnHtml}</span>
+  `;
 }
 
 // v3.22.3：把 ISO 時間轉成中文相對時間（剛剛 / 30 秒前 / 5 分前 / 2 小時前 / 3 天前 / 5/1）
@@ -585,16 +687,19 @@ function cloudUpdateSyncIndicator() {
   const verLine = syncedVer ? `\n雲端版本 #${syncedVer}` : '';
   const timeLine = syncedAt ? `\n最後同步：${fullTime}（${relTime}）` : '';
 
+  // v3.24.15：未推送筆數標記
+  const pendingTag = (cloudPendingChangesCount > 0) ? ` (${cloudPendingChangesCount})` : '';
+
   switch (cloudSyncStatus) {
     case 'pending':
       el.className = 'sync-indicator sync-syncing';
-      el.innerHTML = '⌛ 推送中…';
-      el.title = `本機有未上傳的改動，2 秒後自動推送${timeLine}${verLine}${accountLine}`;
+      el.innerHTML = `⌛ 推送中…${pendingTag}`;
+      el.title = `本機有 ${cloudPendingChangesCount} 筆未上傳改動，2 秒後自動推送${timeLine}${verLine}${accountLine}`;
       break;
     case 'syncing':
       el.className = 'sync-indicator sync-syncing';
-      el.innerHTML = '⏳ 同步中…';
-      el.title = `正在推送到 Drive${timeLine}${verLine}${accountLine}`;
+      el.innerHTML = `⏳ 同步中…${pendingTag}`;
+      el.title = `正在推送到 Drive（${cloudPendingChangesCount} 筆改動）${timeLine}${verLine}${accountLine}`;
       break;
     case 'error': {
       el.className = 'sync-indicator sync-error';
@@ -706,8 +811,76 @@ function isCloudSignedIn() {
   return !!cloudAuthState.user && !!cloudAuthState.accessToken;
 }
 
+// v3.24.15：多 tab 偵測（BroadcastChannel）
+// 同一個瀏覽器開兩個 tab 時，兩 tab 的 push 會互相蓋（race condition）
+// 偵測到時用紅 banner 提示使用者，避免他在多 tab 上同時編輯
+const TAB_ID = `tab-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
+let _tabChannel = null;
+let _otherTabsActive = new Map();   // tabId → lastSeen ms
+const TAB_HEARTBEAT_MS = 5000;
+const TAB_STALE_MS = 12000;
+
+function _initTabDetection() {
+  if (typeof BroadcastChannel === 'undefined') {
+    console.log('[multi-tab] BroadcastChannel 不支援，跳過多 tab 偵測');
+    return;
+  }
+  try {
+    _tabChannel = new BroadcastChannel('freelance-tracker-cloud-tabs');
+  } catch (_) { return; }
+
+  _tabChannel.onmessage = (event) => {
+    const data = event.data || {};
+    if (data.tabId && data.tabId !== TAB_ID) {
+      _otherTabsActive.set(data.tabId, Date.now());
+      _renderMultiTabWarning();
+    }
+  };
+
+  // 廣播「我還活著」每 5 秒一次
+  _tabChannel.postMessage({ type: 'heartbeat', tabId: TAB_ID, ts: Date.now() });
+  setInterval(() => {
+    if (_tabChannel) _tabChannel.postMessage({ type: 'heartbeat', tabId: TAB_ID, ts: Date.now() });
+    // 清掉超過 12 秒沒回應的（已關閉）
+    const now = Date.now();
+    for (const [id, lastSeen] of _otherTabsActive) {
+      if (now - lastSeen > TAB_STALE_MS) _otherTabsActive.delete(id);
+    }
+    _renderMultiTabWarning();
+  }, TAB_HEARTBEAT_MS);
+
+  // 關 tab 前廣播
+  window.addEventListener('beforeunload', () => {
+    try { _tabChannel?.postMessage({ type: 'leaving', tabId: TAB_ID }); } catch (_) {}
+  });
+}
+
+function _renderMultiTabWarning() {
+  const count = _otherTabsActive.size;
+  let warn = document.getElementById('multi-tab-warning');
+  if (count === 0) {
+    if (warn) warn.remove();
+    return;
+  }
+  if (!warn) {
+    warn = document.createElement('div');
+    warn.id = 'multi-tab-warning';
+    warn.className = 'multi-tab-warning';
+    document.body.appendChild(warn);
+  }
+  warn.innerHTML = `⚠️ 偵測到此 app 在 <b>${count + 1}</b> 個分頁同時開啟，<b>請只在一個分頁編輯</b>，避免改動互相覆蓋。`;
+}
+
+_initTabDetection();
+
 // 自啟動：app.js 在 body 尾端載入時 DOM 已就緒，直接 init
 cloudInitGoogleAuth();
+
+// v3.24.13：app 啟動 1 秒後檢查一次 banner（給 cloudInitGoogleAuth 拉完狀態的時間）
+// 例如：上次關閉時 token 已過期 → 重開有 user info 但無 token → 應顯示「未登入」banner
+setTimeout(() => {
+  if (typeof cloudUpdateSyncBanner === 'function') cloudUpdateSyncBanner();
+}, 1000);
 
 // ============== ☁️ Drive API Client（v3.0.0-alpha.2 起新增）==============
 // 純 fetch 包裝 Google Drive API v3，scope 限定 drive.appfolder（只動 App Folder）
@@ -1116,12 +1289,17 @@ function isLocalDataEmpty() {
 async function cloudInitTrackerFile() {
   if (!isCloudSignedIn()) return;
 
+  // v3.24.15：init 期間顯示半透明 overlay，避免使用者在 mergeStates 跑之前編輯
+  // （race condition：剛改的東西可能被 merge 結果覆蓋）
+  if (typeof showInitOverlay === 'function') showInitOverlay();
+
   let trackerFile = null;
   try {
     const files = await driveListAppFolder(`name = "${TRACKER_FILENAME}" and trashed = false`);
     trackerFile = files[0] || null;
   } catch (e) {
     console.error('[cloud-init] list failed:', e);
+    if (typeof hideInitOverlay === 'function') hideInitOverlay();
     if (e instanceof DriveAuthError) {
       alert('Drive 連線失敗：' + e.message);
     } else {
@@ -1151,6 +1329,7 @@ async function cloudInitTrackerFile() {
       console.error('[cloud-init] create failed:', e);
       alert('在 Drive 建立 tracker.json 失敗：' + e.message);
     }
+    if (typeof hideInitOverlay === 'function') hideInitOverlay();  // v3.24.15
     return;
   }
 
@@ -1160,6 +1339,7 @@ async function cloudInitTrackerFile() {
     remoteText = await driveDownloadFile(trackerFile.id);
   } catch (e) {
     console.error('[cloud-init] download failed:', e);
+    if (typeof hideInitOverlay === 'function') hideInitOverlay();  // v3.24.15
     alert('下載 Drive 上的 tracker.json 失敗：' + e.message);
     return;
   }
@@ -1167,6 +1347,7 @@ async function cloudInitTrackerFile() {
   const result = unwrapTracker(remoteText);
   if (!result.ok) {
     console.error('[cloud-init] unwrap failed:', result.error);
+    if (typeof hideInitOverlay === 'function') hideInitOverlay();  // v3.24.15
     alert('Drive 上的 tracker.json 解析失敗：' + result.error +
           '\n\n為避免覆寫雲端資料，本次不執行同步。請手動檢查 Drive App Folder 內的檔案。');
     cloudSaveMeta({ trackerFileId: trackerFile.id });  // 至少先記下 fileId
@@ -1188,6 +1369,7 @@ async function cloudInitTrackerFile() {
     if (typeof logAction === 'function') {
       logAction('cloud-init-pull', { fileId: trackerFile.id, version: result.meta.version });
     }
+    if (typeof hideInitOverlay === 'function') hideInitOverlay();  // v3.24.15
     return;
   }
 
@@ -1212,6 +1394,9 @@ async function cloudInitTrackerFile() {
   cloudEnsureDailyAutoSnapshot().catch(e => console.error('[snapshot-auto] async:', e));
   // α3-4：背景遷移既有 base64 存摺照片到 Drive（fire-and-forget）
   cloudMigrateBankbookImages().catch(e => console.error('[bankbook-migrate] async:', e));
+
+  // v3.24.15：所有路徑都跑完了 → 關 overlay
+  if (typeof hideInitOverlay === 'function') hideInitOverlay();
 }
 
 // ---------- 衝突解決 modal（α2-4b）----------
@@ -1627,11 +1812,20 @@ function mergeStates(base, local, remote) {
 
 let cloudPushTimer = null;        // setTimeout 控制
 let cloudPushInProgress = false;  // 推送中旗標（防併發）
+let cloudPushPendingAfter = false;  // v3.24.13：進行中收到新 save 的話標記「結束後立刻再推」
+let cloudPushFailRetries = 0;       // v3.24.13：失敗次數，指數退避重試
+let cloudPendingChangesCount = 0;   // v3.24.15：距離上次成功 push，本機改動筆數（顯示在 sync indicator）
 const CLOUD_PUSH_DEBOUNCE_MS = 2000;
+const CLOUD_PUSH_MAX_RETRIES = 5;
+const CLOUD_PUSH_RETRY_DELAYS_MS = [3000, 8000, 20000, 60000, 180000];  // 3s, 8s, 20s, 1m, 3m
 
 // 由 save() 呼叫；登入後且 init 完成才實際排程
 function cloudSchedulePush() {
-  if (!isCloudSignedIn()) return;
+  if (!isCloudSignedIn()) {
+    // v3.24.13：未登入時 → 標記資料未同步（banner 會顯示提示）
+    cloudSetSyncStatus('error', '未登入 Google，資料只在本機，請登入後同步');
+    return;
+  }
   const meta = cloudGetMeta();
   if (!meta.trackerFileId) return;  // tracker.json 還沒 init 完成
 
@@ -1645,10 +1839,27 @@ function cloudSchedulePush() {
   cloudSetSyncStatus('pending');
 }
 
+// v3.24.13：立刻 flush（給 visibilitychange / beforeunload 用，跳過 debounce）
+function cloudFlushPush() {
+  if (!isCloudSignedIn()) return;
+  if (cloudPushTimer) {
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = null;
+    cloudPushNow().catch(() => {});
+  }
+}
+
 // 立刻推送（debounce 結束時被呼叫，或將來 sync indicator「立刻同步」按鈕呼叫）
 async function cloudPushNow() {
-  if (cloudPushInProgress) return;  // 防併發：上一次還沒回來就先放棄這次
-  if (!isCloudSignedIn()) return;
+  // v3.24.13：併發防護升級 — 進行中時不直接丟，標記「結束後再推」
+  if (cloudPushInProgress) {
+    cloudPushPendingAfter = true;
+    return;
+  }
+  if (!isCloudSignedIn()) {
+    cloudSetSyncStatus('error', '未登入 Google，資料只在本機');
+    return;
+  }
   const meta = cloudGetMeta();
   if (!meta.trackerFileId) {
     console.warn('[cloud-push] 沒有 trackerFileId，跳過（init 還沒跑完？）');
@@ -1658,6 +1869,47 @@ async function cloudPushNow() {
   cloudPushInProgress = true;
   cloudSetSyncStatus('syncing');  // α2-5
   try {
+    // v3.24.15：樂觀鎖 / version check — push 前先 GET 雲端 metadata，比對 modifiedTime
+    // 如果雲端有別人剛改過（例如另一台電腦推過）→ 不直接覆蓋，改觸發重 pull merge
+    // 防止「電腦 A 剛推完 → 電腦 B push 用舊 base 蓋掉 A 的改動」
+    try {
+      const fileMeta = await driveGetFileMeta(meta.trackerFileId);
+      const remoteModifiedTime = fileMeta.modifiedTime;
+      const lastSyncedAt = meta.lastSyncedAt;
+      // 如果雲端 modifiedTime > 我們的 lastSyncedAt → 雲端有新版（不是我們推的）→ 衝突
+      if (remoteModifiedTime && lastSyncedAt && remoteModifiedTime > lastSyncedAt) {
+        console.warn(`[cloud-push] ⚠️ 雲端版本較新 (${remoteModifiedTime} > ${lastSyncedAt})，重 pull merge 防覆蓋`);
+        if (typeof logAction === 'function') {
+          logAction('cloud-push-conflict-detected', {
+            remoteModifiedTime, lastSyncedAt, fileId: meta.trackerFileId
+          });
+        }
+        // 重 pull → 跑 cloudResolveAndMerge 重新合併（內部會處理衝突 modal 或自動合併後 push）
+        const remoteText = await driveDownloadFile(meta.trackerFileId);
+        const result = unwrapTracker(remoteText);
+        if (result.ok) {
+          // 走完整 merge 流程（會 push 結果）
+          await cloudResolveAndMerge({
+            remoteData: result.data,
+            remoteMeta: result.meta,
+            fileId: meta.trackerFileId,
+            trackerCreatedAt: result.meta.createdAt
+          });
+          // resolveAndMerge 內已 push + setMeta，這裡直接收尾
+          cloudPushFailRetries = 0;
+          cloudPendingChangesCount = 0;
+          cloudSetSyncStatus('idle');
+          if (typeof toast === 'function') toast('✓ 偵測到雲端有新版，已自動合併', 3000);
+          return;
+        }
+        // unwrap 失敗 → 走原本流程（風險較高但不能讓 push 永遠卡住）
+        console.warn('[cloud-push] 雲端 unwrap 失敗，仍照原本流程嘗試 push');
+      }
+    } catch (e) {
+      // version check 失敗（網路 / token）→ 不阻塞 push，繼續走原本流程
+      console.warn('[cloud-push] version check 失敗，跳過繼續 push:', e.message || e);
+    }
+
     const wrapper = buildTrackerWrapper(meta.lastSyncedVersion || 0);
     const updated = await driveUpdateFile(meta.trackerFileId, wrapper);
     cloudSaveMeta({
@@ -1669,6 +1921,8 @@ async function cloudPushNow() {
       logAction('cloud-push', { fileId: meta.trackerFileId, version: wrapper.version });
     }
     console.log(`[cloud-push] ✓ Drive 已更新到 v${wrapper.version}`);
+    cloudPushFailRetries = 0;       // v3.24.13：成功 → 重試計數歸零
+    cloudPendingChangesCount = 0;   // v3.24.15：成功 → 待推筆數歸零
     cloudSetSyncStatus('idle');  // α2-5
     // α2-7b：push 成功後檢查今天是否要建 auto snapshot（內含 1 小時節流）
     cloudEnsureDailyAutoSnapshot().catch(e => console.error('[snapshot-auto] async:', e));
@@ -1678,10 +1932,33 @@ async function cloudPushNow() {
       logAction('cloud-push-error', { error: e.message || String(e) });
     }
     cloudSetSyncStatus('error', e.message || String(e));  // α2-5
-    // 不彈 alert：本機資料還在 localStorage 安全，下次 save() 還會再試
+    // v3.24.13：失敗 → 指數退避自動重試（最多 5 次，再失敗就靠 banner 等使用者手動點重試）
+    if (cloudPushFailRetries < CLOUD_PUSH_MAX_RETRIES) {
+      const delay = CLOUD_PUSH_RETRY_DELAYS_MS[cloudPushFailRetries] || 180000;
+      cloudPushFailRetries++;
+      console.log(`[cloud-push] ${delay/1000}s 後自動重試 (#${cloudPushFailRetries}/${CLOUD_PUSH_MAX_RETRIES})`);
+      setTimeout(() => {
+        cloudPushNow().catch(err => console.error('[cloud-push] retry async failed:', err));
+      }, delay);
+    } else {
+      console.error('[cloud-push] 已達最大重試次數，請手動點 banner 重試');
+    }
   } finally {
     cloudPushInProgress = false;
+    // v3.24.13：併發期間有新 save → 立刻再推一次（不 debounce）
+    if (cloudPushPendingAfter) {
+      cloudPushPendingAfter = false;
+      setTimeout(() => {
+        cloudPushNow().catch(err => console.error('[cloud-push] pending-after async failed:', err));
+      }, 0);
+    }
   }
+}
+
+// v3.24.13：手動重試入口（給 banner 的「立刻重試」按鈕用）
+function cloudRetryPush() {
+  cloudPushFailRetries = 0;
+  cloudPushNow().catch(e => console.error('[cloud-push] manual retry failed:', e));
 }
 
 // ---------- Drive snapshot（α2-7a）----------
@@ -2930,9 +3207,10 @@ function cloudUpdateCalendarSectionVisibility(enabled) {
   if (body) body.classList.toggle('hidden', !enabled);
   const masterStatus = document.getElementById('cloud-cal-master-status');
   if (masterStatus) masterStatus.textContent = enabled ? '已啟用' : '未啟用';
+  // v3.24.17 dead refs：下面這些 element 在 v3.24.16 隨「🔔 通知與提醒」card 一起刪了，
+  // if (el) 防護住不 crash，保留以備未來恢復矩陣 UI；要清乾淨可整段刪除。
   const calHint = document.getElementById('alert-cal-disabled-hint');
   if (calHint) calHint.classList.toggle('hidden', enabled);
-  // 全部 calendar channel checkbox 跟著 master 切換 disabled
   document.querySelectorAll('.alert-matrix input[id$="-calendar"]').forEach(cb => {
     cb.disabled = !enabled;
   });
@@ -3495,6 +3773,8 @@ function save() {
   // 記錄最後變動時間（給匯入差異比對用）
   config.lastModifiedAt = new Date().toISOString();
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  // v3.24.15：每次 save() 累計待推筆數（push 成功時歸零）
+  cloudPendingChangesCount++;
   // v3.0.0-beta.1：移除 v2 Apps Script schedulePush 觸發
   // v3 雲端同步：debounce 推到 Drive
   if (typeof cloudSchedulePush === 'function') {
@@ -4760,6 +5040,8 @@ function renderDashboard() {
   // v3.6.0：完全無資料時顯示 empty state 引導卡，4 張 stat 數字仍是 $0 但有 CTA
   const isEmpty = (state.clients.length === 0) && (state.jobs.length === 0);
   document.getElementById('dash-empty-state')?.classList.toggle('hidden', !isEmpty);
+  // v3.24.18：渲染「今天的重點」清單（沒任何重點時自動 hide）
+  if (typeof renderTodayTodo === 'function') renderTodayTodo();
 
   const m = thisMonth();
   const active = activeJobs();
@@ -4780,13 +5062,14 @@ function renderDashboard() {
 
   // 計數：本月已有任何 payment 的案件數
   const paidJobCount = active.filter(j => (j.payments || []).some(p => getMonth(p.date) === m)).length;
-  document.getElementById('stat-paid').textContent = fmt(paidAmt);
+  // v3.24.18：用 countUpStat 平滑滾動到目標值（200ms），改善「精緻感」
+  countUpStat('stat-paid', paidAmt);
   document.getElementById('stat-paid-sub').textContent = paidJobCount + ' 筆';
-  document.getElementById('stat-unpaid').textContent = fmt(unpaidAmt);
+  countUpStat('stat-unpaid', unpaidAmt);
   document.getElementById('stat-unpaid-sub').textContent = monthJobs.filter(j=>j.done && !jobIsFullyPaid(j)).length + ' 筆';
-  document.getElementById('stat-pending').textContent = fmt(pendingAmt);
+  countUpStat('stat-pending', pendingAmt);
   document.getElementById('stat-pending-sub').textContent = monthJobs.filter(j=>!j.done).length + ' 筆';
-  document.getElementById('stat-year').textContent = fmt(yearAmt);
+  countUpStat('stat-year', yearAmt);
   document.getElementById('stat-year-sub').textContent = year + ' 年已收款';
 
   // 近期案件（v2.7.10：擴大到 10 筆 + 支援 dashboard 批次模式）
@@ -7135,6 +7418,9 @@ function mascotTestSay() {
 function loadDisplayPrefUI() {
   const cb = document.getElementById('pref-show-goals');
   if (cb) cb.checked = !!config.showGoalsCard;
+  // v3.24.18：啟動時也立即同步 card 的 hidden 狀態，避免 prefShowGoals=false 但首次載入時 card 還顯示
+  const card = document.getElementById('rev-goals-card');
+  if (card) card.classList.toggle('hidden', !config.showGoalsCard);
 }
 
 // 設定頁 toggle 的 onchange handler
@@ -8717,13 +9003,15 @@ function maybeFireNotifications() {
   localStorage.setItem(NOTIF_LAST_FIRED_KEY, today);
 }
 
+// @deprecated v3.24.16 — 桌面通知 UI 已隨「🔔 通知與提醒」card 整段刪除，這函式不會再被任何地方呼叫
+// （maybeFireNotifications 也已停掉自動觸發）。整段保留以備未來恢復；如確定永不恢復可整段刪除。
 function updateNotifUI() {
   const status = document.getElementById('notif-status');
   const enableBtn = document.getElementById('notif-enable-btn');
   const disableBtn = document.getElementById('notif-disable-btn');
   // v3.6.2：denied 狀態額外顯示瀏覽器設定步驟引導
   const deniedHelp = document.getElementById('notif-denied-help');
-  if (!status) return;
+  if (!status) return;  // v3.24.16：element 已不存在，永遠 early return
   if (!notifSupported()) {
     status.textContent = '❌ 此瀏覽器不支援';
     if (enableBtn) enableBtn.disabled = true;
@@ -10210,6 +10498,199 @@ function updateJobRow(id) {
   if (newRow) oldRow.replaceWith(newRow);
 }
 
+// v3.24.18：dashboard「今天的重點」卡片
+//           聚合：1) 截止當日 2) 即將到期 3 天內 3) 完成超過 N 天未收 4) 月底快到
+//           沒任何重點 → 整張卡 hidden（不佔空間）
+function renderTodayTodo() {
+  const card = document.getElementById('today-todo-card');
+  const box = document.getElementById('today-todo-list');
+  if (!card || !box) return;
+
+  const today = todayStr();
+  const todayDate = new Date(today);
+  const items = [];
+  const active = (state.jobs || []).filter(j => !j.cancelled);
+
+  // 1. 截止當日（含跨天案件落在今天）
+  active.forEach(j => {
+    const end = j.endDate || j.date || '';
+    if (!end) return;
+    if (end === today && !j.done) {
+      const c = getClient(j.clientId);
+      items.push({
+        priority: 1,
+        icon: '🔴',
+        text: `今天截止：${escapeHtml(j.title || '(無標題)')} · ${c?.name || '?'}`,
+        jobId: j.id,
+      });
+    }
+  });
+
+  // 2. 即將到期（明天 ~ 3 天內，但不含今天）
+  active.forEach(j => {
+    const end = j.endDate || j.date || '';
+    if (!end || j.done) return;
+    if (end > today) {
+      const endDate = new Date(end);
+      const daysLeft = Math.round((endDate - todayDate) / (1000 * 60 * 60 * 24));
+      if (daysLeft <= 3 && daysLeft > 0) {
+        const c = getClient(j.clientId);
+        items.push({
+          priority: 2,
+          icon: '🟡',
+          text: `${daysLeft} 天後截止：${escapeHtml(j.title || '(無標題)')} · ${c?.name || '?'}`,
+          jobId: j.id,
+        });
+      }
+    }
+  });
+
+  // 3. 完成已久未收款（沿用 config.unpaidRemindDays，預設 7）
+  const unpaidThreshold = +config.unpaidRemindDays || 7;
+  active.forEach(j => {
+    if (!j.done || !j.doneAt || jobIsFullyPaid(j)) return;
+    const c = getClient(j.clientId);
+    const overrideDays = c?.unpaidRemindDaysOverride;
+    const days = overrideDays != null ? overrideDays : unpaidThreshold;
+    const doneDate = new Date(j.doneAt);
+    const daysPassed = Math.round((todayDate - doneDate) / (1000 * 60 * 60 * 24));
+    if (daysPassed >= days) {
+      items.push({
+        priority: 3,
+        icon: '🟠',
+        text: `完成 ${daysPassed} 天未收款：${escapeHtml(j.title || '(無標題)')} · ${c?.name || '?'} · ${fmt(jobUnpaidAmount(j))}`,
+        jobId: j.id,
+      });
+    }
+  });
+
+  // 4. 月底快到提醒（如果今天 ≥ 配置的 monthEndReminderDay）
+  const monthEndDay = +config.monthEndReminderDay || 25;
+  const todayDayNum = todayDate.getDate();
+  if (todayDayNum >= monthEndDay) {
+    items.push({
+      priority: 4,
+      icon: '📅',
+      text: `月底快到了！可以開始整理本月可請款的案件了`,
+      action: () => switchTab('invoice'),
+    });
+  }
+
+  // 5. 拖款警告（沿用 computeSlowPayJobs 函式）
+  if (typeof computeSlowPayJobs === 'function') {
+    const slowJobs = computeSlowPayJobs(active);
+    slowJobs.slice(0, 3).forEach(j => {
+      const c = getClient(j.clientId);
+      items.push({
+        priority: 5,
+        icon: '🐢',
+        text: `拖款警告：${c?.name || '?'} 平均 ${j.avgDays} 天，這筆已 ${j.daysSince} 天 · ${fmt(jobUnpaidAmount(j))}`,
+        jobId: j.id,
+      });
+    });
+  }
+
+  // 沒任何重點 → 隱藏卡
+  if (items.length === 0) {
+    card.classList.add('hidden');
+    return;
+  }
+
+  card.classList.remove('hidden');
+  // 按 priority 排序
+  items.sort((a, b) => a.priority - b.priority);
+  box.innerHTML = items.map(it => {
+    const onClick = it.jobId ? `editJob('${it.jobId}')` : (it.action ? '' : '');
+    const cursorStyle = (it.jobId || it.action) ? 'cursor: pointer;' : '';
+    const handler = onClick ? `onclick="${onClick}"` : '';
+    return `<div class="today-todo-item" ${handler} style="${cursorStyle}">
+      <span class="today-todo-icon">${it.icon}</span>
+      <span class="today-todo-text">${it.text}</span>
+    </div>`;
+  }).join('');
+}
+
+// v3.24.18：案件 modal 日期欄位快速選擇按鈕
+//           type='start' / 'end'  preset='today' / 'tomorrow' / 'nextMon' / 'plus3' / 'plus7' / 'clear'
+function setJobDateQuick(type, preset) {
+  const id = type === 'end' ? 'job-end-date' : 'job-date';
+  const inp = document.getElementById(id);
+  if (!inp) return;
+  if (preset === 'clear') { inp.value = ''; return; }
+  const today = new Date();
+  let target = new Date(today);
+  if (preset === 'today') {
+    // target = today
+  } else if (preset === 'tomorrow') {
+    target.setDate(target.getDate() + 1);
+  } else if (preset === 'nextMon') {
+    // 下週一：今天 +(8 - today.getDay()) 天，但 today.getDay()=0(週日) 時是 +1
+    const dow = today.getDay();  // 0=Sun, 1=Mon, ..., 6=Sat
+    const daysToAdd = dow === 0 ? 1 : (8 - dow);
+    target.setDate(target.getDate() + daysToAdd);
+  } else if (preset === 'plus3') {
+    target.setDate(target.getDate() + 3);
+  } else if (preset === 'plus7') {
+    target.setDate(target.getDate() + 7);
+  }
+  const y = target.getFullYear();
+  const m = String(target.getMonth() + 1).padStart(2, '0');
+  const d = String(target.getDate()).padStart(2, '0');
+  inp.value = `${y}-${m}-${d}`;
+}
+
+// v3.24.18：dashboard stat 卡數字平滑滾動（200ms requestAnimationFrame）
+// 從元素「上次顯示的數字」滾到 target；首次載入從 0 滾上去
+const _countUpLastValues = {};
+function countUpStat(elementId, target) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const targetN = +target || 0;
+  const startN = _countUpLastValues[elementId] ?? 0;
+  // 偏好減動效 → 直接 set
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = fmt(targetN);
+    _countUpLastValues[elementId] = targetN;
+    return;
+  }
+  // 差距很小直接 set，避免無謂動畫（< 100 元）
+  if (Math.abs(targetN - startN) < 100) {
+    el.textContent = fmt(targetN);
+    _countUpLastValues[elementId] = targetN;
+    return;
+  }
+  const DURATION_MS = 280;
+  const startTime = performance.now();
+  function tick(now) {
+    const elapsed = now - startTime;
+    const t = Math.min(elapsed / DURATION_MS, 1);
+    // ease-out cubic 緩動
+    const eased = 1 - Math.pow(1 - t, 3);
+    const current = Math.round(startN + (targetN - startN) * eased);
+    el.textContent = fmt(current);
+    if (t < 1) requestAnimationFrame(tick);
+    else {
+      el.textContent = fmt(targetN);  // 確保最終值精確
+      _countUpLastValues[elementId] = targetN;
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+// v3.24.18：找對應 row（涵蓋 5 種視圖 — comfort .row / compact .row-compact / table tr / card .job-card-tile / dashboard 近期案件）
+//           加 pulse class 觸發 0.5s 綠光暈或金色光暈，再自動移除
+function flashRowPulse(jobId, pulseClass) {
+  if (!jobId || !pulseClass) return;
+  const els = document.querySelectorAll(`[data-job-id="${jobId}"]`);
+  els.forEach(el => {
+    el.classList.remove('pulse-success', 'pulse-paid');  // 清掉舊的避免動畫卡住
+    // 強制 reflow 讓 animation 重啟
+    void el.offsetWidth;
+    el.classList.add(pulseClass);
+    setTimeout(() => el.classList.remove(pulseClass), 600);
+  });
+}
+
 function toggleDone(id) {
   const j = state.jobs.find(x => x.id === id); if (!j) return;
   if (j.cancelled) { toast('案件已取消，請先取消「已取消」狀態'); return; }
@@ -10222,6 +10703,8 @@ function toggleDone(id) {
   logAction(j.done ? 'job-done' : 'job-undo-done', { jobId: id, title: j.title, amount: j.amount, clientId: j.clientId, clientName: c?.name });
   updateJobRow(id);
   renderAlerts(); renderBadge();
+  // v3.24.18：標完成 → 對應 row 觸發綠光暈微動效
+  if (j.done) flashRowPulse(id, 'pulse-success');
   toast(j.done?'✓ 已標記完成':'已改為進行中');
 }
 
@@ -10316,6 +10799,10 @@ function confirmPaidDate() {
   }
   closePaidDateModal();
   save(); render();
+  // v3.24.18：標收款 → 對應 row 觸發金色光暈微動效（單筆才顯，批次不閃）
+  if (ids.length === 1 && n > 0) {
+    setTimeout(() => flashRowPulse(ids[0], 'pulse-paid'), 50);  // delay 給 render() 完成
+  }
   toast(`💰 ${n} 筆已標記收款 (${dateStr})`, 3000);
 }
 
@@ -10483,6 +10970,9 @@ function updateJobAmountSummary() {
   const summary = document.getElementById('job-amount-summary');
   if (!summary) return;
   const base = +document.getElementById('job-amount').value || 0;
+  // v3.24.18：千分位即時 hint（讓使用者輸入大數字時看得清楚）
+  const fmtHint = document.getElementById('job-amount-formatted');
+  if (fmtHint) fmtHint.textContent = base > 0 ? `≈ ${fmt(base)}` : '';
   const type = document.querySelector('input[name="job-discount-type"]:checked')?.value || 'none';
   const dval = +document.getElementById('job-discount-value').value || 0;
   let final = base, disc = 0;
@@ -12617,7 +13107,10 @@ function checkAppVersionUpdate() {
 // 每 5 分鐘 fetch 一次自己的 HTML 比對版本
 async function pollAppVersion() {
   try {
-    const resp = await fetch(location.href, { cache: 'no-store' });
+    // v3.24.15：加 cache buster query param 繞過 service worker 快取
+    // 否則 SW 攔截後直接回 cache，永遠看不到新版（v3.24.14 強制備份 modal 也跟著失效）
+    const pollUrl = location.origin + location.pathname + '?_pollver=' + Date.now();
+    const resp = await fetch(pollUrl, { cache: 'no-store' });
     const html = await resp.text();
     const match = html.match(/<meta name="app-version" content="([^"]+)"/);
     if (!match) return;
@@ -12630,7 +13123,8 @@ async function pollAppVersion() {
         const div = document.createElement('div');
         div.id = 'version-remind';
         div.className = 'version-remind';
-        div.innerHTML = `🆕 APP 有新版本（${serverAppVersion}），<a onclick="hardReload()" style="color:#fff;text-decoration:underline;cursor:pointer;">點此強制更新</a>`;
+        // v3.24.14：點橫幅不再直接 hardReload，改開「強制備份才能更新」modal
+        div.innerHTML = `🆕 APP 有新版本（${serverAppVersion}），<a onclick="showUpdateConfirmModal()" style="color:#fff;text-decoration:underline;cursor:pointer;">點此更新（強制先備份）</a>`;
         document.body.appendChild(div);
       }
     } else {
@@ -12639,6 +13133,150 @@ async function pollAppVersion() {
     }
   } catch (err) {
     // 靜默失敗
+  }
+}
+
+// ============== v3.24.14：強制備份才能更新（保護資料不被新版 bug 弄壞） ==============
+// 流程：偵測到新版 → 點橫幅或版號 badge → showUpdateConfirmModal()
+//       → 使用者必須選「Drive 快照備份」或「下載 JSON 備份」其中一個
+//       → 完成備份才呼叫 hardReload() 更新
+
+function showUpdateConfirmModal() {
+  const modal = document.getElementById('update-confirm-modal');
+  if (!modal) {
+    // modal 還沒載入（極罕見）→ fallback 給原本流程
+    if (confirm(`偵測到新版 ${serverAppVersion}。建議先到設定頁手動建立備份再更新。\n\n要立刻強制更新嗎？（不建議）`)) {
+      hardReload();
+    }
+    return;
+  }
+  // 重置 modal 內容（避免多次開關殘留舊狀態）
+  const actions = document.getElementById('update-modal-actions');
+  if (actions) {
+    actions.innerHTML = `
+      <button class="btn btn-primary" onclick="confirmUpdateWithDriveBackup()" id="update-backup-drive-btn">📸 建立 Drive 快照並更新</button>
+      <button class="btn btn-outline" onclick="confirmUpdateWithJSONDownload()" id="update-backup-json-btn">📥 下載 JSON 備份</button>
+      <button class="btn btn-ghost" onclick="cancelUpdate()">⏸️ 稍後再說</button>
+    `;
+  }
+  // 填狀態文字
+  const status = document.getElementById('update-backup-status');
+  const signedIn = (typeof isCloudSignedIn === 'function') && isCloudSignedIn();
+  const accountLine = signedIn && cloudAuthState.user
+    ? `已登入：<b>${cloudAuthState.user.email || ''}</b>`
+    : `<span style="color: var(--warning);">⚠️ 未登入 Google，無法建 Drive 快照（請先登入或下載 JSON 備份）</span>`;
+  if (status) {
+    status.innerHTML = `
+      🆕 新版本：<b>${serverAppVersion || '(unknown)'}</b><br>
+      目前版本：${APP_VERSION}<br>
+      ${accountLine}
+    `;
+  }
+  // 未登入 → 禁用 Drive 備份按鈕
+  const driveBtn = document.getElementById('update-backup-drive-btn');
+  if (driveBtn) {
+    driveBtn.disabled = !signedIn;
+    if (!signedIn) driveBtn.title = '請先登入 Google';
+  }
+  modal.classList.add('open');
+}
+
+async function confirmUpdateWithDriveBackup() {
+  if (!isCloudSignedIn()) {
+    alert('未登入 Google，無法建立 Drive 快照。\n\n請改選「下載 JSON 備份」。');
+    return;
+  }
+  const btn = document.getElementById('update-backup-drive-btn');
+  const otherBtn = document.getElementById('update-backup-json-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '📸 備份中…請稍候'; }
+  if (otherBtn) otherBtn.disabled = true;
+  try {
+    // 用 cloudCreateSnapshot 直接建 manual snapshot（永久保留），label 帶版本號方便辨識
+    const safetyLabel = `更新前備份 → ${serverAppVersion || 'new'}`;
+    await cloudCreateSnapshot('manual', safetyLabel);
+    if (typeof toast === 'function') toast('✓ 備份完成，1.5 秒後更新…', 2000);
+    if (typeof logAction === 'function') {
+      logAction('update-backup', { type: 'drive-snapshot', from: APP_VERSION, to: serverAppVersion });
+    }
+    // 給使用者看到 toast 後再 reload
+    setTimeout(() => hardReload(), 1500);
+  } catch (e) {
+    console.error('[update-backup] Drive snapshot failed:', e);
+    alert('Drive 備份失敗：' + (e.message || e) +
+          '\n\n為了你的資料安全，請改選「下載 JSON 備份」，或修復網路 / 重新登入後再試。');
+    if (btn) { btn.disabled = false; btn.textContent = '📸 建立 Drive 快照並更新'; }
+    if (otherBtn) otherBtn.disabled = false;
+  }
+}
+
+function confirmUpdateWithJSONDownload() {
+  // 用 buildTrackerWrapper 組完整 wrapper 結構（schema、版本、所有資料）
+  let wrapper;
+  try {
+    wrapper = (typeof buildTrackerWrapper === 'function')
+      ? buildTrackerWrapper(0)
+      : {
+          schemaVersion: (typeof CURRENT_SCHEMA_VERSION !== 'undefined' ? CURRENT_SCHEMA_VERSION : 1),
+          lastModifiedAt: new Date().toISOString(),
+          data: {
+            clients: state.clients || [],
+            jobs: state.jobs || [],
+            invoiceHistory: state.invoiceHistory || [],
+            config: config || {}
+          }
+        };
+  } catch (e) {
+    alert('組備份檔失敗：' + (e.message || e));
+    return;
+  }
+  const json = JSON.stringify(wrapper, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.href = url;
+  a.download = `freelance-tracker-backup-${ts}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  if (typeof logAction === 'function') {
+    logAction('update-backup', { type: 'json-download', from: APP_VERSION, to: serverAppVersion });
+  }
+  // 改 modal 的內容：要使用者親自確認檔案存在後才允許 reload
+  const status = document.getElementById('update-backup-status');
+  if (status) {
+    status.innerHTML = `
+      ✓ JSON 備份已下載到「下載」資料夾<br>
+      檔名：<code>freelance-tracker-backup-${ts}.json</code><br>
+      <span style="color: var(--warning);">⚠️ 請先確認檔案存在再點下方更新</span>
+    `;
+  }
+  const actions = document.getElementById('update-modal-actions');
+  if (actions) {
+    actions.innerHTML = `
+      <button class="btn btn-primary" onclick="hardReload()">✓ 確認備份完成，立刻更新</button>
+      <button class="btn btn-ghost" onclick="cancelUpdate()">⏸️ 我還沒確認，稍後再說</button>
+    `;
+  }
+}
+
+function cancelUpdate() {
+  const modal = document.getElementById('update-confirm-modal');
+  if (modal) modal.classList.remove('open');
+  // 不擋繼續使用 — 下次 pollAppVersion 觸發或使用者主動點橫幅，modal 會再次開啟
+}
+
+// v3.24.14：版號 badge 點擊行為 — 有新版走「強制備份」modal，沒新版走清快取重整
+function onVersionBadgeClick() {
+  if (serverAppVersion && (typeof compareAppVersion === 'function')
+      && compareAppVersion(serverAppVersion, APP_VERSION) > 0) {
+    showUpdateConfirmModal();
+  } else {
+    // 沒新版 → 原本的強制刷新（清 cache）— 但加個確認免得使用者誤點
+    if (confirm('目前已是最新版。\n\n要強制清除快取並重新載入嗎？\n（資料不會遺失，只是清瀏覽器快取）')) {
+      hardReload();
+    }
   }
 }
 
@@ -12776,11 +13414,10 @@ function onboardingChoose(choice) {
   } else if (choice === 'demo') {
     loadDemo();
   } else if (choice === 'blank') {
-    switchTab('settings');
+    // v3.24.16：原本跳到「我的資料」card，但該 card 已刪 → 改跳請款單分頁讓使用者設定收款帳號
+    switchTab('invoice');
     setTimeout(() => {
-      const myinfo = document.getElementById('card-myinfo');
-      if (myinfo && myinfo.classList.contains('collapsed')) myinfo.classList.remove('collapsed');
-      toast('💡 建議先到「我的資料」填寫姓名與匯款資訊');
+      toast('💡 建議先到「請款單」分頁設定收款帳號（姓名、匯款資訊）', 4500);
     }, 300);
   }
 }
@@ -12872,7 +13509,8 @@ setTimeout(() => {
   if (groupSel) groupSel.value = jobsGroupBy;
 }, 50);
 // v2.5: 開頁掃一次推通知（一天一次）
-setTimeout(maybeFireNotifications, 4000);
+// v3.24.16：桌面通知觸發已停用（「通知與提醒」卡已整段刪除）；保留 maybeFireNotifications 函式 dead code 以備未來恢復
+// setTimeout(maybeFireNotifications, 4000);
 
 // v3.0.0-beta.1：移除 v2 Apps Script 啟動同步邏輯（pullFromSheet / setupAutoPoll / maybeGenerateMonthlySnapshot）
 // v3 同步由 cloudInitGoogleAuth → cloudInitTrackerFile 觸發；setSyncStatus 全交給 cloudUpdateSyncIndicator

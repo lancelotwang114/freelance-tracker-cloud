@@ -86,6 +86,12 @@
 | **v3.24.10** | **收益總覽月度範圍選單新增「📅 當月」「📅 上個月」快捷選項（自動處理跨年）** | ✅ **完成（2026-05-08）** |
 | **v3.24.11** | **🚨 Google 行事曆 iOS 通知修復：事件強制帶 reminders.overrides；4 種全天事件改時間事件；UI label「每日早報時段」→「通知時間」** | ✅ **完成（2026-05-08）** |
 | **v3.24.12** | **🚨 批次模式 5 視圖修復 + 外包對帳 UX：table/compact/card 加 bulkMode checkbox；selector 改寬涵蓋 `<tr>`；外包對帳預設選「全部月份」+ 加 banner 提示** | ✅ **完成（2026-05-09）** |
+| **v3.24.13** | **🚨 雲端同步穩定性大補強：cloudPushNow 加併發重排（不丟 save）+ 失敗指數退避重試（3s→8s→20s→1m→3m）+ visibilitychange/beforeunload flush + 同步失敗 / 未登入時頂部紅 banner（立刻重試 / 重新登入按鈕）+ silent refresh 失敗連動 banner** | ✅ **完成（2026-05-09）** |
+| **v3.24.14** | **🛡️ 強制備份才能更新：偵測到新版 → 跳 modal 強制使用者選「Drive 快照」或「下載 JSON 」備份才能 reload；未登入只能下載 JSON；Drive 失敗回退讓使用者改下載；版號 badge / 更新橫幅都走新 modal** | ✅ **完成（2026-05-09）** |
+| **v3.24.15** | **🛡️ 同步防呆六項：(1) pollAppVersion 加 cache buster 修阻斷器 (2) 啟動 init overlay 擋編輯防 race condition (3) navigator.onLine 監聽 + 上線立刻重推 (4) 未同步筆數顯示在 sync indicator (5) push 前 version check 防多裝置衝突 (6) BroadcastChannel 多 tab 偵測警告** | ✅ **完成（2026-05-09）** |
+| **v3.24.16** | **🧹 設定頁大整理（8 卡 → 4 卡）：刪「我的收款資訊」「🤖 小幫手」「🔔 通知與提醒」「💾 資料備份」「📦 雲端備份歷史」獨立卡；改名「🔐 Google Drive 同步」→「☁️ 雲端同步」；雲端歷史 + 離線備份併進去當 sub-section；小幫手併進「🎨 顯示偏好」；桌面通知功能停用（dead code 保留）；提醒類型矩陣全隱藏（cfg.syncTypes 預設仍 work）** | ✅ **完成（2026-05-09）** |
+| **v3.24.17** | **🧹 設定頁巡查修補：(1) 修 onboarding 'blank' 分支引用已刪 card-myinfo bug 改跳請款單分頁；(2) 設定頁卡片視覺順序用 CSS `order` 調成「雲端同步 → 行事曆同步 → 顯示偏好」（同步相關放一起）；(3) 小幫手 9 個狀態預覽收進 `<details>` 預設折疊；(4) CSS .alert-matrix 等 ~15 條 dead rule 標 @deprecated；(5) updateNotifUI / cloudUpdateMasterToggle 內 dead refs 標 @deprecated（不刪、保留以備恢復）** | ✅ **完成（2026-05-09）** |
+| **v3.24.18** | **✨ UX 視覺優化八項：stat 卡顏色語意統一（綠/黃/藍/紫）+ 數字 CountUp 滾動 + 打勾微動效（綠/金光暈）+ 「⚡ 今天的重點」dashboard 卡（截止/到期/拖款/月底/拖款警告聚合）+ 案件 modal 金額千分位 hint + 日期欄位快速選擇按鈕（今天/明天/下週一/+3/+7）+ 達成目標 card 啟動同步 hide + HTML 預設 NT$0** | ✅ **完成（2026-05-09）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

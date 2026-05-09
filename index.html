@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-08-v3.24.12">
+<meta name="app-version" content="2026-05-09-v3.24.18">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -62,7 +62,7 @@
         <h1 id="page-title">外包收益與排程管理</h1>
         <div class="sub" id="page-sub">
           個人自由工作者工具 ·
-          <span id="app-version-badge" onclick="hardReload()" style="font-family: monospace; font-size: 11px; padding: 1px 6px; background: var(--bg); border-radius: 4px; cursor: pointer;" title="點擊強制刷新（清除快取）">載入中…</span>
+          <span id="app-version-badge" onclick="onVersionBadgeClick()" style="font-family: monospace; font-size: 11px; padding: 1px 6px; background: var(--bg); border-radius: 4px; cursor: pointer;" title="點擊更新或強制刷新">載入中…</span>
         </div>
       </div>
       <div style="display: flex; gap: 6px; align-items: center;">
@@ -123,26 +123,33 @@
       </div>
     </div>
 
+    <!-- v3.24.18：今天該做什麼 -->
+    <div class="card today-todo-card hidden" id="today-todo-card">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px;">⚡ 今天的重點</h3>
+      <div id="today-todo-list"></div>
+    </div>
+
     <!-- v3.6.0：4 張 stat 卡可點擊，跳轉案件 tab 自動套對應 filter -->
+    <!-- v3.24.18：HTML 預設「$0」→「NT$0」初始 flash 一致；stat-paid 加 success class、stat-pending 加 info class（顏色語意統一） -->
     <div class="stat-grid">
-      <div class="stat clickable" onclick="dashStatJump('paid')" title="點擊查看本月已收款的案件">
+      <div class="stat success clickable" onclick="dashStatJump('paid')" title="點擊查看本月已收款的案件">
         <div class="label">本月已收款</div>
-        <div class="value" id="stat-paid">$0</div>
+        <div class="value" id="stat-paid">NT$0</div>
         <div class="delta" id="stat-paid-sub">0 筆</div>
       </div>
       <div class="stat warning clickable" onclick="dashStatJump('unpaid')" title="點擊查看本月完成待收款的案件">
         <div class="label">本月待收款</div>
-        <div class="value" id="stat-unpaid">$0</div>
+        <div class="value" id="stat-unpaid">NT$0</div>
         <div class="delta" id="stat-unpaid-sub" style="color: var(--warning);">0 筆</div>
       </div>
-      <div class="stat clickable" onclick="dashStatJump('pending')" title="點擊查看本月進行中的案件">
+      <div class="stat info clickable" onclick="dashStatJump('pending')" title="點擊查看本月進行中的案件">
         <div class="label">本月待完成</div>
-        <div class="value" id="stat-pending">$0</div>
+        <div class="value" id="stat-pending">NT$0</div>
         <div class="delta" id="stat-pending-sub" style="color: var(--muted);">0 筆</div>
       </div>
-      <div class="stat clickable" onclick="dashStatJump('year')" title="點擊查看年度已收款的案件">
+      <div class="stat year clickable" onclick="dashStatJump('year')" title="點擊查看年度已收款的案件">
         <div class="label">年度已收款</div>
-        <div class="value" id="stat-year">$0</div>
+        <div class="value" id="stat-year">NT$0</div>
         <div class="delta" id="stat-year-sub"></div>
       </div>
     </div>
@@ -636,12 +643,11 @@
   <!-- Settings -->
   <section id="tab-settings" class="hidden">
 
-    <!-- ============== 🔐 Google Drive 同步（v3.0.0-alpha.1 新增）============== -->
-    <!-- 注意：名稱刻意跟 v2 既有「☁️ 雲端同步」（Apps Script + Sheet）區隔，避免使用者混淆 -->
-    <!-- 目前只有 UI 骨架，按鈕尚未接 handler；後續 commit 會把 GIS Token Client 接上 -->
+    <!-- ============== ☁️ 雲端同步（v3.24.16 改名 + 整合）============== -->
+    <!-- v3.24.16：原「🔐 Google Drive 同步」改名「☁️ 雲端同步」，並把「💾 資料備份（離線）」+「📦 雲端備份歷史」併進來當 sub-section -->
     <div class="card card-cloud-auth" id="card-cloud-auth">
       <div class="card-head" style="cursor: default;">
-        <h3>🔐 Google Drive 同步</h3>
+        <h3>☁️ 雲端同步</h3>
         <span class="card-status" id="cloud-auth-status">未登入</span>
       </div>
       <div class="card-body">
@@ -696,225 +702,26 @@
           </p>
         </div>
 
-      </div>
-    </div>
-
-    <!-- v3.6.1：移除 section 分類標題，所有 card 拉平展示；備份歷史移到最下面 -->
-
-    <!-- v3.4.0：改成 collapsible collapsed + 砍掉冗長提示 -->
-    <div class="card collapsible collapsed" id="card-myinfo">
-      <div class="card-head" onclick="toggleCard('card-myinfo')">
-        <h3>我的收款資訊</h3>
-        <span class="card-status">已搬到請款單分頁</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <button type="button" class="btn btn-primary btn-sm" onclick="switchTab('invoice')">前往請款單分頁編輯</button>
-      </div>
-    </div>
-
-    <!-- v3.22.8：顯示偏好（加新功能 toggle 都放這） -->
-    <div class="card collapsible collapsed" id="card-display-pref">
-      <div class="card-head" onclick="toggleCard('card-display-pref')">
-        <h3>🎨 顯示偏好</h3>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
-          <input type="checkbox" id="pref-show-goals" onchange="onTogglePrefShowGoals(this.checked)" style="margin-top: 3px;">
-          <div>
-            <div style="font-weight: 500;">📊 顯示收益目標達成率卡片</div>
-            <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
-              在「收益 → 總覽」分頁顯示「達成目標」+「智慧分析」。預設關閉，要設目標時再開。
-            </div>
-          </div>
-        </label>
-      </div>
-    </div>
-
-    <!-- v3.23.0：小幫手（mascot）設定 -->
-    <div class="card collapsible collapsed" id="card-mascot">
-      <div class="card-head" onclick="toggleCard('card-mascot')">
-        <h3>🤖 小幫手</h3>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
-          <input type="checkbox" id="pref-mascot-enabled" onchange="onMascotEnabledChange(this.checked)" checked style="margin-top: 3px;">
-          <div>
-            <div style="font-weight: 500;">啟用小幫手</div>
-            <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
-              右下角浮動的小機器人。完成案件 / 收款 / 新增案件等時候會跳鼓勵文字。
-            </div>
-          </div>
-        </label>
-        <div style="margin-top: 14px; padding: 12px; background: var(--bg); border-radius: 8px;">
-          <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">給它取個名字（選填）</label>
-          <input type="text" id="pref-mascot-name" placeholder="例如：小機、嘟嘟、肝寶…" maxlength="8" oninput="onMascotNameChange(this.value)" style="width: 100%; max-width: 200px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
-          <div style="margin-top: 6px; font-size: 11px; color: var(--muted);">取了名字之後，小幫手講話會自動帶上稱呼（例：「小機：完成一筆，做得好！」）</div>
-        </div>
-        <div style="margin-top: 14px;">
-          <button class="btn btn-outline btn-sm" onclick="mascotTestSay()">試試看 ▶</button>
-          <span style="margin-left: 8px; font-size: 11px; color: var(--muted);">（隨機說一句鼓勵的話）</span>
-        </div>
-        <!-- v3.23.2：5 種狀態預覽 -->
-        <div style="margin-top: 14px; padding: 10px 12px; background: var(--bg); border-radius: 8px;">
-          <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px;">預覽狀態（看左下角 mascot 反應）：</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('idle')">😊 待機</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('loading')">⌛ 處理中</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('thinking')">🤔 思考</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('success')">✅ 完成</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('error')">❌ 錯誤</button>
-            <!-- v3.23.3：3 個新狀態 -->
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('searching')">🔍 搜尋中</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('celebrating')">🎉 慶祝</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('sleeping')">😴 睡覺</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotWink()">😉 眨眼</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 通知與提醒（合併「桌面通知 + 提醒設定」）-->
-    <div class="card collapsible collapsed" id="card-reminder">
-      <div class="card-head" onclick="toggleCard('card-reminder')">
-        <h3>🔔 通知與提醒</h3>
-        <span class="card-status">桌面通知 + 提醒項目</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <!-- v3.8.0：提醒類型矩陣（每類自帶 desktop + calendar 兩 channel toggle） -->
-      <!-- 取消「儲存」按鈕，所有 toggle 改 immediate save -->
-      <div class="card-body reminder-compact">
-
-        <!-- 桌面通知狀態（瀏覽器權限） -->
-        <div class="reminder-row reminder-row--full">
-          <label style="font-size: 13px; font-weight: 600;">🖥️ 瀏覽器桌面通知</label>
-          <div id="notif-status" class="reminder-hint" style="background: var(--card); padding: 4px 8px; border-radius: 6px; margin-top: 4px;"></div>
-          <div id="notif-denied-help" class="reminder-hint hidden" style="margin-top: 6px; padding: 8px; background: var(--warning-light); color: var(--warning); border-radius: 6px; font-size: 12px; line-height: 1.5;">
-            ⚠️ 瀏覽器已記住「拒絕」，JS 沒辦法再叫對話框跳出來。要重新啟用：<br>
-            <b>Chrome / Edge</b>：點網址列左邊的鎖頭 🔒 → 「網站設定」→ 把「通知」改成「允許」<br>
-            <b>Firefox</b>：點網址列左邊的小圖 → 移除「不允許接收通知」權限<br>
-            <b>Safari</b>：偏好設定 → 網站 → 通知 → 把這個網站改成「允許」
-          </div>
-          <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
-            <button class="btn btn-primary btn-sm" id="notif-enable-btn" onclick="requestNotifPermission()">啟用通知</button>
-            <button class="btn btn-outline btn-sm hidden" id="notif-disable-btn" onclick="disableNotif()">停用通知</button>
-            <button class="btn btn-ghost btn-sm" onclick="sendTestNotification()">試發一則</button>
-          </div>
-        </div>
-
-        <p class="reminder-hint" style="margin: 12px 0 6px;">
-          每個提醒類型可獨立決定要走哪個通道（桌面通知 / Google 行事曆）。
-          <br>
-          📅 Google 行事曆通知統一在「② 通知時間」設定（預設 09:30），到下方「Google 行事曆同步」卡調整。
-          <span id="alert-cal-disabled-hint" class="hidden" style="color: var(--warning);">📅 欄位需先在下方「Google 行事曆同步」開啟 master 開關才能勾選</span>
+        <!-- v3.24.16：📦 雲端版本歷史 sub-section（從原獨立 card 搬來） -->
+        <div class="section-divider"></div>
+        <h4 style="margin: 8px 0; font-size: 14px; font-weight: 600;">📦 雲端版本歷史</h4>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
+          手動備份永久保留；自動每日備份會分層保留。<span id="cloud-snapshot-status" style="margin-left: 6px;">登入後可用</span>
         </p>
-
-        <!-- 提醒類型矩陣 -->
-        <div class="alert-matrix">
-          <div class="alert-matrix-header">
-            <div></div>
-            <div title="瀏覽器桌面通知（每天首次開頁推一次）">🖥️ 桌面</div>
-            <div title="Google 行事曆事件（要先啟用 Google 行事曆同步 master）">📅 Google 行事曆</div>
-          </div>
-
-          <!-- 1. 逾期未完成（只有桌面） -->
-          <div class="alert-row">
-            <div class="alert-name">🔴 逾期未完成</div>
-            <div class="alert-cell"><input type="checkbox" id="alert-overdue-desktop" onchange="onAlertChannelToggle('overdue','desktop')"></div>
-            <div class="alert-cell alert-na">—</div>
-          </div>
-
-          <!-- 2. 即將到期（只有桌面 + 提前天數） -->
-          <div class="alert-row">
-            <div class="alert-name">
-              🟡 即將到期
-              <span class="alert-config">提前 <input type="number" id="alert-dueSoon-days" min="1" max="30" value="3" onchange="onAlertNumberChange('dueSoonDays', this.value)"> 天</span>
-            </div>
-            <div class="alert-cell"><input type="checkbox" id="alert-dueSoon-desktop" onchange="onAlertChannelToggle('dueSoon','desktop')"></div>
-            <div class="alert-cell alert-na">—</div>
-          </div>
-
-          <!-- 3. 完成已久未收款（兩通道 + 天數） -->
-          <div class="alert-row">
-            <div class="alert-name">
-              🟠 完成已久未收款
-              <span class="alert-config">超過 <input type="number" id="alert-unpaidLong-days" min="1" max="120" value="7" onchange="onAlertNumberChange('unpaidRemindDays', this.value)"> 天</span>
-            </div>
-            <div class="alert-cell"><input type="checkbox" id="alert-unpaidLong-desktop" onchange="onAlertChannelToggle('unpaidLong','desktop')"></div>
-            <div class="alert-cell"><input type="checkbox" id="alert-unpaidLong-calendar" onchange="onAlertChannelToggle('unpaidLong','calendar')"></div>
-          </div>
-
-          <!-- 4. 月底提醒（兩通道 + 日期） -->
-          <div class="alert-row">
-            <div class="alert-name">
-              📅 月底提醒
-              <span class="alert-config">每月 <input type="number" id="alert-monthEnd-day" min="20" max="31" value="25" onchange="onAlertNumberChange('monthEndReminderDay', this.value)"> 號後</span>
-            </div>
-            <div class="alert-cell"><input type="checkbox" id="alert-monthEnd-desktop" onchange="onAlertChannelToggle('monthEnd','desktop')"></div>
-            <div class="alert-cell"><input type="checkbox" id="alert-monthEnd-calendar" onchange="onAlertChannelToggle('monthEnd','calendar')"></div>
-          </div>
-
-          <!-- 5. 業主固定請款日（兩通道） -->
-          <div class="alert-row">
-            <div class="alert-name">💼 業主固定請款日</div>
-            <div class="alert-cell"><input type="checkbox" id="alert-billingDay-desktop" onchange="onAlertChannelToggle('billingDay','desktop')"></div>
-            <div class="alert-cell"><input type="checkbox" id="alert-billingDay-calendar" onchange="onAlertChannelToggle('billingDay','calendar')"></div>
-          </div>
-
-          <!-- 6. 智慧拖款警告（兩通道） -->
-          <div class="alert-row">
-            <div class="alert-name">⏱️ 智慧拖款警告</div>
-            <div class="alert-cell"><input type="checkbox" id="alert-slowPay-desktop" onchange="onAlertChannelToggle('slowPay','desktop')"></div>
-            <div class="alert-cell"><input type="checkbox" id="alert-slowPay-calendar" onchange="onAlertChannelToggle('slowPay','calendar')"></div>
-          </div>
-
-          <!-- 7. 備份提醒（只有桌面 + 天數） -->
-          <div class="alert-row">
-            <div class="alert-name">
-              💾 備份提醒
-              <span class="alert-config">超過 <input type="number" id="alert-backup-days" min="1" max="90" value="14" onchange="onAlertNumberChange('backupRemindDays', this.value)"> 天</span>
-            </div>
-            <div class="alert-cell"><input type="checkbox" id="alert-backup-desktop" onchange="onAlertChannelToggle('backup','desktop')"></div>
-            <div class="alert-cell alert-na">—</div>
-          </div>
-
-          <!-- 分隔（Google 行事曆獨有的事件） -->
-          <div class="alert-row alert-row--separator">
-            <div class="alert-name reminder-hint" style="font-style: italic;">— 以下只在 Google 行事曆 —</div>
-            <div class="alert-cell"></div>
-            <div class="alert-cell"></div>
-          </div>
-
-          <!-- 8. 案件本身（只有 Calendar） -->
-          <div class="alert-row">
-            <div class="alert-name">📋 案件本身（含取消的）</div>
-            <div class="alert-cell alert-na">—</div>
-            <div class="alert-cell"><input type="checkbox" id="alert-jobs-calendar" onchange="onAlertChannelToggle('jobs','calendar')"></div>
-          </div>
-
-          <!-- 9. 每日早報摘要（只有 Calendar） -->
-          <div class="alert-row">
-            <div class="alert-name">🌅 每日早報摘要</div>
-            <div class="alert-cell alert-na">—</div>
-            <div class="alert-cell"><input type="checkbox" id="alert-dailyMorning-calendar" onchange="onAlertChannelToggle('dailyMorning','calendar')"></div>
-          </div>
-
+        <div style="display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
+          <input type="text" id="cloud-snapshot-manual-label" placeholder="標籤（例：月底結算前）" style="flex: 1; min-width: 160px;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="cloudCreateManualSnapshot()">📸 建立備份</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshSnapshotList()">🔄 重新整理列表</button>
         </div>
-      </div>
-    </div>
+        <div id="cloud-snapshot-list">
+          <p style="color: var(--muted); font-size: 13px;">點「重新整理列表」載入</p>
+        </div>
 
-    <!-- 資料備份 -->
-    <div class="card collapsible collapsed" id="card-backup">
-      <div class="card-head" onclick="toggleCard('card-backup')">
-        <h3>💾 資料備份</h3>
-        <span class="card-status" id="backup-status">—</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          建議每週匯出一次資料備份檔，存雲端硬碟。
+        <!-- v3.24.16：💾 離線資料備份 sub-section（從原獨立 card 搬來，名稱明確標「離線」與雲端區分） -->
+        <div class="section-divider"></div>
+        <h4 style="margin: 8px 0; font-size: 14px; font-weight: 600;">💾 離線資料備份</h4>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
+          匯出 / 匯入到本機檔案，跟 Drive 雲端同步無關。建議偶爾手動備份一份到電腦，當作雙保險。
         </p>
         <div style="display:flex; gap: 8px; flex-wrap: wrap;">
           <button class="btn btn-primary btn-sm" onclick="exportData()">📤 匯出 JSON 備份</button>
@@ -928,8 +735,76 @@
           <button class="btn btn-outline btn-sm" id="demo-btn" onclick="loadDemo()">載入範例資料</button>
           <button class="btn btn-danger btn-sm" onclick="clearAll()">清空所有資料</button>
         </div>
+
       </div>
     </div>
+
+    <!-- v3.6.1：移除 section 分類標題，所有 card 拉平展示；備份歷史移到最下面 -->
+    <!-- v3.24.16：刪「我的收款資訊」卡（內容已搬到請款單分頁，這邊只是跳轉按鈕） -->
+
+    <!-- v3.22.8：顯示偏好（加新功能 toggle 都放這） -->
+    <div class="card collapsible collapsed" id="card-display-pref">
+      <div class="card-head" onclick="toggleCard('card-display-pref')">
+        <h3>🎨 顯示偏好</h3>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <!-- 收益目標 toggle -->
+        <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
+          <input type="checkbox" id="pref-show-goals" onchange="onTogglePrefShowGoals(this.checked)" style="margin-top: 3px;">
+          <div>
+            <div style="font-weight: 500;">📊 顯示收益目標達成率卡片</div>
+            <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
+              在「收益 → 總覽」分頁顯示「達成目標」+「智慧分析」。預設關閉，要設目標時再開。
+            </div>
+          </div>
+        </label>
+
+        <div class="section-divider"></div>
+
+        <!-- 🤖 小幫手 sub-section（v3.24.16 從原獨立 card 搬來） -->
+        <h4 style="margin: 4px 0 8px; font-size: 14px; font-weight: 600;">🤖 小幫手</h4>
+        <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
+          <input type="checkbox" id="pref-mascot-enabled" onchange="onMascotEnabledChange(this.checked)" checked style="margin-top: 3px;">
+          <div>
+            <div style="font-weight: 500;">啟用小幫手</div>
+            <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
+              左下角浮動的小角色。完成案件 / 收款 / 新增案件等時候會跳鼓勵文字。
+            </div>
+          </div>
+        </label>
+        <div style="margin-top: 12px; padding: 12px; background: var(--bg); border-radius: 8px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">給它取個名字（選填）</label>
+          <input type="text" id="pref-mascot-name" placeholder="例如：小機、嘟嘟、肝寶…" maxlength="8" oninput="onMascotNameChange(this.value)" style="width: 100%; max-width: 200px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
+          <div style="margin-top: 6px; font-size: 11px; color: var(--muted);">取了名字之後，小幫手講話會自動帶上稱呼（例：「小機：完成一筆，做得好！」）</div>
+        </div>
+        <div style="margin-top: 12px;">
+          <button class="btn btn-outline btn-sm" onclick="mascotTestSay()">試試看 ▶</button>
+          <span style="margin-left: 8px; font-size: 11px; color: var(--muted);">（隨機說一句鼓勵的話）</span>
+        </div>
+        <!-- v3.24.17：9 個狀態預覽按鈕收進 details 預設折疊，避免一打開卡片就一堆按鈕 -->
+        <details style="margin-top: 12px;">
+          <summary style="cursor: pointer; font-size: 12px; color: var(--muted); padding: 6px 12px; background: var(--bg); border-radius: 8px;">▸ 預覽其他狀態（看左下角 mascot 反應）</summary>
+          <div style="margin-top: 8px; padding: 10px 12px; background: var(--bg); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('idle')">😊 待機</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('loading')">⌛ 處理中</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('thinking')">🤔 思考</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('success')">✅ 完成</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('error')">❌ 錯誤</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('searching')">🔍 搜尋中</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('celebrating')">🎉 慶祝</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotSetState('sleeping')">😴 睡覺</button>
+            <button class="btn btn-outline btn-sm" onclick="mascotWink()">😉 眨眼</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- v3.24.16：原「🔔 通知與提醒」card 整段刪除（桌面通知功能停用、提醒類型矩陣全部隱藏，內容只剩 Google 行事曆通知時間 → 已搬到「📅 Google 行事曆同步」卡內統一管理）。
+         保留：cfg.syncTypes（jobs/unpaidLong/monthEnd/billingDay/slowPay/dailyMorning 預設都 true）、unpaidRemindDays / monthEndReminderDay / billingRemindDays 等天數設定 → 行事曆事件還是會用這些值建立。
+         停用：桌面通知觸發（app.js 啟動 4 秒的 maybeFireNotifications 已刪除）。 -->
+
+    <!-- v3.24.16：原「💾 資料備份」card 已搬進「☁️ 雲端同步」card 內當「💾 離線資料備份」sub-section -->
 
     <!-- 📅 Google Calendar 同步（v3.1.0 重做：直接打 Calendar API、不再經過 Apps Script） -->
     <div class="card collapsible collapsed" id="card-calendar">
@@ -981,8 +856,8 @@
             </div>
           </div>
 
-          <!-- v3.8.0：「要同步哪些事件」勾選已搬到「通知與提醒」卡的提醒類型矩陣「Google 行事曆」欄 -->
-          <p class="cal-hint" style="margin: 6px 0;">💡 要同步哪些事件 → 在「🔔 通知與提醒」卡的「📅 Google 行事曆」欄勾選</p>
+          <!-- v3.24.16：「通知與提醒」card 已刪除，這個提示拿掉 -->
+          <p class="cal-hint" style="margin: 6px 0;">💡 預設會推送「案件本身 + 完成未收款 / 月底 / 業主請款日 / 拖款警告 / 每日早報」。這些事件類型目前沒有獨立 toggle UI，預設全開。</p>
 
           <!-- 同步狀態 + 立即同步 -->
           <div id="cloud-cal-sync-status" class="cal-hint" style="margin-top: 8px;">
@@ -996,35 +871,10 @@
       </div>
     </div>
 
-    <!-- v3.6.1：📦 雲端備份歷史搬到設定頁最下面 -->
-    <div class="card collapsible collapsed" id="card-cloud-snapshots">
-      <div class="card-head" onclick="toggleCard('card-cloud-snapshots'); cloudRefreshSnapshotList()">
-        <h3>📦 雲端備份歷史</h3>
-        <span class="card-status" id="cloud-snapshot-status">登入後可用</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          手動備份永久保留；自動每日備份會分層保留。
-        </p>
-
-        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-          <input type="text" id="cloud-snapshot-manual-label" placeholder="標籤（例：月底結算前）" style="flex: 1;">
-          <button type="button" class="btn btn-primary btn-sm" onclick="cloudCreateManualSnapshot()">建立備份</button>
-        </div>
-
-        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-          <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshSnapshotList()">重新整理列表</button>
-        </div>
-
-        <div id="cloud-snapshot-list">
-          <p style="color: var(--muted); font-size: 13px;">展開卡片時自動載入</p>
-        </div>
-      </div>
-    </div>
+    <!-- v3.24.16：原「📦 雲端備份歷史」card 已搬進「☁️ 雲端同步」card 內當 sub-section -->
 
     <!-- 關於 -->
-    <div style="text-align: center; font-size: 12px; color: var(--muted); padding: 24px 0 0;">
+    <div class="settings-about" style="text-align: center; font-size: 12px; color: var(--muted); padding: 24px 0 0;">
       <a onclick="showOnboardingAgain()" style="color: var(--primary); cursor: pointer; font-size: 12px;">↻ 再次顯示歡迎引導</a>
       <div style="margin-top: 6px; font-size: 11px;">外包收益管理工具 · v1.3</div>
     </div>
@@ -1163,10 +1013,24 @@
       <div>
         <label>開始日期</label>
         <input type="date" id="job-date">
+        <!-- v3.24.18：快速選日期按鈕 -->
+        <div class="date-quick-picks">
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('start','today')">今天</button>
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('start','tomorrow')">明天</button>
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('start','nextMon')">下週一</button>
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('start','clear')">清空</button>
+        </div>
       </div>
       <div>
         <label>截止日（選填）</label>
         <input type="date" id="job-end-date" placeholder="跨天案件才填">
+        <!-- v3.24.18：快速選日期按鈕（截止日常用 +N 天） -->
+        <div class="date-quick-picks">
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('end','today')">今天</button>
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('end','plus3')">+3天</button>
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('end','plus7')">+7天</button>
+          <button type="button" class="date-quick-btn" onclick="setJobDateQuick('end','clear')">清空</button>
+        </div>
       </div>
     </div>
 
@@ -1209,6 +1073,8 @@
       <div>
         <label>總金額</label>
         <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">
+        <!-- v3.24.18：千分位即時 hint，避免大數字眼花 -->
+        <div id="job-amount-formatted" class="num-hint" style="font-size: 11px; color: var(--muted); margin-top: 2px; min-height: 14px;"></div>
       </div>
     </div>
     <!-- v3.6.3：工時 + 計時器合併成一行 -->
@@ -1549,6 +1415,25 @@
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closePaidDateModal()">取消</button>
       <button class="btn btn-primary" onclick="confirmPaidDate()">確認標記</button>
+    </div>
+  </div>
+</div>
+
+<!-- v3.24.14：偵測到新版本時的「強制備份才能更新」modal -->
+<div class="modal-bg" id="update-confirm-modal">
+  <div class="modal" style="max-width: 480px;">
+    <h2>🆕 偵測到新版本</h2>
+    <p style="font-size: 13px; color: var(--muted); margin: 8px 0 12px 0; line-height: 1.7;">
+      為了你的資料安全，<b>更新前必須先備份</b>。<br>
+      兩地電腦同步時，新版若有 bug 可能影響資料 —— 強制備份是雙重保險。
+    </p>
+    <div id="update-backup-status" style="padding: 10px 12px; background: var(--card); border-left: 3px solid var(--primary); border-radius: 6px; font-size: 13px; line-height: 1.7; margin-bottom: 12px;">
+      <!-- 動態填入版本資訊 -->
+    </div>
+    <div class="modal-actions" id="update-modal-actions">
+      <button class="btn btn-primary" onclick="confirmUpdateWithDriveBackup()" id="update-backup-drive-btn">📸 建立 Drive 快照並更新</button>
+      <button class="btn btn-outline" onclick="confirmUpdateWithJSONDownload()" id="update-backup-json-btn">📥 下載 JSON 備份</button>
+      <button class="btn btn-ghost" onclick="cancelUpdate()">⏸️ 稍後再說</button>
     </div>
   </div>
 </div>
