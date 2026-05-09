@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-08-v3.24.11';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-08-v3.24.12';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -4336,7 +4336,9 @@ function toggleBulkSelect(id) {
 }
 
 function bulkSelectAll() {
-  document.querySelectorAll('#jobs-list .row[data-job-id]').forEach(el => {
+  // v3.24.12：selector 從 `.row[data-job-id]` 改成 `[data-job-id]`，涵蓋 5 種視圖
+  // （comfort/compact 用 div.row、table 用 tr、card 用 div.job-card-tile 都有 data-job-id）
+  document.querySelectorAll('#jobs-list [data-job-id]').forEach(el => {
     bulkSelected.add(el.getAttribute('data-job-id'));
   });
   document.getElementById('bulk-count').textContent = `已選 ${bulkSelected.size} 筆`;
@@ -4344,7 +4346,8 @@ function bulkSelectAll() {
 }
 
 function bulkInvert() {
-  document.querySelectorAll('#jobs-list .row[data-job-id]').forEach(el => {
+  // v3.24.12：selector 同上
+  document.querySelectorAll('#jobs-list [data-job-id]').forEach(el => {
     const id = el.getAttribute('data-job-id');
     if (bulkSelected.has(id)) bulkSelected.delete(id);
     else bulkSelected.add(id);
@@ -5272,6 +5275,22 @@ function jobRowCompact(j) {
                      (status === 'partial' ? '🔶' :
                      (status === 'prepaid' ? '✓ 待做' :
                      '🔄'))));
+
+  // v3.24.12：批次模式
+  if (bulkMode) {
+    const isSelected = bulkSelected.has(j.id);
+    return `<div class="row-compact state-${status}${isSelected ? ' selected' : ''}" data-job-id="${j.id}"
+                onclick="toggleBulkSelect('${j.id}')">
+      <div class="bulk-checkbox ${isSelected ? 'checked' : ''}" style="margin-right: 4px;"></div>
+      <span class="row-compact-dot" style="background:${color}"></span>
+      <span class="row-compact-date">${dateShort || '-'}</span>
+      <span class="row-compact-title">${escapeHtml(j.title || '（無標題）')}</span>
+      <span class="row-compact-client">· ${escapeHtml(name)}</span>
+      <span class="row-compact-amount">${fmt(jobFinalAmount(j)).replace('NT$', '').trim()}</span>
+      <span class="row-compact-status">${statusIcon}</span>
+    </div>`;
+  }
+
   return `<div class="row-compact state-${status}" data-job-id="${j.id}"
               onclick="editJob('${j.id}')"
               ontouchstart="onJobRowTouchStart(event, '${j.id}')"
@@ -5294,11 +5313,14 @@ function jobRowCompact(j) {
 // ============== v3.21.0：報表模式（spreadsheet 風）==============
 function renderJobsTable(jobs) {
   if (!jobs.length) return '';
+  // v3.24.12：加 bulkMode 支援 — 批次模式下每 row 顯示 checkbox cell + 整 row click 切選取
+  const inBulk = bulkMode;
   const rows = jobs.map(j => {
     const c = getClient(j.clientId);
     const color = c ? c.color : '#ccc';
     const name = c ? c.name : '未指定';
     const status = jobStatus(j);
+    const isSelected = bulkSelected.has(j.id);
     const statusBadge = j.cancelled ? '<span class="t-badge t-cancelled">🚫 已取消</span>' :
                         (status === 'paid' ? '<span class="t-badge t-paid">✅ 已收</span>' :
                         (status === 'done-unpaid' ? '<span class="t-badge t-unpaid">$ 待收</span>' :
@@ -5307,6 +5329,24 @@ function renderJobsTable(jobs) {
                         '<span class="t-badge t-pending">🔄 進行中</span>'))));
     const tags = (Array.isArray(j.tags) && j.tags.length ? j.tags : (j.tag ? [j.tag] : []));
     const tagsHtml = tags.length ? tags.map(t => `<span class="t-tag">${escapeHtml(t)}</span>`).join('') : '<span class="t-empty">—</span>';
+
+    // v3.24.12：批次模式 → 整 row click toggle、第一格放 checkbox、不顯示快速 action
+    if (inBulk) {
+      return `<tr data-job-id="${j.id}" class="${isSelected ? 'bulk-selected' : ''}"
+                onclick="toggleBulkSelect('${j.id}')">
+        <td class="t-bulk"><div class="bulk-checkbox ${isSelected ? 'checked' : ''}"></div></td>
+        <td class="t-date">${j.date || '-'}</td>
+        <td class="t-client">
+          <span class="row-compact-dot" style="background:${color}; vertical-align:middle;"></span>
+          ${escapeHtml(name)}
+        </td>
+        <td class="t-title">${escapeHtml(j.title || '（無標題）')}</td>
+        <td class="t-tags">${tagsHtml}</td>
+        <td class="t-amount">${fmt(jobFinalAmount(j))}</td>
+        <td class="t-status">${statusBadge}</td>
+      </tr>`;
+    }
+
     return `<tr data-job-id="${j.id}"
               onclick="editJob('${j.id}')"
               ontouchstart="onJobRowTouchStart(event, '${j.id}')"
@@ -5329,9 +5369,19 @@ function renderJobsTable(jobs) {
       </td>
     </tr>`;
   }).join('');
-  return `<table class="jobs-table">
-    <thead>
-      <tr>
+
+  // 表頭：批次模式下換成 checkbox 欄 + 沒有 actions 欄
+  const headerHtml = inBulk
+    ? `<tr>
+        <th class="t-bulk"></th>
+        <th>日期</th>
+        <th>業主</th>
+        <th>標題</th>
+        <th>標籤</th>
+        <th class="t-amount">金額</th>
+        <th>狀態</th>
+      </tr>`
+    : `<tr>
         <th>日期</th>
         <th>業主</th>
         <th>標題</th>
@@ -5339,8 +5389,10 @@ function renderJobsTable(jobs) {
         <th class="t-amount">金額</th>
         <th>狀態</th>
         <th></th>
-      </tr>
-    </thead>
+      </tr>`;
+
+  return `<table class="jobs-table${inBulk ? ' bulk-mode' : ''}">
+    <thead>${headerHtml}</thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -5352,6 +5404,26 @@ function jobRowCard(j) {
   const name = c ? c.name : '未指定';
   const status = jobStatus(j);
   const tags = (Array.isArray(j.tags) && j.tags.length ? j.tags : (j.tag ? [j.tag] : []));
+
+  // v3.24.12：批次模式
+  if (bulkMode) {
+    const isSelected = bulkSelected.has(j.id);
+    return `<div class="job-card-tile state-${status}${isSelected ? ' selected' : ''}" data-job-id="${j.id}"
+                onclick="toggleBulkSelect('${j.id}')">
+      <div class="bulk-checkbox ${isSelected ? 'checked' : ''}" style="position: absolute; top: 8px; right: 8px;"></div>
+      <div class="job-card-tile-head">
+        <span class="row-compact-dot" style="background:${color}"></span>
+        <span class="job-card-tile-date">${j.date || '-'}</span>
+      </div>
+      <div class="job-card-tile-title">${escapeHtml(j.title || '（無標題）')}</div>
+      <div class="job-card-tile-client">${escapeHtml(name)}</div>
+      ${tags.length ? `<div class="job-card-tile-tags">${tags.map(t => `<span class="tag-chip-mini">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+      <div class="job-card-tile-bottom">
+        <span class="job-card-tile-amount">${fmt(jobFinalAmount(j))}</span>
+      </div>
+    </div>`;
+  }
+
   return `<div class="job-card-tile state-${status}" data-job-id="${j.id}"
               onclick="editJob('${j.id}')"
               ontouchstart="onJobRowTouchStart(event, '${j.id}')"
@@ -6283,14 +6355,21 @@ function renderOutsourceReport() {
     </div>`;
     return;
   }
-  // 加「全部」選項
+  // v3.24.12：預設選「全部月份」（之前選 months[0] 會讓使用者一進來只看到當月，誤以為下拉壞掉）
   const cur = sel.value;
   sel.innerHTML = '<option value="all">全部月份</option>' + months.map(m => `<option value="${m}">${m}</option>`).join('');
-  sel.value = cur && (cur === 'all' || months.includes(cur)) ? cur : (months[0] || 'all');
+  sel.value = cur && (cur === 'all' || months.includes(cur)) ? cur : 'all';
 
   const month = sel.value;
   const jobs = (month === 'all' ? allOutsourceJobs : allOutsourceJobs.filter(j => jobBelongMonth(j) === month))
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  // v3.24.12：加 banner 提示「下拉只列有派外包的月份」+ 當前範圍 / 總筆數
+  const monthLabel = month === 'all' ? `全部 ${months.length} 個月` : month;
+  const banner = `<div class="reminder-hint" style="margin-bottom: 8px; padding: 6px 10px; background: var(--card); border-left: 3px solid var(--primary); font-size: 12px;">
+    📦 目前顯示：<b>${monthLabel}</b> · 共 ${jobs.length} 筆外包紀錄
+    ${months.length === 1 ? '<br>💡 下拉只列出有派外包的月份，目前只有 1 個月有紀錄' : ''}
+  </div>`;
 
   if (!jobs.length) {
     box.innerHTML = '<div class="empty" style="padding: 20px; text-align: center; color: var(--muted);">該月份沒有派外包紀錄</div>';
@@ -6343,6 +6422,7 @@ function renderOutsourceReport() {
     </tr>`).join('');
 
   box.innerHTML = `
+    ${banner}
     <div style="overflow-x: auto; margin-bottom: 16px;">
       <table class="report-table">
         <thead><tr>
@@ -7944,10 +8024,13 @@ function clickClientRank(cid) {
   const cache = clientRankCache[cid];
   if (!cache) return;
   // 範圍標籤（描述當前 revenue 顯示的範圍）
+  // v3.24.12：補 this-month / last-month（v3.24.10 加的快捷選項，否則 label 會顯示「最近 last-month 個月」這種怪字串）
   let rangeLabel = '當前範圍';
   const r = String(revenueState.range);
   if (r === 'all') rangeLabel = '全部';
   else if (r === 'ytd') rangeLabel = '今年至今';
+  else if (r === 'this-month') rangeLabel = '當月';
+  else if (r === 'last-month') rangeLabel = '上個月';
   else if (r === 'custom') {
     rangeLabel = revenueState.mode === 'month' ? '自訂月份範圍' : '自訂年份範圍';
   } else if (revenueState.mode === 'year') {

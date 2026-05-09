@@ -373,6 +373,27 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .bulk-checkbox.checked::after { content: "✓"; }
 .bulk-checkbox:hover { border-color: var(--primary); }
 
+/* v3.24.12：table 視圖批次模式 — 第一格放 checkbox，selected row 加底色 */
+.jobs-table.bulk-mode tr { cursor: pointer; }
+.jobs-table .t-bulk { width: 36px; padding: 4px 8px; }
+.jobs-table tr.bulk-selected { background: var(--primary-light); }
+.jobs-table tr.bulk-selected td { color: var(--text); }
+
+/* v3.24.12：card 視圖批次模式 — selected card 加 outline */
+.job-card-tile { position: relative; }
+.job-card-tile.selected {
+  outline: 2px solid var(--primary);
+  background: var(--primary-light);
+}
+
+/* v3.24.12：compact row 批次模式 selected */
+.row-compact.selected {
+  background: var(--primary-light);
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
 /* 備份歷史 row */
 .snapshot-row {
   padding: 12px;

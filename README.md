@@ -85,6 +85,7 @@
 | **v3.24.9** | **計時器 UI 隱藏（功能保留）+ Modal 取消/儲存 sticky footer + 🚨 Google 登出 hotfix（cloudLoadAuthState 過期不清，啟動時 silent refresh 補 token）** | ✅ **完成（2026-05-08）** |
 | **v3.24.10** | **收益總覽月度範圍選單新增「📅 當月」「📅 上個月」快捷選項（自動處理跨年）** | ✅ **完成（2026-05-08）** |
 | **v3.24.11** | **🚨 Google 行事曆 iOS 通知修復：事件強制帶 reminders.overrides；4 種全天事件改時間事件；UI label「每日早報時段」→「通知時間」** | ✅ **完成（2026-05-08）** |
+| **v3.24.12** | **🚨 批次模式 5 視圖修復 + 外包對帳 UX：table/compact/card 加 bulkMode checkbox；selector 改寬涵蓋 `<tr>`；外包對帳預設選「全部月份」+ 加 banner 提示** | ✅ **完成（2026-05-09）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

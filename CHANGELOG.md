@@ -1,5 +1,47 @@
 ﻿# 版本更新歷史
 
+## v3.24.12 — 批次模式在 5 視圖中失效修復（2026-05-09）
+
+### 🚨 Bug 修復：批次模式 + 全選 / 反選失效
+**症狀**：使用者進入批次模式後：
+- 案件清單**完全沒有 checkbox** 顯示
+- 點「全選」沒反應，「已選 0 筆」不變
+
+**根因**：v3.21.0 加了 5 種視圖（comfort / compact / table / card / board），但只有 **comfort 視圖（`jobRow`）正確處理 bulkMode 的 checkbox**。其他 4 個視圖的渲染函式完全沒判斷 `bulkMode`：
+- `renderJobsTable()`（報表視圖）→ 沒 checkbox 欄、row click 仍然開編輯 modal
+- `jobRowCompact()`（緊湊視圖）→ 同上
+- `jobRowCard()`（卡片視圖）→ 同上
+
+且 `bulkSelectAll()` 跟 `bulkInvert()` 的 selector 寫死 `.row[data-job-id]`，**抓不到 table 視圖的 `<tr data-job-id>`**。
+
+**修法**：
+1. **`bulkSelectAll()` / `bulkInvert()`**：selector 從 `.row[data-job-id]` 改成 `[data-job-id]`，涵蓋所有視圖
+2. **`renderJobsTable()`**：批次模式下表頭多一格 checkbox 欄、tr 第一格放 checkbox、row onclick 改 `toggleBulkSelect`、不顯示快速 action
+3. **`jobRowCompact()`**：批次模式下渲染 checkbox + row click 切選取
+4. **`jobRowCard()`**：批次模式下右上角放 checkbox（absolute 定位）+ selected 加 outline + 不顯示快速 action
+5. **CSS**：補 `.jobs-table.bulk-mode tr`、`.jobs-table tr.bulk-selected`、`.job-card-tile.selected`、`.row-compact.selected` 視覺樣式
+
+> 看板（board）視圖暫不處理批次（拖曳跟批次互斥，先讓 board 退回拖曳專屬）
+
+### 附帶修復：「最近 last-month 個月」label
+v3.24.10 加的 `'this-month'` / `'last-month'` 收益範圍快捷選項，沒在 `clickClientRank()` 處理 → 從業主貢獻排行點業主後，案件分頁的釘選 banner 會顯示「最近 last-month 個月」這種怪字串。
+
+**修法**：`clickClientRank()` 新增兩個分支：
+- `r === 'this-month'` → label = '當月'
+- `r === 'last-month'` → label = '上個月'
+
+### 附帶修復：外包對帳 UX
+**症狀**：使用者反映「月份下拉只能看 5 月、點全部月份沒反應」。
+
+**根因**：兩個 UX 問題（不是程式邏輯壞）：
+1. 預設選 `months[0]`（最新月份）→ 進來只看到當月、切「全部」筆數沒變→ 誤以為下拉壞了
+2. 沒任何提示說「下拉只列有派外包的月份」→ 資料量少時下拉只有 1–2 個選項，看起來像 bug
+
+**修法**（`renderOutsourceReport()` line ~6361）：
+1. 預設改選 `'all'`（全部月份），讓使用者一進來看到所有外包紀錄
+2. 加 banner 顯示「📦 目前顯示：XX · 共 N 筆外包紀錄」
+3. 只有 1 個月有外包時補一行：「💡 下拉只列出有派外包的月份，目前只有 1 個月有紀錄」
+
 ## v3.24.11 — Google 行事曆通知 iOS 修復 + 通知時間統一（2026-05-08）
 
 ### 🚨 Bug 修復：iOS 行事曆收不到通知
