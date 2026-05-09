@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-09-v3.24.18';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-09-v3.24.20';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -665,6 +665,8 @@ function cloudUpdateSyncIndicator() {
   const el = document.getElementById('sync-indicator');
   // v3.22.9：同時更新右側 account pill 的光暈狀態
   cloudRenderAccountPill();
+  // v3.24.20：行事曆 master toggle 隨登入狀態切換 disabled / 提示
+  if (typeof cloudUpdateCalSigninGate === 'function') cloudUpdateCalSigninGate();
 
   if (!el) return;
 
@@ -880,6 +882,8 @@ cloudInitGoogleAuth();
 // 例如：上次關閉時 token 已過期 → 重開有 user info 但無 token → 應顯示「未登入」banner
 setTimeout(() => {
   if (typeof cloudUpdateSyncBanner === 'function') cloudUpdateSyncBanner();
+  // v3.24.20：行事曆 master toggle disable 狀態也同步一次
+  if (typeof cloudUpdateCalSigninGate === 'function') cloudUpdateCalSigninGate();
 }, 1000);
 
 // ============== ☁️ Drive API Client（v3.0.0-alpha.2 起新增）==============
@@ -3081,7 +3085,23 @@ function cloudScheduleCalendarSync() {
 // ---------- Calendar UI handlers（v3.1.0）----------
 
 // 卡片展開時觸發：載入既存配置 + 列出 calendars + 渲染狀態
+// v3.24.20：根據登入狀態切換行事曆 master toggle 是否可勾 + 「未登入」提示
+//           登入後 → checkbox 解鎖、提示 hide
+//           未登入 → checkbox disabled、提示顯示
+function cloudUpdateCalSigninGate() {
+  const cb = document.getElementById('cloud-cal-enabled');
+  const hint = document.getElementById('cloud-cal-need-signin');
+  const signedIn = (typeof isCloudSignedIn === 'function') && isCloudSignedIn();
+  if (cb) {
+    cb.disabled = !signedIn;
+    if (!signedIn) cb.checked = false;  // 未登入時強制反勾，避免 cfg 被殘留 enabled=true 誤導 UI
+  }
+  if (hint) hint.classList.toggle('hidden', signedIn);
+}
+
 function cloudRenderCalendarUI() {
+  // v3.24.20：先同步 signin gate 狀態
+  cloudUpdateCalSigninGate();
   if (!isCloudSignedIn()) {
     const status = document.getElementById('cloud-cal-status');
     if (status) status.textContent = '請先登入';
@@ -3187,6 +3207,12 @@ function cloudOnCalendarConfigChange() {
 function cloudOnCalendarEnabledToggle() {
   const cb = document.getElementById('cloud-cal-enabled');
   if (!cb) return;
+  // v3.24.20：未登入時擋啟用（即使 disabled 沒生效也擋）
+  if (cb.checked && !isCloudSignedIn()) {
+    cb.checked = false;
+    toast('⚠️ 請先到上方「☁️ 雲端同步」登入 Google', 4000);
+    return;
+  }
   const enabled = !!cb.checked;
   cloudSaveCalendarConfig({ enabled });
   cloudUpdateCalendarSectionVisibility(enabled);
@@ -12488,24 +12514,47 @@ function loadDemo() {
   save(); renderAll(); toast(`✓ 已載入範例：${state.clients.length} 業主 · ${state.jobs.length} 案件 · 跨 14 個月`, 4500);
 }
 
-function clearAll() {
+// v3.24.19：clearAll 加 skipPrompt 參數 — 從「⚠️ 危險區」card 內 inline 確認後呼叫，跳過原本的 prompt
+function clearAll(skipPrompt) {
   const cnt = state.jobs.length;
   if (cnt === 0 && state.clients.length === 0) {
     toast('資料已經是空的');
     return;
   }
-  if (!confirm(`⚠️ 即將清空所有資料！\n\n業主：${state.clients.length} 位\n案件：${cnt} 筆\n\n操作不可復原。確定？`)) return;
-  // 二次確認：必須輸入「確認清空」
-  const verify = prompt('最後確認：請輸入「確認清空」四個字才會執行（避免誤觸）');
-  if (verify !== '確認清空') {
-    toast('已取消（輸入文字不符）');
-    return;
+  if (!skipPrompt) {
+    // 舊路徑（保留以防其他地方呼叫）：confirm + prompt 二段確認
+    if (!confirm(`⚠️ 即將清空所有資料！\n\n業主：${state.clients.length} 位\n案件：${cnt} 筆\n\n操作不可復原。確定？`)) return;
+    const verify = prompt('最後確認：請輸入「確認清空」四個字才會執行（避免誤觸）');
+    if (verify !== '確認清空') {
+      toast('已取消（輸入文字不符）');
+      return;
+    }
   }
   const beforeC = state.clients.length;
   const beforeJ = state.jobs.length;
   state.clients = []; state.jobs = [];
   logAction('data-clear', { clearedClients: beforeC, clearedJobs: beforeJ });
   save(); renderAll(); toast('已清空全部資料');
+}
+
+// v3.24.19：危險區「清空所有資料」確認 input 監聽 — 比對輸入完全等於「確定清空所有資料」才解鎖按鈕
+function onDangerClearConfirmInput() {
+  const input = document.getElementById('danger-clear-confirm');
+  const btn = document.getElementById('danger-clear-btn');
+  if (!input || !btn) return;
+  btn.disabled = input.value.trim() !== '確定清空所有資料';
+}
+
+// v3.24.19：使用者輸入確認文字後按下「清空所有資料」按鈕
+function onDangerClearConfirm() {
+  const input = document.getElementById('danger-clear-confirm');
+  if (!input || input.value.trim() !== '確定清空所有資料') return;  // 雙保險：理論上 button 沒解鎖不會走到這
+  // 已通過 inline 確認，跳過 clearAll 內的 prompt
+  clearAll(true);
+  // 清空 input + 重 disable 按鈕
+  input.value = '';
+  const btn = document.getElementById('danger-clear-btn');
+  if (btn) btn.disabled = true;
 }
 
 // ============== 事件監聽 ==============

@@ -1,5 +1,125 @@
 ﻿# 版本更新歷史
 
+## v3.24.20 — 設定頁雲端同步 / 行事曆同步 排版優化（2026-05-09）
+
+### 1. 行事曆同步「啟用」要先登入才能勾
+**之前**：未登入也能勾「啟用 Google 行事曆同步」checkbox，但呼叫 Drive API 會失敗 → 使用者不知道為什麼沒同步。
+
+**現在**：
+- 新增 `cloudUpdateCalSigninGate()` 函式：根據登入狀態切換 checkbox `disabled` 屬性 + 顯示 `#cloud-cal-need-signin` 提示
+- 未登入時：checkbox 灰色不可點 + 顯示「⚠️ 請先到上方『☁️ 雲端同步』登入 Google」（黃色 warning）
+- 登入後：checkbox 解鎖、提示自動 hide
+- `cloudUpdateSyncIndicator` 內呼叫一次（登入 / 登出狀態變化時連動）
+- 啟動 1 秒後也呼叫一次（給 cloudInitGoogleAuth 拉完狀態的時間）
+- 雙保險：`cloudOnCalendarEnabledToggle` 內也擋未登入勾選（即使 disabled 沒生效也擋）
+
+### 2. 行事曆同步排版重構
+**之前（垂直 7 個區塊）**：
+```
+master toggle + status / 推送說明 /
+Step ① 同步到哪一本日曆 / 
+Step ② 通知時間 /
+推送內容說明 / 同步狀態 / 立即同步按鈕
+```
+
+**現在（垂直 5 個區塊）**：
+- 取消 「Step ①②」風格 → 改 inline label「日曆」「通知時間」
+- 「日曆」+「通知時間」**兩欄 grid 並排**（桌面省垂直空間，手機自動換行）
+- 「重新整理日曆列表」改成 🔄 icon-only（節省空間）
+- 「上次同步」狀態 + 「立即同步」按鈕同一列
+- 「💡 建議建外包專用日曆」改成獨立 details 折疊（移到最下面）
+- 推送內容精簡成一行：「推送：案件本身、未收款、月底、業主請款日、拖款警告、每日早報」
+
+### 3. 雲端同步排版重構（兩個 sub-section 改 details 折疊）
+**之前**：「📦 雲端版本歷史」+「💾 離線資料備份」兩個 sub-section 永遠展開，垂直堆疊很長
+
+**現在**：
+- 兩個 sub-section 都改成 `<details>` 預設折疊
+- 進設定頁第一眼只看到登入狀態 + 立即同步按鈕（最常用）
+- 要備份才點開
+- 配合新 CSS class（`.cloud-sub-section` / `.cloud-sub-body` / `.cloud-sub-status` 等）
+- summary 內顯示狀態（例如「登入後可用」「JSON / CSV」）
+
+### 影響範圍
+- `index.html`：
+  - `card-cloud-auth` body 內 sub-section 改 `<details>` 結構
+  - `card-calendar` body 重構：移除 cal-step / cal-step-label，改用 cal-settings-grid + cal-field
+  - 加 `#cloud-cal-need-signin` 警告提示
+- `css/style.css`：新增 `.cloud-sub-section` / `.cloud-sub-status` / `.cal-settings-grid` / `.cal-field` / `.cal-sync-row` 等 ~10 條 rule
+- `js/app.js`：新增 `cloudUpdateCalSigninGate()`；`cloudRenderCalendarUI` / `cloudUpdateSyncIndicator` / `cloudOnCalendarEnabledToggle` 內呼叫；啟動 setTimeout 加同步；APP_VERSION
+- `service-worker.js`：CACHE_VERSION
+
+### 不動的部分
+- 序列化 / 同步 / merge / push 邏輯：完全沒動
+- schema 沒動
+- cloudCalendarConfig 結構沒動
+
+### 你會看到的差別
+1. 進設定頁 → 「☁️ 雲端同步」卡內預設只看到登入區 + 立即同步，雲端歷史 / 離線備份要點才開
+2. 「📅 Google 行事曆同步」卡點開後，未登入時 checkbox 灰色不能勾，上方顯示黃色提示
+3. 啟用後，「日曆」「通知時間」兩個欄位並排顯示（桌面），不再垂直疊
+4. 「立即同步」按鈕跟「上次同步」狀態同一列
+5. 「建議建外包專用日曆」收進折疊區（最下面）
+
+## v3.24.19 — 危險區獨立 + 雲端同步文字校正（2026-05-09）
+
+### 1. 「危險區」獨立成設定頁最下面的 card
+**之前**：「載入範例資料」+「清空所有資料」混在「☁️ 雲端同步 → 💾 離線資料備份」sub-section 底下，標題「⚠️ 危險操作」，視覺上跟「匯出 / 匯入」並排，容易誤點。
+
+**現在**：獨立 card `#card-danger`，放設定頁最下面（CSS order 90，「關於」之前）：
+- 紅色左 border 視覺警示
+- 卡 head 紅色「⚠️ 危險區」+ 紅色「不可逆操作」狀態
+- 預設摺疊（要點才展開），減少誤觸機會
+- 內含兩個區塊：「載入範例資料」+「清空所有資料」
+
+### 2. 「清空所有資料」改成 inline 確認 input
+**之前**：點按鈕 → confirm dialog → prompt 輸入「確認清空」
+- 流程：兩個彈窗，輸入文字在 prompt 裡（無視覺提示）
+
+**現在**：
+- 「清空」按鈕預設 disabled（灰色不可點）
+- 上方顯眼紅字提示「**確定清空所有資料**」
+- 旁邊 input 框，照打就解鎖按鈕
+- 按下後直接清空（不再需要 confirm dialog）
+- 清空後 input 自動清空、按鈕重新 disabled
+- `clearAll(skipPrompt)` 加參數，從 inline 確認進來時跳過原本 confirm + prompt
+
+### 3. 雲端同步卡內文字校正（簡單明瞭）
+
+| 原文字 | 改成 |
+|---|---|
+| 登入後資料同步到你自己的 Google Drive 應用程式資料夾。 | 登入後自動同步到你的 Google Drive。 |
+| （Google 登入元件初始化中，請稍候…） | 登入元件載入中… |
+| 自動同步，1 小時後 token 過期需重新登入。 | （整段刪除 — silent refresh 已自動續，不必再提） |
+| 手動備份永久保留；自動每日備份會分層保留。 | 手動備份永久保留。 |
+| 標籤（例：月底結算前） | 備份標籤（選填） |
+| 🔄 重新整理列表 | 🔄 重新整理 |
+| 點「重新整理列表」載入 | 點「重新整理」載入 |
+| 匯出 / 匯入到本機檔案，跟 Drive 雲端同步無關。建議偶爾手動備份一份到電腦，當作雙保險。 | 匯出 / 匯入到本機檔案，當作雙保險。 |
+| 📤 匯出 JSON 備份 | 📤 匯出 JSON |
+| 📥 匯入備份 | 📥 匯入 |
+| 📊 匯出 CSV（做帳用） | 📊 匯出 CSV |
+| 從 Drive 拉取最新版本（含三方合併、衝突 modal） | 從 Drive 拉取最新版本 |
+| 正在載入 Google 登入元件… | 載入中… |
+
+### 影響範圍
+- `index.html`：刪「危險操作」區塊（雲端同步卡內）；新增 `#card-danger` 卡（設定頁最下面）；雲端同步卡 9 處文字校正
+- `css/style.css`：`#tab-settings > #card-danger { order: 90; }`、`.card-danger` 紅色左 border
+- `js/app.js`：`clearAll(skipPrompt)` 加跳過參數；新增 `onDangerClearConfirmInput` / `onDangerClearConfirm`；APP_VERSION
+- `service-worker.js`：CACHE_VERSION
+
+### 不動的部分
+- 同步 / 序列化 / merge / push 邏輯：完全沒動
+- schema 沒動
+- `loadDemo()` 函式沒動（只是按鈕位置改）
+
+### 你會看到的差別
+1. 設定頁最下面多一張紅色「⚠️ 危險區」摺疊卡
+2. 點開後看到「載入範例資料」+「清空所有資料」兩個區塊
+3. 「清空」按鈕預設灰色不可點 → 在 input 照打「確定清空所有資料」7 個字 → 按鈕變紅可點
+4. 點下去直接清空（不再跳兩個 dialog）
+5. 「☁️ 雲端同步」卡的所有說明文字變短、變直接
+
 ## v3.24.18 — UX 視覺優化八項（2026-05-09）
 
 ### 1. Dashboard stat 卡初始 flash 一致

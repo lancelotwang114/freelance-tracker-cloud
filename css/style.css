@@ -469,9 +469,93 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 #tab-settings > #card-cloud-auth { order: 1; }
 #tab-settings > #card-calendar { order: 2; }
 #tab-settings > #card-display-pref { order: 3; }
+#tab-settings > #card-danger { order: 90; }      /* v3.24.19：危險區放在「關於」之前最後 */
 #tab-settings > .settings-about { order: 99; }
-/* 註解 / 空白 div / placeholder 都用 order: 50 排最後 card 之後（顯示為間距） */
-#tab-settings > *:not(#card-cloud-auth):not(#card-calendar):not(#card-display-pref):not(.settings-about) { order: 50; }
+/* 註解 / 空白 div / placeholder 都用 order: 50 排其他 card 之後（顯示為間距） */
+#tab-settings > *:not(#card-cloud-auth):not(#card-calendar):not(#card-display-pref):not(#card-danger):not(.settings-about) { order: 50; }
+
+/* v3.24.19：危險區卡 — 紅色左 border 視覺警示 */
+.card-danger {
+  border-left: 3px solid var(--danger);
+}
+
+/* v3.24.20：雲端同步 sub-section 折疊樣式（替代原本 section-divider + h4 + content） */
+.cloud-sub-section {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.cloud-sub-section > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  font-weight: 600;
+  font-size: 14px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cloud-sub-section > summary::-webkit-details-marker { display: none; }
+.cloud-sub-section > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.cloud-sub-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+.cloud-sub-status {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.cloud-sub-body { padding: 4px 0 8px; }
+.cloud-sub-hint { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.cloud-sub-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
+/* v3.24.20：行事曆同步設定 — 兩欄 grid（桌面），手機自動垂直 */
+.cal-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 6px;
+}
+@media (max-width: 600px) {
+  .cal-settings-grid { grid-template-columns: 1fr; gap: 8px; }
+}
+.cal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cal-field-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.cal-field-input {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.cal-field-input select,
+.cal-field-input input[type="time"] {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+/* 同步狀態 + 立即同步按鈕同列 */
+.cal-sync-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
 
 /* v3.24.15：cloud init 期間的 loading overlay（防止 race condition） */
 .init-overlay {

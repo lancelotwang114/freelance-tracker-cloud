@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-09-v3.24.18">
+<meta name="app-version" content="2026-05-09-v3.24.20">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -660,10 +660,10 @@
           </p>
         </div>
 
-        <!-- 狀態 B：未登入（v3.0.0-alpha.1 commit 3 階段：預設顯示，按鈕永遠 disabled）-->
+        <!-- 狀態 B：未登入 -->
         <div id="cloud-auth-signed-out" class="cloud-auth-signed-out">
           <p style="font-size: 13px; color: var(--muted); margin: 0 0 12px 0;">
-            登入後資料同步到你自己的 Google Drive 應用程式資料夾。
+            登入後自動同步到你的 Google Drive。
           </p>
           <button type="button" id="cloud-signin-btn" class="cloud-signin-btn" onclick="cloudSignIn()" disabled>
             <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -675,7 +675,7 @@
             <span>使用 Google 登入</span>
           </button>
           <p id="cloud-signin-disabled-hint" style="font-size: 12px; color: var(--muted); margin: 8px 0 0 0;">
-            （Google 登入元件初始化中，請稍候…）
+            登入元件載入中…
           </p>
         </div>
 
@@ -690,51 +690,50 @@
             <button type="button" class="btn btn-outline btn-sm" onclick="cloudSignOut()">登出</button>
           </div>
 
-          <!-- v3.0.0-alpha.2 α2-6：立即同步按鈕 -->
+          <!-- 立即同步按鈕（v3.24.19：移除下方「token 1 小時過期」說明，silent refresh 已自動續） -->
           <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-            <button type="button" class="btn btn-outline btn-sm" onclick="cloudPullNow()" title="從 Drive 拉取最新版本（含三方合併、衝突 modal）">
+            <button type="button" class="btn btn-outline btn-sm" onclick="cloudPullNow()" title="從 Drive 拉取最新版本">
               🔄 立即同步
             </button>
           </div>
-
-          <p style="font-size: 12px; color: var(--muted); margin: 12px 0 0 0;">
-            自動同步，1 小時後 token 過期需重新登入。
-          </p>
         </div>
 
-        <!-- v3.24.16：📦 雲端版本歷史 sub-section（從原獨立 card 搬來） -->
-        <div class="section-divider"></div>
-        <h4 style="margin: 8px 0; font-size: 14px; font-weight: 600;">📦 雲端版本歷史</h4>
+        <!-- v3.24.20：📦 雲端版本歷史 改 details 折疊 -->
+        <details class="cloud-sub-section">
+        <summary><span class="cloud-sub-title">📦 雲端版本歷史</span></summary>
+        <div class="cloud-sub-body">
+        <h4 style="margin: 8px 0; font-size: 14px; font-weight: 600; display: none;">📦 雲端版本歷史</h4>
         <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
-          手動備份永久保留；自動每日備份會分層保留。<span id="cloud-snapshot-status" style="margin-left: 6px;">登入後可用</span>
+          手動備份永久保留。<span id="cloud-snapshot-status" style="margin-left: 6px;">登入後可用</span>
         </p>
         <div style="display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
-          <input type="text" id="cloud-snapshot-manual-label" placeholder="標籤（例：月底結算前）" style="flex: 1; min-width: 160px;">
+          <input type="text" id="cloud-snapshot-manual-label" placeholder="備份標籤（選填）" style="flex: 1; min-width: 160px;">
           <button type="button" class="btn btn-primary btn-sm" onclick="cloudCreateManualSnapshot()">📸 建立備份</button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshSnapshotList()">🔄 重新整理列表</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshSnapshotList()">🔄 重新整理</button>
         </div>
         <div id="cloud-snapshot-list">
-          <p style="color: var(--muted); font-size: 13px;">點「重新整理列表」載入</p>
+          <p style="color: var(--muted); font-size: 13px;">點「重新整理」載入</p>
         </div>
+        </div>
+        </details>
 
-        <!-- v3.24.16：💾 離線資料備份 sub-section（從原獨立 card 搬來，名稱明確標「離線」與雲端區分） -->
-        <div class="section-divider"></div>
-        <h4 style="margin: 8px 0; font-size: 14px; font-weight: 600;">💾 離線資料備份</h4>
+        <!-- v3.24.20：💾 離線資料備份 改 details 折疊 -->
+        <details class="cloud-sub-section">
+        <summary><span class="cloud-sub-title">💾 離線資料備份</span></summary>
+        <div class="cloud-sub-body">
+        <h4 style="margin: 8px 0; font-size: 14px; font-weight: 600; display: none;">💾 離線資料備份</h4>
         <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
-          匯出 / 匯入到本機檔案，跟 Drive 雲端同步無關。建議偶爾手動備份一份到電腦，當作雙保險。
+          匯出 / 匯入到本機檔案，當作雙保險。
         </p>
         <div style="display:flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-primary btn-sm" onclick="exportData()">📤 匯出 JSON 備份</button>
-          <button class="btn btn-outline btn-sm" onclick="document.getElementById('import-file').click()">📥 匯入備份</button>
+          <button class="btn btn-primary btn-sm" onclick="exportData()">📤 匯出 JSON</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('import-file').click()">📥 匯入</button>
           <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
-          <button class="btn btn-outline btn-sm" onclick="exportCSV()">📊 匯出 CSV（做帳用）</button>
+          <button class="btn btn-outline btn-sm" onclick="exportCSV()">📊 匯出 CSV</button>
         </div>
-        <div class="section-divider"></div>
-        <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">⚠️ 危險操作：</p>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-outline btn-sm" id="demo-btn" onclick="loadDemo()">載入範例資料</button>
-          <button class="btn btn-danger btn-sm" onclick="clearAll()">清空所有資料</button>
         </div>
+        </details>
+        <!-- v3.24.19：「危險操作」區塊移除，改成設定頁最下面獨立 card「⚠️ 危險區」 -->
 
       </div>
     </div>
@@ -813,9 +812,9 @@
         <span class="card-status" id="cloud-cal-status">未設定</span>
         <span class="toggle-arrow">▼</span>
       </div>
-      <!-- v3.7.0：頂端加 master toggle，OFF 時下面整段隱藏；移除 Step 4「自動 vs 手動」（啟用就一律 auto） -->
+      <!-- v3.24.20：master toggle 重構 — 未登入時 disabled + 顯示提示 -->
       <div class="card-body cal-compact">
-        <!-- Master toggle（必開才同步） -->
+        <!-- Master toggle（要先登入 Google 才能勾） -->
         <div class="cal-master-toggle">
           <label class="cal-master-label">
             <input type="checkbox" id="cloud-cal-enabled" onchange="cloudOnCalendarEnabledToggle()">
@@ -823,55 +822,90 @@
           </label>
           <span id="cloud-cal-master-status" class="cal-hint">未啟用</span>
         </div>
+        <!-- v3.24.20：未登入提示，登入後 hide -->
+        <p id="cloud-cal-need-signin" class="cal-hint hidden" style="color: var(--warning); margin: 6px 0 8px;">
+          ⚠️ 請先到上方「☁️ 雲端同步」登入 Google
+        </p>
         <p class="cal-hint" style="margin: 6px 0 8px;">
-          開啟後自動把案件 + 提醒推送到 Google 行事曆，只動帶 <code>ftSource</code> 標記的事件。
+          開啟後自動把案件 + 提醒推送到 Google 行事曆。
         </p>
 
-        <!-- 啟用時才顯示的設定區 -->
+        <!-- v3.24.20：啟用時才顯示的設定區 — 重構成 inline label + 兩欄 grid，取消 Step ①② 風格 -->
         <div id="cloud-cal-settings-body" class="hidden">
 
-          <!-- Step 1：選擇 Calendar -->
-          <div class="cal-step">
-            <label class="cal-step-label">① 同步到哪一本日曆？</label>
-            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-              <select id="cloud-cal-picker" style="flex: 1; min-width: 180px;" onchange="cloudOnCalendarPicked()">
-                <option value="">— 請先載入 —</option>
-              </select>
-              <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshCalendarList()">重新整理</button>
-            </div>
-            <details id="cloud-cal-recommend-wrap" style="margin-top: 6px;">
-              <summary class="cal-hint" style="cursor: pointer;">💡 建議建一本「外包」專用日曆（點看做法）</summary>
-              <div id="cloud-cal-recommend" class="cal-hint" style="margin-top: 4px; padding-left: 16px;">
-                做法：開 <a href="https://calendar.google.com" target="_blank" rel="noopener" style="color: var(--primary);">calendar.google.com</a> → 左側「其他日曆」+ 號 → 建立新日曆 → 名稱「外包」 → 建立 → 回來按「重新整理」。
+          <!-- 日曆 + 通知時間（兩欄並排，桌面省空間） -->
+          <div class="cal-settings-grid">
+            <div class="cal-field">
+              <span class="cal-field-label">日曆</span>
+              <div class="cal-field-input">
+                <select id="cloud-cal-picker" onchange="cloudOnCalendarPicked()">
+                  <option value="">— 請先載入 —</option>
+                </select>
+                <button type="button" class="btn btn-outline btn-sm" onclick="cloudRefreshCalendarList()" title="重新整理日曆列表">🔄</button>
               </div>
-            </details>
-          </div>
-
-          <!-- Step 2：通知時間（v3.24.11：擴展為所有提醒類型統一通知時間，含早報、未收款、月底、業主請款日、拖款警告）-->
-          <div class="cal-step">
-            <label class="cal-step-label">② 通知時間</label>
-            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-              <input type="time" id="cloud-cal-morning-time" value="09:30" onchange="cloudOnCalendarConfigChange()" style="font-size: 13px;">
-              <span class="cal-hint">適用於所有 Google 行事曆提醒（早報、未收款、月底、請款日、拖款）</span>
+            </div>
+            <div class="cal-field">
+              <span class="cal-field-label">通知時間</span>
+              <div class="cal-field-input">
+                <input type="time" id="cloud-cal-morning-time" value="09:30" onchange="cloudOnCalendarConfigChange()">
+              </div>
             </div>
           </div>
 
-          <!-- v3.24.16：「通知與提醒」card 已刪除，這個提示拿掉 -->
-          <p class="cal-hint" style="margin: 6px 0;">💡 預設會推送「案件本身 + 完成未收款 / 月底 / 業主請款日 / 拖款警告 / 每日早報」。這些事件類型目前沒有獨立 toggle UI，預設全開。</p>
+          <!-- 推送內容說明（精簡） -->
+          <p class="cal-hint" style="margin: 8px 0 4px;">
+            推送：案件本身、未收款、月底、業主請款日、拖款警告、每日早報（預設全開）
+          </p>
 
-          <!-- 同步狀態 + 立即同步 -->
-          <div id="cloud-cal-sync-status" class="cal-hint" style="margin-top: 8px;">
-            尚未同步過。
+          <!-- 上次同步 + 立即同步按鈕（同一列） -->
+          <div class="cal-sync-row">
+            <span id="cloud-cal-sync-status" class="cal-hint">尚未同步過。</span>
+            <button class="btn btn-primary btn-sm" id="cloud-cal-sync-btn" onclick="cloudSyncCalendar()">立即同步</button>
           </div>
 
-          <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
-            <button class="btn btn-primary btn-sm" id="cloud-cal-sync-btn" onclick="cloudSyncCalendar()">立即同步到 Google 行事曆</button>
-          </div>
+          <!-- 建議外包專用日曆（折疊） -->
+          <details id="cloud-cal-recommend-wrap" style="margin-top: 8px;">
+            <summary class="cal-hint" style="cursor: pointer;">💡 建議建一本「外包」專用日曆</summary>
+            <div id="cloud-cal-recommend" class="cal-hint" style="margin-top: 4px; padding-left: 16px;">
+              做法：開 <a href="https://calendar.google.com" target="_blank" rel="noopener" style="color: var(--primary);">calendar.google.com</a> → 左側「其他日曆」+ 號 → 建立新日曆 → 名稱「外包」 → 回來按 🔄。
+            </div>
+          </details>
         </div>
       </div>
     </div>
 
     <!-- v3.24.16：原「📦 雲端備份歷史」card 已搬進「☁️ 雲端同步」card 內當 sub-section -->
+
+    <!-- v3.24.19：⚠️ 危險區（獨立卡，放設定頁最下面） -->
+    <div class="card collapsible collapsed card-danger" id="card-danger">
+      <div class="card-head" onclick="toggleCard('card-danger')">
+        <h3 style="color: var(--danger);">⚠️ 危險區</h3>
+        <span class="card-status" style="color: var(--danger);">不可逆操作</span>
+        <span class="toggle-arrow">▼</span>
+      </div>
+      <div class="card-body">
+        <!-- 載入範例資料 -->
+        <h4 style="font-size: 14px; margin: 4px 0;">載入範例資料</h4>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+          會覆蓋目前所有業主跟案件，僅給新使用者試水溫用。
+        </p>
+        <button class="btn btn-outline btn-sm" id="demo-btn" onclick="loadDemo()">載入範例資料</button>
+
+        <div class="section-divider"></div>
+
+        <!-- 清空所有資料 -->
+        <h4 style="font-size: 14px; margin: 4px 0; color: var(--danger);">清空所有資料</h4>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+          本機所有業主、案件、設定都會刪除（Drive 雲端的版本歷史不會動，可從那邊還原）。
+        </p>
+        <p style="font-size: 12px; margin: 8px 0 4px;">請輸入下方文字解鎖按鈕：</p>
+        <p style="color: var(--danger); font-weight: 700; font-family: monospace; font-size: 14px; margin: 4px 0;">確定清空所有資料</p>
+        <input type="text" id="danger-clear-confirm" oninput="onDangerClearConfirmInput()" placeholder="在這裡照打" style="width: 100%; max-width: 300px; padding: 6px 10px; font-family: monospace; margin-bottom: 8px;">
+        <div>
+          <button class="btn btn-danger btn-sm" id="danger-clear-btn" disabled onclick="onDangerClearConfirm()">清空所有資料（不可復原）</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 關於 -->
     <div class="settings-about" style="text-align: center; font-size: 12px; color: var(--muted); padding: 24px 0 0;">
