@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-09-v3.24.20';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-11-v3.24.21';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1319,8 +1319,9 @@ async function cloudInitTrackerFile() {
       const created = await driveCreateFile(TRACKER_FILENAME, wrapper);
       cloudSaveMeta({
         trackerFileId: created.id,
-        trackerCreatedAt: wrapper.createdAt,
-        lastSyncedAt: wrapper.lastModifiedAt,
+        trackerCreatedAt: (created && created.createdTime) || wrapper.createdAt,
+        // v3.24.21：用 Drive 回傳的 modifiedTime（避免本機時間誤差導致 version check 誤判）
+        lastSyncedAt: (created && created.modifiedTime) || wrapper.lastModifiedAt,
         lastSyncedVersion: wrapper.version,
       });
       // α2-4a：剛 push 上去的內容就是「上次成功同步的快照」
@@ -1361,10 +1362,17 @@ async function cloudInitTrackerFile() {
   // Case B：本機空白 → 自動 pull
   if (isLocalDataEmpty()) {
     applyTrackerData(result.data);
+    // v3.24.21：清掉 applyTrackerData → save() → cloudSchedulePush() 的觸發（剛 pull 完不該推回去）
+    if (cloudPushTimer) {
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = null;
+    }
+    cloudPendingChangesCount = 0;
     cloudSaveMeta({
       trackerFileId: trackerFile.id,
       trackerCreatedAt: result.meta.createdAt,
-      lastSyncedAt: result.meta.lastModifiedAt,
+      // v3.24.21：用 Drive 的 modifiedTime（list 回傳值，雲端權威時間）而非 wrapper 內 lastModifiedAt
+      lastSyncedAt: trackerFile.modifiedTime || result.meta.lastModifiedAt,
       lastSyncedVersion: result.meta.version,
     });
     // α2-4a：剛 pull 下來的內容就是「上次成功同步的快照」
@@ -1423,13 +1431,21 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
   if (result.clean) {
     // 無衝突 → 直接套用合併結果 + push 上 Drive
     applyTrackerData(result.merged);
+    // v3.24.21：清掉 applyTrackerData → save() → cloudSchedulePush() 觸發的 2 秒後重推
+    // 因為下面立刻自己 driveUpdateFile，schedule 的那一次是多餘的（避免無限迴圈推送）
+    if (cloudPushTimer) {
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = null;
+    }
+    cloudPendingChangesCount = 0;
     try {
       const wrapper = buildTrackerWrapper(remoteMeta.version);
       const updated = await driveUpdateFile(fileId, wrapper);
       cloudSaveMeta({
         trackerFileId: fileId,
         trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
-        lastSyncedAt: wrapper.lastModifiedAt,
+        // v3.24.21：用 Drive 回傳的 modifiedTime（避免本機時間 vs 雲端寫入時間誤差）
+        lastSyncedAt: (updated && updated.modifiedTime) || wrapper.lastModifiedAt,
         lastSyncedVersion: wrapper.version,
       });
       cloudSaveLastSyncedSnapshot(wrapper.data);
@@ -1876,13 +1892,20 @@ async function cloudPushNow() {
     // v3.24.15：樂觀鎖 / version check — push 前先 GET 雲端 metadata，比對 modifiedTime
     // 如果雲端有別人剛改過（例如另一台電腦推過）→ 不直接覆蓋，改觸發重 pull merge
     // 防止「電腦 A 剛推完 → 電腦 B push 用舊 base 蓋掉 A 的改動」
+    //
+    // v3.24.21 修：加 5 秒緩衝，避免「同一次推送但時間略差」誤判
+    // 原本 bug：wrapper.lastModifiedAt 是本機 build 時間、Drive modifiedTime 是寫入時間，
+    //          後者一定晚 100-500ms → version check 永遠 true → 無限迴圈推送
+    const VERSION_CHECK_BUFFER_MS = 5000;
     try {
       const fileMeta = await driveGetFileMeta(meta.trackerFileId);
       const remoteModifiedTime = fileMeta.modifiedTime;
       const lastSyncedAt = meta.lastSyncedAt;
-      // 如果雲端 modifiedTime > 我們的 lastSyncedAt → 雲端有新版（不是我們推的）→ 衝突
-      if (remoteModifiedTime && lastSyncedAt && remoteModifiedTime > lastSyncedAt) {
-        console.warn(`[cloud-push] ⚠️ 雲端版本較新 (${remoteModifiedTime} > ${lastSyncedAt})，重 pull merge 防覆蓋`);
+      // 如果雲端 modifiedTime > 我們的 lastSyncedAt + 緩衝 → 真的有別人改過
+      const remoteT = remoteModifiedTime ? new Date(remoteModifiedTime).getTime() : 0;
+      const localT = lastSyncedAt ? new Date(lastSyncedAt).getTime() : 0;
+      if (remoteT && localT && remoteT > localT + VERSION_CHECK_BUFFER_MS) {
+        console.warn(`[cloud-push] ⚠️ 雲端版本較新 (${remoteModifiedTime} > ${lastSyncedAt} + ${VERSION_CHECK_BUFFER_MS}ms)，重 pull merge 防覆蓋`);
         if (typeof logAction === 'function') {
           logAction('cloud-push-conflict-detected', {
             remoteModifiedTime, lastSyncedAt, fileId: meta.trackerFileId
@@ -1917,7 +1940,8 @@ async function cloudPushNow() {
     const wrapper = buildTrackerWrapper(meta.lastSyncedVersion || 0);
     const updated = await driveUpdateFile(meta.trackerFileId, wrapper);
     cloudSaveMeta({
-      lastSyncedAt: wrapper.lastModifiedAt,
+      // v3.24.21：用 Drive 回傳的 modifiedTime（精確到伺服器寫入時間），而非 wrapper.lastModifiedAt（本機 build 時間，會早 100-500ms）
+      lastSyncedAt: (updated && updated.modifiedTime) || wrapper.lastModifiedAt,
       lastSyncedVersion: wrapper.version,
     });
     cloudSaveLastSyncedSnapshot(wrapper.data);  // α2-4a：本機剛 push 的就是新的「上次成功同步」

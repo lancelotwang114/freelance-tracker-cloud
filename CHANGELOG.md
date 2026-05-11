@@ -1,5 +1,94 @@
 ﻿# 版本更新歷史
 
+## v3.24.21 — 🚨 修無限推送迴圈 bug（2026-05-11）
+
+### 症狀
+使用者在「重新登入並更新後」遇到 sync indicator **持續顯示「⌛ 推送中… (1)」、雲端版本號一直增加**（已到 #79+）。
+
+### 根因
+v3.24.15 加的「樂觀鎖 / version check」邏輯有時間戳不對等的 bug：
+
+```js
+const wrapper = buildTrackerWrapper(...);   // lastModifiedAt = new Date()  ← 本機 build 時間（早）
+await driveUpdateFile(fileId, wrapper);     // Drive 寫入 → modifiedTime ← 雲端寫入時間（晚 200-500ms）
+cloudSaveMeta({ lastSyncedAt: wrapper.lastModifiedAt });  // ← 用本機時間（早的那個）
+```
+
+下次 cloudPushNow 內 version check：
+```js
+const remoteModifiedTime = (await driveGetFileMeta(...)).modifiedTime;  // 雲端寫入時間（晚）
+if (remoteModifiedTime > meta.lastSyncedAt) {                          // 永遠 true！
+  await cloudResolveAndMerge(...);  // 重 pull merge
+  // applyTrackerData → save() → cloudSchedulePush() → 2 秒後又跑一次 cloudPushNow
+  // → 又觸發 version check → 又重 merge → 無限迴圈
+}
+```
+
+每次循環都會：
+- 推一次 Drive（版本 +1）
+- 浪費 Drive API quota
+- sync indicator 永遠顯示「推送中」
+
+**資料安全性**：✅ 沒有遺失（每次推的內容相同）；只是版本號累積跟資源浪費。
+
+### 修法（4 點）
+
+**1. cloudPushNow 內 push 成功後，用 Drive 回傳的 modifiedTime 更新 lastSyncedAt**
+```js
+const updated = await driveUpdateFile(meta.trackerFileId, wrapper);
+cloudSaveMeta({
+  lastSyncedAt: (updated && updated.modifiedTime) || wrapper.lastModifiedAt,
+  ...
+});
+```
+
+**2. cloudResolveAndMerge 內也用 Drive 回傳的 modifiedTime**
+同樣修法。
+
+**3. cloudInitTrackerFile Case A / B 也用 Drive 回傳的 modifiedTime**
+- Case A（建檔）：用 `created.modifiedTime` / `created.createdTime`
+- Case B（pull）：用 `trackerFile.modifiedTime`（從 driveListAppFolder 取得）
+
+**4. version check 加 5 秒緩衝**
+```js
+const VERSION_CHECK_BUFFER_MS = 5000;
+if (remoteT > localT + VERSION_CHECK_BUFFER_MS) {
+  // 真的有別人推過才觸發
+}
+```
+即使極端 race 也不誤判。
+
+**5. 防 race：cloudResolveAndMerge / Case B 內 applyTrackerData 後立刻清 push timer**
+```js
+applyTrackerData(result.merged);
+if (cloudPushTimer) {
+  clearTimeout(cloudPushTimer);
+  cloudPushTimer = null;
+}
+cloudPendingChangesCount = 0;
+```
+
+避免 applyTrackerData → save() → cloudSchedulePush() 觸發的 2 秒後重推（因為下面立刻自己推）。
+
+### 影響範圍
+- `js/app.js`：`cloudPushNow` / `cloudResolveAndMerge` / `cloudInitTrackerFile` Case A&B 邏輯修正；APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 不動的部分
+- 沒動 schema / 沒動 buildTrackerWrapper / 沒動 mergeStates / 沒動 push 觸發機制
+- cfg、cloud-meta、cloud-last-synced-snapshot 結構都沒動
+
+### 你會看到的差別
+1. 推送一次後 sync indicator 應該變綠勾「✓ 剛剛同步」，**不再持續推送**
+2. 雲端版本號（meta.lastSyncedVersion）穩定不再爆衝
+3. 即使切 tab / 重新登入也不再觸發假迴圈
+
+### 之前累積到的版本號（#79）會怎樣？
+- ✅ 都是有效的 snapshot（資料一樣）
+- ✅ Drive snapshot 列表會顯示這些
+- ✅ 可以從任一版本還原（內容都正確）
+- ✅ 不影響資料正確性
+
 ## v3.24.20 — 設定頁雲端同步 / 行事曆同步 排版優化（2026-05-09）
 
 ### 1. 行事曆同步「啟用」要先登入才能勾

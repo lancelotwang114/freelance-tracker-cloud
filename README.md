@@ -94,6 +94,7 @@
 | **v3.24.18** | **✨ UX 視覺優化八項：stat 卡顏色語意統一（綠/黃/藍/紫）+ 數字 CountUp 滾動 + 打勾微動效（綠/金光暈）+ 「⚡ 今天的重點」dashboard 卡（截止/到期/拖款/月底/拖款警告聚合）+ 案件 modal 金額千分位 hint + 日期欄位快速選擇按鈕（今天/明天/下週一/+3/+7）+ 達成目標 card 啟動同步 hide + HTML 預設 NT$0** | ✅ **完成（2026-05-09）** |
 | **v3.24.19** | **🚨 危險區獨立 + 雲端同步文字校正：「載入範例 / 清空資料」搬到設定頁最下面獨立紅色 card；「清空所有資料」改成 inline input 確認（打「確定清空所有資料」才解鎖按鈕）；雲端同步卡 9 處文字精簡** | ✅ **完成（2026-05-09）** |
 | **v3.24.20** | **🎨 設定頁同步區排版優化：(1) 行事曆同步未登入時 master toggle disabled + 黃色警告 (2) 行事曆設定改 inline + 日曆/通知時間並排 grid + 立即同步同列 + 建議外包日曆折疊 (3) 雲端同步「雲端版本歷史 / 離線資料備份」改 details 折疊（progressive disclosure）** | ✅ **完成（2026-05-09）** |
+| **v3.24.21** | **🚨 修無限推送迴圈：v3.24.15 樂觀鎖時間戳不對等 bug（本機 wrapper.lastModifiedAt vs Drive modifiedTime 差 200-500ms 永遠誤判雲端較新）→ 改用 Drive 回傳 modifiedTime + 加 5 秒緩衝；cloudResolveAndMerge / Case B 內 applyTrackerData 後清 push timer 防 race** | ✅ **完成（2026-05-11）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
