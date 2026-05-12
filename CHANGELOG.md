@@ -1,5 +1,69 @@
 ﻿# 版本更新歷史
 
+## v3.24.22 — 兩地電腦無感切換（純前端最佳化）（2026-05-11）
+
+### 你會看到的差別
+- 家裡電腦改完 → 公司電腦（沒關機、分頁沒關）切回分頁 → **自動拉新版本**，不用按「立即同步」
+- silent refresh 成功 → 自動拉雲端最新，不用手動同步
+- 電腦睡眠喚醒後 → 30 秒內自動補做 refresh + pull
+- 「重新登入」按鈕直接用上次帳號（不跳帳號選擇器）
+
+### 修法 4 點
+
+**1. silent refresh 成功後自動 pull**
+這是 bug fix：`cloudOnTokenResponse` 內 silent refresh 路徑只更新 token，**沒呼叫 init / pull**，所以家裡剛推的東西公司不會自動拉。
+修法：silent refresh 成功 → 呼叫 `cloudAutoPullThrottled()`。從 error 恢復時重設節流（立刻 pull）；正常 refresh 走 5 分鐘節流（避免狂打 API）。
+
+**2. visibilitychange / focus / pageshow 也觸發 auto pull**
+之前這三個事件只觸發 `_silentRefresh`（且只在「token 快過期」時跑）。修法：即使 token 還新，切回分頁也 throttle 後 `cloudAutoPullThrottled()` 一次。
+
+**3. 心跳偵測（catch-up 機制）**
+`setTimeout` 在電腦睡眠 / 分頁背景時會被暫停或延遲，導致 silent refresh 沒準時跑。新增 `_heartbeatTick` 每 30 秒檢查「距上次心跳的時間差」，若 > 5 分鐘 = 電腦剛醒 / tab throttle 結束 → 立刻補 refresh + pull。`setInterval` 在 throttle 下仍會跑（只是頻率降低），比 `setTimeout` 可靠。
+
+**4. requestAccessToken 帶 `hint: email`**
+`_silentRefresh` 跟 `cloudSignIn` 都帶 hint。Google OAuth 看到 hint 會直接用該帳號 refresh，**不跳帳號選擇器**。對多 Google 帳號使用者特別有感。
+
+### 預期效果（你的核心情境）
+
+```
+家裡電腦改了案件 X → push 到 Drive ✓
+                          ↓
+   隔天進公司，公司電腦沒關、瀏覽器分頁沒關
+                          ↓
+   切回分頁 / 喚醒電腦
+                          ↓
+   ① visibilitychange / focus 觸發 _checkAndRefreshIfNeeded
+   ② 若 token 過期 → _silentRefresh → 成功 → 自動 pull
+   ③ 若 token 還新 → cloudAutoPullThrottled → 自動 pull
+   ④ 心跳偵測到「距上次 > 5 分鐘」也補一次
+                          ↓
+   看到案件 X 出現在公司電腦的清單 ✓（無感）
+```
+
+### 還是會要重登的少見情境
+- Chrome 完全重啟（不只是 tab 沒關，是整個 browser process 重開）
+- Google session 真的過期（隔超過一週、Chrome 設定極嚴 / 公司 IT 強制登出）
+- 公司網路擋 Google OAuth 端點
+
+這些是 Web 純前端 Implicit Flow 的硬性限制，繞不過（除非加 backend Code Model）。
+
+### 影響範圍
+- `js/app.js`：
+  - 新增 `cloudAutoPullThrottled()` + `_lastAutoPullAt`（5 分鐘節流）
+  - 新增 `_heartbeatTick` + `setInterval`（30 秒檢查、5 分鐘睡眠閾值）
+  - 改 `_silentRefresh`：帶 hint
+  - 改 `cloudOnTokenResponse` silent refresh 路徑：成功後 auto pull
+  - 改 `_checkAndRefreshIfNeeded`：token 還新時也 auto pull
+  - 改 `cloudSignIn`：帶 hint
+  - APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 不動的部分
+- 沒動 schema、沒動 buildTrackerWrapper、沒動 mergeStates、沒動 push 邏輯
+- 沒新增 localStorage key（純記憶體節流計數器）
+- 沒違反 v3 路線圖（純前端、無後端）
+- 異地電腦同步行為更穩定
+
 ## v3.24.21 — 🚨 修無限推送迴圈 bug（2026-05-11）
 
 ### 症狀

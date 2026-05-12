@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-11-v3.24.21';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-11-v3.24.22';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -210,14 +210,19 @@ async function cloudInitGoogleAuth() {
   // v3.22.2 + v3.22.10：多重事件觸發 refresh check
   // 分頁休眠（Chrome Tab Discarding / Edge Sleeping Tabs）會讓 setTimeout 暫停，
   // 用戶切回時 token 可能已過期。三事件並用最大化覆蓋率。
+  // v3.24.22：除了 refresh，也順便 throttle 拉雲端最新（家裡推完 → 公司切回分頁自動拿）
   const _checkAndRefreshIfNeeded = (trigger) => {
     if (!cloudAuthState.accessToken || !cloudAuthState.tokenExpiresAt) return;
     const remaining = cloudAuthState.tokenExpiresAt - Date.now();
     if (remaining < REFRESH_BEFORE_EXPIRY_MS) {
       console.log(`[cloud-auth] ${trigger} → token expiring (${Math.round(remaining/60000)}min left), refresh now`);
-      _silentRefresh();
+      _silentRefresh();  // silent refresh 成功會自動 pull（v3.24.22 加的）
     } else {
       _scheduleSilentRefresh();  // 重排（覆蓋可能被休眠壓制的舊 timer）
+      // v3.24.22：即使 token 還新，也 throttle 後 auto pull 一次（5 分鐘節流，不會狂打 API）
+      if (typeof cloudAutoPullThrottled === 'function') {
+        cloudAutoPullThrottled(trigger);
+      }
     }
     cloudUpdateSyncIndicator();
   };
@@ -272,7 +277,12 @@ function cloudSignIn() {
     return;
   }
   // prompt: '' = 已授權直接放行、未授權跳同意畫面（一般情境用這個）
-  cloudAuthState.tokenClient.requestAccessToken({ prompt: '' });
+  // v3.24.22：帶 hint 加速重登 — 指定上次的 Google 帳號，避免跳出帳號選擇器
+  const hint = cloudAuthState.user && cloudAuthState.user.email;
+  cloudAuthState.tokenClient.requestAccessToken({
+    prompt: '',
+    ...(hint ? { hint } : {})
+  });
 }
 
 // ---------- v3.22.2 + v3.22.10：silent token refresh（無感續約 + 多重防護）----------
@@ -322,13 +332,58 @@ function _silentRefresh() {
   _isSilentRefreshing = true;
   console.log('[cloud-auth] silent refresh starting…');
   try {
-    cloudAuthState.tokenClient.requestAccessToken({ prompt: '' });
+    // v3.24.22：帶 hint 加速 silent refresh（指定上次的 Google 帳號，避免多帳號切換）
+    const hint = cloudAuthState.user && cloudAuthState.user.email;
+    cloudAuthState.tokenClient.requestAccessToken({
+      prompt: '',
+      ...(hint ? { hint } : {})
+    });
   } catch (e) {
     _isSilentRefreshing = false;
     console.warn('[cloud-auth] silent refresh threw:', e);
     _handleSilentRefreshFailure(e?.message || String(e));
   }
 }
+
+// v3.24.22：節流版自動拉取雲端 — 5 分鐘內最多一次
+// 觸發時機：visibilitychange / focus / silent refresh 成功 / heartbeat 偵測到睡眠喚醒
+let _lastAutoPullAt = 0;
+const AUTO_PULL_THROTTLE_MS = 5 * 60 * 1000;
+function cloudAutoPullThrottled(trigger) {
+  if (!isCloudSignedIn()) return;
+  const now = Date.now();
+  if (now - _lastAutoPullAt < AUTO_PULL_THROTTLE_MS) {
+    console.log(`[auto-pull] ${trigger}: throttled (${Math.round((now - _lastAutoPullAt)/1000)}s < 5min)`);
+    return;
+  }
+  _lastAutoPullAt = now;
+  console.log(`[auto-pull] ${trigger}: pulling…`);
+  if (typeof cloudPullNow === 'function') {
+    cloudPullNow().catch(e => console.warn('[auto-pull] failed:', e));
+  }
+}
+
+// v3.24.22：心跳偵測 — 每 30 秒檢查「距上次心跳的時間差」
+// 如果差 > 5 分鐘 = 表示電腦睡眠 / 分頁 throttle 過 → 補 silent refresh + auto pull
+// （setInterval 在背景會被 throttle 但喚醒後就會 catch up，比 setTimeout 可靠）
+let _lastHeartbeatAt = Date.now();
+const HEARTBEAT_CHECK_MS = 30 * 1000;
+const HEARTBEAT_STALE_MS = 5 * 60 * 1000;
+function _heartbeatTick() {
+  const now = Date.now();
+  const gap = now - _lastHeartbeatAt;
+  _lastHeartbeatAt = now;
+  if (gap > HEARTBEAT_STALE_MS && isCloudSignedIn()) {
+    console.log(`[heartbeat] gap=${Math.round(gap/1000)}s，電腦剛醒 / tab throttle 結束 → 補 refresh + pull`);
+    const remaining = cloudAuthState.tokenExpiresAt - now;
+    if (remaining < REFRESH_BEFORE_EXPIRY_MS) {
+      _silentRefresh();  // silent refresh 成功後會自動 pull（修法 1 加進去的）
+    } else {
+      cloudAutoPullThrottled('heartbeat-wake');
+    }
+  }
+}
+setInterval(_heartbeatTick, HEARTBEAT_CHECK_MS);
 
 // v3.22.10：silent refresh 失敗時的處理（不清 state，retry 後仍 fail 才提示）
 function _handleSilentRefreshFailure(errMsg) {
@@ -383,10 +438,20 @@ async function cloudOnTokenResponse(resp) {
     }
     _scheduleSilentRefresh();  // 排下一次 refresh
     // v3.22.10：refresh 成功時若之前是 sync error 狀態，恢復為正常
-    if (cloudSyncStatus === 'error' && typeof cloudSetSyncStatus === 'function') {
+    const wasErrorState = cloudSyncStatus === 'error';
+    if (wasErrorState && typeof cloudSetSyncStatus === 'function') {
       cloudSetSyncStatus('idle');
     }
     console.log('[cloud-auth] silent refresh ok, next refresh in ~', Math.round((expiresIn - 300) / 60), 'min');
+    // v3.24.22：silent refresh 成功 → 自動拉雲端最新（解「重登後要手動按同步」bug）
+    // 從 error 恢復的話一定要 pull；正常 refresh 也 pull（會被 5 分鐘節流擋）
+    if (typeof cloudAutoPullThrottled === 'function') {
+      if (wasErrorState) {
+        // 從錯誤恢復 → 重設節流，立刻 pull
+        _lastAutoPullAt = 0;
+      }
+      cloudAutoPullThrottled(wasErrorState ? 'silent-refresh-recover' : 'silent-refresh-ok');
+    }
     return;
   }
 

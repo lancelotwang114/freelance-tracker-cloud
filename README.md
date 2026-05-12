@@ -95,6 +95,7 @@
 | **v3.24.19** | **🚨 危險區獨立 + 雲端同步文字校正：「載入範例 / 清空資料」搬到設定頁最下面獨立紅色 card；「清空所有資料」改成 inline input 確認（打「確定清空所有資料」才解鎖按鈕）；雲端同步卡 9 處文字精簡** | ✅ **完成（2026-05-09）** |
 | **v3.24.20** | **🎨 設定頁同步區排版優化：(1) 行事曆同步未登入時 master toggle disabled + 黃色警告 (2) 行事曆設定改 inline + 日曆/通知時間並排 grid + 立即同步同列 + 建議外包日曆折疊 (3) 雲端同步「雲端版本歷史 / 離線資料備份」改 details 折疊（progressive disclosure）** | ✅ **完成（2026-05-09）** |
 | **v3.24.21** | **🚨 修無限推送迴圈：v3.24.15 樂觀鎖時間戳不對等 bug（本機 wrapper.lastModifiedAt vs Drive modifiedTime 差 200-500ms 永遠誤判雲端較新）→ 改用 Drive 回傳 modifiedTime + 加 5 秒緩衝；cloudResolveAndMerge / Case B 內 applyTrackerData 後清 push timer 防 race** | ✅ **完成（2026-05-11）** |
+| **v3.24.22** | **兩地電腦無感切換：(1) silent refresh 成功後自動 pull（修「重登後要手動同步」bug）(2) visibilitychange/focus 也 throttle 後 auto pull（家裡推 → 公司切回分頁自動拿）(3) 心跳偵測（30 秒一次，> 5 分鐘 gap = 睡眠喚醒 → 補 refresh+pull）(4) requestAccessToken 帶 hint:email 跳過帳號選擇器** | ✅ **完成（2026-05-11）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
