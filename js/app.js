@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-11-v3.24.22';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-13-v3.24.23';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -359,7 +359,8 @@ function cloudAutoPullThrottled(trigger) {
   _lastAutoPullAt = now;
   console.log(`[auto-pull] ${trigger}: pulling…`);
   if (typeof cloudPullNow === 'function') {
-    cloudPullNow().catch(e => console.warn('[auto-pull] failed:', e));
+    // v3.24.23：auto 觸發 → silent 模式，不跳 alert（race condition 時 token 失效不會打斷使用者）
+    cloudPullNow(true).catch(e => console.warn('[auto-pull] failed:', e));
   }
 }
 
@@ -650,6 +651,8 @@ function showInitOverlay() {
 function hideInitOverlay() {
   const o = document.getElementById('init-overlay');
   if (o) o.remove();
+  // v3.24.23：順手 reset init 旗標（cloudInitTrackerFile 每個 return 路徑都走這個函式）
+  if (typeof cloudInitInProgress !== 'undefined') cloudInitInProgress = false;
 }
 
 // v3.24.13：頂部紅色固定 banner — 同步失敗 / 未登入時強提示
@@ -1355,8 +1358,15 @@ function isLocalDataEmpty() {
 //     資料完全一致 → 靜默合併 + toast「✓ 已跟雲端同步」
 //     有差異但無真衝突 → 自動合併
 //     真衝突 → 跳衝突 modal 給使用者逐筆挑
+// v3.24.23：加併發保護 — cloudOnTokenResponse 跟 cloudPullNow 都可能呼叫 init，避免並發 driveList / driveCreate
+let cloudInitInProgress = false;
 async function cloudInitTrackerFile() {
   if (!isCloudSignedIn()) return;
+  if (cloudInitInProgress) {
+    console.log('[cloud-init] already in progress, skip');
+    return;
+  }
+  cloudInitInProgress = true;
 
   // v3.24.15：init 期間顯示半透明 overlay，避免使用者在 mergeStates 跑之前編輯
   // （race condition：剛改的東西可能被 merge 結果覆蓋）
@@ -1494,22 +1504,58 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
   const result = mergeStates(base, local, remoteData);
 
   if (result.clean) {
-    // 無衝突 → 直接套用合併結果 + push 上 Drive
+    // 無衝突 → 直接套用合併結果
     applyTrackerData(result.merged);
     // v3.24.21：清掉 applyTrackerData → save() → cloudSchedulePush() 觸發的 2 秒後重推
-    // 因為下面立刻自己 driveUpdateFile，schedule 的那一次是多餘的（避免無限迴圈推送）
     if (cloudPushTimer) {
       clearTimeout(cloudPushTimer);
       cloudPushTimer = null;
     }
     cloudPendingChangesCount = 0;
+
+    // v3.24.23：合併結果跟雲端完全一致 → 跳過 push 避免無謂版本 +1
+    // 比對 merged data vs remoteData（兩者都是 { clients, jobs, invoiceHistory, config } 結構）
+    let skipPush = false;
+    try {
+      const mergedJson = JSON.stringify(result.merged);
+      const remoteJson = JSON.stringify(remoteData);
+      if (mergedJson === remoteJson) {
+        skipPush = true;
+        console.log('[cloud-merge] merged === remote，跳過 push（無實際變動）');
+      }
+    } catch (_) { /* JSON 失敗 fallback 走 push */ }
+
+    if (skipPush) {
+      // 只更新本機 meta（記住已對齊到 remote 的版本，下次比對才正確）
+      cloudSaveMeta({
+        trackerFileId: fileId,
+        trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
+        lastSyncedAt: remoteMeta.lastModifiedAt,
+        lastSyncedVersion: remoteMeta.version,
+      });
+      cloudSaveLastSyncedSnapshot(remoteData);  // base 也更新成 remote
+      if (typeof logAction === 'function') {
+        logAction('cloud-merge-noop', { fileId, version: remoteMeta.version });
+      }
+      console.log('[cloud-merge] 對齊完成，無實際差異');
+      return;
+    }
+
+    // v3.24.23：搶 cloudPushInProgress 鎖，避免跟 cloudPushNow 的 driveUpdateFile 撞車
+    // 如果有 push 正在跑 → 標記 pending after，讓 push 結束後再推一次（cloudResolveAndMerge 這次跳過自己的 push）
+    if (cloudPushInProgress) {
+      cloudPushPendingAfter = true;
+      console.log('[cloud-merge] cloudPushNow 正在跑，標記 pendingAfter，本次 merge 不 push');
+      return;
+    }
+    cloudPushInProgress = true;
     try {
       const wrapper = buildTrackerWrapper(remoteMeta.version);
       const updated = await driveUpdateFile(fileId, wrapper);
       cloudSaveMeta({
         trackerFileId: fileId,
         trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
-        // v3.24.21：用 Drive 回傳的 modifiedTime（避免本機時間 vs 雲端寫入時間誤差）
+        // v3.24.21：用 Drive 回傳的 modifiedTime
         lastSyncedAt: (updated && updated.modifiedTime) || wrapper.lastModifiedAt,
         lastSyncedVersion: wrapper.version,
       });
@@ -1518,11 +1564,19 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
         logAction('cloud-merge-clean', { fileId, version: wrapper.version });
       }
       console.log(`[cloud-merge] 自動合併完成（無衝突）→ Drive 已更新到 v${wrapper.version}`);
-      // 給使用者一點視覺反饋（這條路徑包含「重新登入靜默對齊」的常見情境）
       if (typeof toast === 'function') toast('✓ 已跟雲端同步', 2500);
     } catch (e) {
       console.error('[cloud-merge] push after clean merge failed:', e);
       alert('自動合併成功但推送 Drive 失敗：' + e.message);
+    } finally {
+      cloudPushInProgress = false;
+      // v3.24.23：搶鎖期間若有 pending push，跑完釋放鎖
+      if (cloudPushPendingAfter) {
+        cloudPushPendingAfter = false;
+        setTimeout(() => {
+          cloudPushNow().catch(err => console.error('[cloud-push] pending-after async failed:', err));
+        }, 0);
+      }
     }
     return;
   }
@@ -3366,24 +3420,32 @@ function cloudRenderCalendarStatus() {
 // 使用者主動觸發：拉雲端最新版 → 走三方合併 → 推回 Drive（如果有改動）
 // UI：🔐 Google Drive 同步 卡片內「🔄 立即同步」按鈕
 
-async function cloudPullNow() {
+// v3.24.23：加併發保護（避免 visibilitychange + heartbeat + silent refresh recover 三方撞車）
+//           silent 參數：auto pull 觸發時不跳 alert（race condition 防護）
+let cloudPullInProgress = false;
+async function cloudPullNow(silent) {
+  if (cloudPullInProgress) {
+    console.log('[cloud-pull] already in progress, skip');
+    return;
+  }
   if (!isCloudSignedIn()) {
-    alert('請先登入 Google 帳號');
+    if (!silent) alert('請先登入 Google 帳號');
     return;
   }
   const meta = cloudGetMeta();
   if (!meta.trackerFileId) {
-    // 還沒 init 完成 → 改跑 init 流程（idempotent）
+    // 還沒 init 完成 → 改跑 init 流程（idempotent，內部也有併發保護）
     await cloudInitTrackerFile();
     return;
   }
 
+  cloudPullInProgress = true;
   cloudSetSyncStatus('syncing');
   try {
     const remoteText = await driveDownloadFile(meta.trackerFileId);
     const result = unwrapTracker(remoteText);
     if (!result.ok) {
-      alert('Drive 上的 tracker.json 解析失敗：' + result.error);
+      if (!silent) alert('Drive 上的 tracker.json 解析失敗：' + result.error);
       cloudSetSyncStatus('error', result.error);
       return;
     }
@@ -3411,17 +3473,24 @@ async function cloudPullNow() {
       });
       cloudSetSyncStatus('idle');
     }
+    // v3.24.23：手動 / 自動同步都更新節流時間戳，避免 5 分鐘內又被 visibilitychange 觸發
+    _lastAutoPullAt = Date.now();
   } catch (e) {
     console.error('[cloud-pull] failed:', e);
     if (typeof logAction === 'function') {
       logAction('cloud-pull-error', { error: e.message || String(e) });
     }
     cloudSetSyncStatus('error', e.message || String(e));
-    if (e instanceof DriveAuthError) {
-      alert('Drive 連線失敗，請重新登入：' + e.message);
-    } else {
-      alert('從 Drive 拉取失敗：' + e.message);
+    if (!silent) {
+      if (e instanceof DriveAuthError) {
+        alert('Drive 連線失敗，請重新登入：' + e.message);
+      } else {
+        alert('從 Drive 拉取失敗：' + e.message);
+      }
     }
+  } finally {
+    // v3.24.23：finally 確保旗標一定歸零
+    cloudPullInProgress = false;
   }
 }
 

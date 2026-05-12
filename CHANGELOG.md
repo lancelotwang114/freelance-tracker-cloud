@@ -1,5 +1,62 @@
 ﻿# 版本更新歷史
 
+## v3.24.23 — 同步併發保護 + 無變動跳過 push（2026-05-13）
+
+v3.24.22 加了多個 auto pull 觸發點（visibilitychange / heartbeat / silent refresh recover），暴露了既有架構的併發 race。本版補上完整保護 + 順手做幾個 polish。
+
+### 1. 🔴 cloudPullNow 加併發保護 + silent 參數
+**問題**：v3.24.22 三個 auto pull 觸發點可能同時觸發 cloudPullNow（毫秒內），都通過 5 分鐘節流檢查 → 三個 cloudResolveAndMerge 並發跑 → driveUpdateFile 撞車。
+
+**修法**：
+- 新增 `cloudPullInProgress` flag，入口檢查
+- 新增 `cloudPullNow(silent)` 參數 — auto 觸發 (silent=true) 時不跳 alert（避免 race 時 token 失效跳出來打斷使用者）
+
+### 2. 🔴 cloudResolveAndMerge 內 push 搶 cloudPushInProgress 鎖
+**問題**：cloudPushNow 有 `cloudPushInProgress` 保護，但 cloudResolveAndMerge 內的 `driveUpdateFile` 不認這個 flag，可能跟 cloudPushNow 並發。
+
+**修法**：cloudResolveAndMerge 內 driveUpdateFile 前後也搶 `cloudPushInProgress` 鎖：
+- 如果已被 cloudPushNow 鎖住 → 標記 `cloudPushPendingAfter` 後 return（讓 push 結束後再推一次）
+- 拿到鎖 → 跑完 driveUpdateFile → finally 釋放鎖 + 處理 pendingAfter
+
+### 3. 🟢 mergeStates 無變動跳過 push
+**問題**：mergeStates 對「兩邊資料完全一致」也回 result.clean=true，cloudResolveAndMerge 還是會 push 一次 → 版本號 +1，但沒實際變化。
+
+**修法**：cloudResolveAndMerge 用 `JSON.stringify(merged) === JSON.stringify(remoteData)` 判斷無變動 → 跳過 driveUpdateFile，只更新本機 meta + lastSyncedSnapshot 對齊到 remote。
+
+新增 logAction event：`cloud-merge-noop`
+
+### 4. 🟡 cloudInitTrackerFile 加併發保護
+**問題**：cloudOnTokenResponse 跟 cloudPullNow (trackerFileId 不存在時 fallback) 都會呼叫 init，可能並發。
+
+**修法**：新增 `cloudInitInProgress` flag。在 `hideInitOverlay()` 內順手 reset（所有 return 路徑都走這個函式，不用每個 return 都改）。
+
+### 5. 🟡 cloudPullNow 完成後也更新 `_lastAutoPullAt`
+**問題**：使用者按完「立即同步」後 1 分鐘切回分頁，visibilitychange 還是會再 throttle 後 auto pull 一次（多餘）。
+
+**修法**：cloudPullNow finally 區塊更新 `_lastAutoPullAt = Date.now()`。
+
+### 影響範圍
+- `js/app.js`：
+  - 新增 `cloudPullInProgress` / `cloudInitInProgress` 兩個 flag
+  - `cloudPullNow(silent)` 加參數 + try/finally 包裹 + alert 全部加 `if (!silent)` 防護
+  - `cloudResolveAndMerge` 內 clean merge 路徑：先比對 merged vs remote 跳過 noop push、再搶 cloudPushInProgress 鎖、finally 釋放
+  - `cloudInitTrackerFile` 入口檢查 + cloudInitInProgress=true
+  - `hideInitOverlay` 內 reset cloudInitInProgress
+  - `cloudAutoPullThrottled` 改用 `cloudPullNow(true)` silent 模式
+  - APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 你會看到的差別
+1. 雲端版本號不再每次 visibilitychange / focus 都 +1 — **只有真有變動才 push**
+2. silent refresh + visibilitychange + heartbeat 三方同時觸發也不會撞車
+3. token 失效 race 時自動 pull 安靜失敗（log 而非 alert），不打斷使用者
+4. 操作日誌新增 `cloud-merge-noop` event，可以從那邊看到「對齊但沒實際變動」的次數
+
+### 不動的部分
+- 沒動 schema / buildTrackerWrapper / mergeStates / push 觸發機制
+- 沒新增 localStorage key
+- 沒違反 v3 純前端原則
+
 ## v3.24.22 — 兩地電腦無感切換（純前端最佳化）（2026-05-11）
 
 ### 你會看到的差別
