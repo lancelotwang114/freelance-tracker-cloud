@@ -1,5 +1,69 @@
 ﻿# 版本更新歷史
 
+## v3.24.27 — silent refresh 卡死保護 + 訊息友善化（2026-05-13）
+
+### 背景
+使用者澄清「電腦沒睡眠、分頁沒睡眠」也看到紅 banner「未登入 Google 或 access token 已過期，請先登入」。
+
+→ 表示 v3.24.26 的「睡眠喚醒 race」假設不適用。重新診斷，這版針對另外三個可能根因。
+
+### 修法
+
+#### 1. `_silentRefresh` 加 safety timer（修 GIS SDK 卡住）
+**情境**：silent refresh 觸發 `requestAccessToken({prompt: ''})` 後 GIS SDK 因網路 / 內部 bug 永遠不 callback → `_isSilentRefreshing` 永遠卡 true → 後續所有 silent refresh 被擋掉 → token 永遠不會更新。
+
+**修法**：
+- 新增 `_silentRefreshSafetyTimer` + `SILENT_REFRESH_SAFETY_TIMEOUT_MS = 30 * 1000`
+- 觸發 silent refresh 時排 30 秒 safety timer
+- 30 秒沒收到 callback → 強制 `_isSilentRefreshing = false` + 走 `_handleSilentRefreshFailure` 重試流程
+- `cloudOnTokenResponse` 內 callback 來了就清掉 safety timer
+
+#### 2. DriveAuthError 訊息友善化（修 banner 嚇人）
+**之前**：技術訊息「未登入 Google 或 access token 已過期，請先登入」、「access token 已失效或缺少新 scope，請登出再登入」
+**現在**：行動指示「**Google 連線需要重新整理，請點右上角『重新登入』**」
+
+統一一致，使用者看到就知道要做什麼，不會被「access token」「scope」這種技術詞嚇到。
+
+#### 3. `ensureValidToken` timeout 從 15s → 30s
+之前 15 秒太短，silent refresh 失敗 + 3 次指數退避 retry 總共要 35 秒，timeout 不夠用。延長到 30 秒，給 retry 充分時間。
+
+### 影響範圍
+- `js/app.js`：
+  - `_silentRefresh` 加 safety timer 邏輯
+  - `cloudOnTokenResponse` 內清 safety timer
+  - `ensureValidToken` timeout 預設值 15000 → 30000
+  - `driveFetch` 兩處 DriveAuthError 訊息改友善化
+  - APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 不動的部分
+- 沒動 schema / push 邏輯 / pull 邏輯 / mergeStates
+- 沒動 silent refresh 觸發機制（visibilitychange / focus / heartbeat 等）
+- 沒新增 localStorage key
+
+### 你會看到的差別
+1. **如果 silent refresh 真的失敗**（Google session 過期、Web 純前端 Implicit Flow 硬性限制） → banner 變成友善訊息「Google 連線需要重新整理，請點右上角『重新登入』」，**而不是嚇人的「access token 已過期」**
+2. **如果 GIS SDK 卡住**（極罕見） → 30 秒後自動 force reset，不會永遠卡死
+3. silent refresh 失敗 retry 3 次有充分時間（35 秒）跑完，ensureValidToken 也等夠久
+
+### 仍然要重登的情境（Web 純前端硬性限制）
+即使這版加了多重保護，下面這些情境**還是要重登一次**：
+- Chrome 完全重啟（不只 tab）
+- Google session 真過期（公司 IT 政策 / 隔超過特定時間）
+- 公司網路擋 Google OAuth 端點
+
+這些是 GIS Token Client (Implicit Flow) 的本質限制，繞不過（除非加 backend + Code Model）。
+
+### 同步鐵則 self-review 8 項 ✅
+1. 新觸發點會跟既有路徑撞車嗎？— 沒新加觸發點
+2. 每個 mutable 入口都有併發保護嗎？— `_isSilentRefreshing` + `_silentRefreshSafetyTimer` 雙重保險
+3. 時間戳更新邏輯一致嗎？— 沒動
+4. 失敗路徑會打斷使用者嗎？— 訊息友善化反而提升 UX
+5. finally 區塊清理乾淨嗎？— safety timer 在 callback / catch 都會清
+6. 無變動還會 push 嗎？— 沒動 push
+7. 新加的 setTimeout 在睡眠 throttle 下會失靈嗎？— safety timer 在睡眠下會延遲，但 heartbeat 會 catch up
+8. 異地兩台電腦同時操作場景跑得過嗎？— 沒動同步邏輯
+
 ## v3.24.26 — 🚨 修「睡眠喚醒後紅 banner 誤觸發」bug（2026-05-13）
 
 ### 症狀

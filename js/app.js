@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-13-v3.24.26';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-13-v3.24.27';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -326,6 +326,11 @@ function _scheduleSilentRefresh() {
   }
 }
 
+// v3.24.27：silent refresh safety timer — 30 秒沒收到 callback 就強制 reset
+// 防護「GIS SDK 因網路 / 內部 bug 卡住不 callback」造成 _isSilentRefreshing 永遠 true
+let _silentRefreshSafetyTimer = null;
+const SILENT_REFRESH_SAFETY_TIMEOUT_MS = 30 * 1000;
+
 function _silentRefresh() {
   if (!cloudAuthState.tokenClient) {
     console.warn('[cloud-auth] silent refresh skipped: tokenClient not ready');
@@ -337,6 +342,15 @@ function _silentRefresh() {
   }
   _isSilentRefreshing = true;
   console.log('[cloud-auth] silent refresh starting…');
+  // v3.24.27：safety timer — 30 秒沒 callback 視為 GIS 卡住，強制 reset 才能再試
+  if (_silentRefreshSafetyTimer) clearTimeout(_silentRefreshSafetyTimer);
+  _silentRefreshSafetyTimer = setTimeout(() => {
+    if (_isSilentRefreshing) {
+      console.warn('[cloud-auth] silent refresh stuck 30s，force reset 旗標');
+      _isSilentRefreshing = false;
+      _handleSilentRefreshFailure('GIS SDK 30 秒沒回應，可能網路問題');
+    }
+  }, SILENT_REFRESH_SAFETY_TIMEOUT_MS);
   try {
     // v3.24.22：帶 hint 加速 silent refresh（指定上次的 Google 帳號，避免多帳號切換）
     const hint = cloudAuthState.user && cloudAuthState.user.email;
@@ -346,6 +360,10 @@ function _silentRefresh() {
     });
   } catch (e) {
     _isSilentRefreshing = false;
+    if (_silentRefreshSafetyTimer) {
+      clearTimeout(_silentRefreshSafetyTimer);
+      _silentRefreshSafetyTimer = null;
+    }
     console.warn('[cloud-auth] silent refresh threw:', e);
     _handleSilentRefreshFailure(e?.message || String(e));
   }
@@ -420,6 +438,11 @@ async function cloudOnTokenResponse(resp) {
   // v3.22.2：抓 silent refresh flag 後立刻清，避免後續流程誤判
   const wasSilentRefresh = _isSilentRefreshing;
   _isSilentRefreshing = false;
+  // v3.24.27：GIS callback 來了 → 清 safety timer（避免 30 秒後誤觸發 force reset）
+  if (_silentRefreshSafetyTimer) {
+    clearTimeout(_silentRefreshSafetyTimer);
+    _silentRefreshSafetyTimer = null;
+  }
 
   if (resp.error) {
     console.error('[cloud-auth] token error:', resp);
@@ -895,9 +918,10 @@ function isCloudSignedIn() {
 }
 
 // v3.24.26：確保 access token 仍有效，無效則主動觸發 silent refresh 並等待結果
+// v3.24.27：timeout 從 15s 延長到 30s，給 silent refresh 失敗 + 3 次指數退避 retry（總 35s）足夠時間
 // 修「電腦睡眠喚醒後 silent refresh 還沒完成、driveFetch 就先 throw → 紅 banner 誤觸發」bug
 // 用法：在 driveFetch 入口呼叫，token 無效就 await refresh 完成再繼續
-async function ensureValidToken(timeoutMs = 15000) {
+async function ensureValidToken(timeoutMs = 30000) {
   if (getValidAccessToken()) return true;
   // 沒登入 / SDK 沒 ready → 不能 refresh
   if (!cloudAuthState.user || !cloudAuthState.tokenClient) return false;
@@ -1015,21 +1039,21 @@ class DriveAuthError extends Error {
 async function driveFetch(url, options = {}) {
   let token = getValidAccessToken();
   if (!token) {
-    // v3.24.26：先等 silent refresh 把 token 補上（最多等 15 秒）
+    // v3.24.26：先等 silent refresh 把 token 補上
+    // v3.24.27：訊息改成行動指示（之前「access token 已過期」是技術術語，使用者看了不知道要做啥）
     const ok = await ensureValidToken();
     if (!ok) {
-      throw new DriveAuthError('未登入 Google 或 access token 已過期，請先登入');
+      throw new DriveAuthError('Google 連線需要重新整理，請點右上角「重新登入」');
     }
     token = getValidAccessToken();
     if (!token) {
-      // ensureValidToken 回 true 但 token 還是無效（極罕見的 race）
-      throw new DriveAuthError('refresh 後仍拿不到有效 access token');
+      throw new DriveAuthError('Google 連線需要重新整理，請點右上角「重新登入」');
     }
   }
   const headers = new Headers(options.headers || {});
   headers.set('Authorization', 'Bearer ' + token);
   const r = await fetch(url, { ...options, headers });
-  if (r.status === 401) throw new DriveAuthError('access token 已失效或缺少新 scope，請登出再登入');
+  if (r.status === 401) throw new DriveAuthError('Google 連線需要重新整理，請點右上角「重新登入」');
   if (r.status === 403) {
     // 403 通常是 API 在 GCP 沒啟用、或 quota 超過。Google 的錯誤訊息含啟用連結，直接傳給 caller
     let msg = 'Google API 403：權限不足或 API 未啟用';
