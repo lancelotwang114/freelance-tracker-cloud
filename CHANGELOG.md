@@ -1,5 +1,82 @@
 ﻿# 版本更新歷史
 
+## v3.24.29 — 修每天跳衝突 modal 的 bug（base=null 自動視為 local，雲端優先）（2026-05-13）
+
+### 問題現象
+使用者每天開電腦（家裡↔公司切換）都會跳「資料衝突」modal，例如顯示「5 筆衝突，案件 ta5cvel8 有 3 個欄位差異（日期 / 詳情 / 金額）」。但其實前一天明明在另一台電腦改完，本機這台從未動過——根本沒有真正的衝突。
+
+### 根本原因
+診斷指令確認：`localStorage['cloud-last-synced-snapshot'] === null`
+
+也就是說 `cloudGetLastSyncedSnapshot()` 拿不到「上次同步時的快照」（base）。原因可能是：
+1. 歷史 v3.24.x 同步事故期間，snapshot 沒寫入或被清掉
+2. localStorage 被瀏覽器清理
+3. 早期版本不存 snapshot
+
+當 `base = null` 進到 `mergeStates` 後：
+```
+baseObj = base || {} = {}
+bV = baseObj[field] = undefined
+lChanged = (lV !== bV) → true  // 因 bV undefined，差異一定成立
+rChanged = (rV !== bV) → true  // 同上
+→ 雙方都改 → 誤判為衝突 → 開 modal
+```
+
+每個本機 vs 雲端不同的欄位都會被當成衝突，就算其實只是另一台改完還沒同步下來而已。
+
+### 修正
+
+#### Fix 1：mergeStates 加 base=null 自動降級為 base=local
+```js
+function mergeStates(base, local, remote) {
+  if (!base) {
+    console.warn('[mergeStates] base=null → 自動視為 base=local（雲端優先）');
+    base = local;
+  }
+  // ...
+}
+```
+
+效果：
+- 本機沒改的欄位：`lV === bV` → lChanged=false；如果雲端有改 → 採雲端值（rChanged=true）
+- 本機獨有的案件 / 欄位：保留（不會被砍）
+- 雲端獨有的案件 / 欄位：補進來（一樣會 merge）
+- 結果：**雲端版本權威**，本機只獨有的東西不丟失
+
+對應使用者原話：「**基本上只要有上傳到雲端 就抓雲端版本**」
+
+#### Fix 2：cloudInitTrackerFile 結尾偵測 base=null 主動 cloudPullNow
+即使 Fix 1 擋住誤判，base=null 的根本狀態仍需要修復。在 init 跑完所有路徑後（hideInitOverlay 之後）加：
+```js
+if (isCloudSignedIn() && !cloudGetLastSyncedSnapshot()) {
+  console.warn('[cloud-init] 偵測到 base=null，主動 cloudPullNow 重建同步基準');
+  if (typeof toast === 'function') toast('💡 同步基準重建中，對齊雲端…', 3000);
+  cloudPullNow(true).catch(e => console.error('[cloud-init] base 重建 pull failed:', e));
+}
+```
+
+效果：主動補一次 pull，把雲端版本當成新的 base 存進 localStorage。下一個操作週期就有正確基準了。
+
+### 不做的選項
+- ❌ Fix 3：手動「重置同步基準」按鈕——使用者明確拒絕「先做 1、2 就好」
+
+### 對使用者體驗的影響
+- 每天開電腦不再跳衝突 modal（除非真的兩邊都改了不同欄位）
+- 跨裝置切換流暢度顯著提升
+- 不再被「衝突解決」打斷工作流
+
+### 影響範圍
+- `js/app.js`：`mergeStates`（line ~2028）加 base=null guard；`cloudInitTrackerFile`（line ~1581）結尾加 base=null detect + pull
+- `index.html`：meta version → v3.24.29
+- `service-worker.js`：CACHE_VERSION → v3.24.29
+
+### 沿用先前的鐵則
+- 改動同步機制 → 必跑「同步機制改完 self-review 8 項」（CLAUDE.md）
+- 不引入新的本機獨佔 localStorage 業務資料
+- 不繞過 buildTrackerWrapper / save() 路徑
+
+---
+
 ## v3.24.28 — 純前端極致 silent refresh（最大化降低重登機率）（2026-05-13）
 
 ### 背景

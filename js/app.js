@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-13-v3.24.28';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-13-v3.24.29';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1578,6 +1578,18 @@ async function cloudInitTrackerFile() {
 
   // v3.24.15：所有路徑都跑完了 → 關 overlay
   if (typeof hideInitOverlay === 'function') hideInitOverlay();
+
+  // v3.24.29：init 跑完仍偵測到 base=null（snapshot 沒寫進去）→ 主動 cloudPullNow 重建基準
+  // 背景：歷史同步事故 / localStorage 被清，cloud-last-synced-snapshot 為 null
+  //       即便 Fix 1（mergeStates base=null 自動視 local）已擋住誤判，
+  //       這層安全網確保下一個操作週期前 base 一定會被補齊。
+  if (isCloudSignedIn() && !cloudGetLastSyncedSnapshot()) {
+    console.warn('[cloud-init] 偵測到 base=null，主動 cloudPullNow 重建同步基準');
+    if (typeof toast === 'function') toast('💡 同步基準重建中，對齊雲端…', 3000);
+    if (typeof cloudPullNow === 'function') {
+      cloudPullNow(true).catch(e => console.error('[cloud-init] base 重建 pull failed:', e));
+    }
+  }
 }
 
 // ---------- 衝突解決 modal（α2-4b）----------
@@ -2026,6 +2038,17 @@ function _cloudMergeConfig(base, local, remote) {
 // 主入口：對 { clients, jobs, config } 三方合併
 // 回傳：{ merged, conflicts, clean }
 function mergeStates(base, local, remote) {
+  // v3.24.29：base=null 自動視為 base=local（避免每天跳衝突 modal）
+  // 背景：歷史同步事故 / localStorage 被清，cloud-last-synced-snapshot 為 null
+  //       原本 baseObj = {} → bV = undefined → 每個欄位都被誤判為「兩邊都改過」
+  //       → 觸發 cloudShowConflictModal，每天開電腦都被打斷
+  // 修法：base = local 後，lChanged 一律 false，rChanged 為真才採 remote
+  //       → 等效於「雲端版本權威，本機獨有的欄位 / 案件保留」
+  //       使用者原話：「基本上只要有上傳到雲端 就抓雲端版本」
+  if (!base) {
+    console.warn('[mergeStates] base=null → 自動視為 base=local（避免誤判全欄位衝突，雲端優先）');
+    base = local;
+  }
   const baseData = base || {};
   const c = _cloudMergeEntityList('client', baseData.clients, local.clients, remote.clients);
   const j = _cloudMergeEntityList('job', baseData.jobs, local.jobs, remote.jobs);
