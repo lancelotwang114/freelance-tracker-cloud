@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-13-v3.24.27';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-13-v3.24.28';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -197,7 +197,8 @@ async function cloudInitGoogleAuth() {
     // v3.22.10：啟動時若 token 剩不到 30 分鐘，主動先 refresh 一次（不等 setTimeout）
     // 防護「user 上次離開時 token 還有時間，但離開期間電腦睡眠 / 分頁休眠」的情境
     const remainingOnBoot = cloudAuthState.tokenExpiresAt - Date.now();
-    const PROACTIVE_REFRESH_THRESHOLD = 30 * 60 * 1000; // 30 分鐘
+    // v3.24.28：啟動主動 refresh 門檻從 30 分鐘放寬到 45 分鐘，更積極預防 token 過期
+    const PROACTIVE_REFRESH_THRESHOLD = 45 * 60 * 1000; // 45 分鐘
     if (remainingOnBoot < PROACTIVE_REFRESH_THRESHOLD) {
       console.log(`[cloud-auth] boot: token has ${Math.round(remainingOnBoot/60000)}min left, refresh now`);
       _silentRefresh();
@@ -299,7 +300,8 @@ function cloudSignIn() {
 //   2. 失敗 retry 1 次（5 秒後）
 //   3. 失敗時不清 cloudAuthState，避免「無預警閃登出」— 改顯示 sync error，user 主動點重登
 //   4. 加詳細 console log，方便 user F12 自己看
-const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 過期前 5 分鐘預先 refresh
+// v3.24.28：時機提前到過期前 15 分鐘（之前 5 分鐘）— 讓 retry 有更多時間，降低重登機率
+const REFRESH_BEFORE_EXPIRY_MS = 15 * 60 * 1000; // 過期前 15 分鐘預先 refresh
 // v3.24.25：指數退避陣列（覆蓋 35 秒總長，能挺過更長的網路抖動）
 // 之前固定 5 秒 × 1 次太保守，網路抖動就跳紅 banner；改成 5s → 10s → 20s 共 3 次
 const REFRESH_RETRY_DELAYS_MS = [5000, 10000, 20000];
@@ -409,6 +411,21 @@ function _heartbeatTick() {
   }
 }
 setInterval(_heartbeatTick, HEARTBEAT_CHECK_MS);
+
+// v3.24.28：periodic refresh check — 每 20 分鐘背景檢查 token 還剩多少
+// 即使 visibilitychange / focus / heartbeat 都沒觸發，這個會主動跑
+// 目的：把「重登頻率」降到最低（純前端的極致）
+const PERIODIC_REFRESH_CHECK_MS = 20 * 60 * 1000;
+const PERIODIC_REFRESH_THRESHOLD = 30 * 60 * 1000;  // 剩 < 30 分鐘就主動 refresh
+function _periodicRefreshCheck() {
+  if (!isCloudSignedIn() || !cloudAuthState.tokenExpiresAt) return;
+  const remaining = cloudAuthState.tokenExpiresAt - Date.now();
+  if (remaining < PERIODIC_REFRESH_THRESHOLD) {
+    console.log(`[cloud-auth] periodic check: token ${Math.round(remaining/60000)}min left → 主動 refresh`);
+    _silentRefresh();
+  }
+}
+setInterval(_periodicRefreshCheck, PERIODIC_REFRESH_CHECK_MS);
 
 // v3.22.10：silent refresh 失敗時的處理（不清 state，retry 後仍 fail 才提示）
 // v3.24.25：指數退避（5s → 10s → 20s），總共 3 次 retry 容忍 35 秒網路抖動

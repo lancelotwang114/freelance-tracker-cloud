@@ -1,5 +1,79 @@
 ﻿# 版本更新歷史
 
+## v3.24.28 — 純前端極致 silent refresh（最大化降低重登機率）（2026-05-13）
+
+### 背景
+使用者明確表態「我希望盡量避免被登出要重新登入」（已寫進 memory）。純前端 Implicit Flow **不可能 100% 避免**（Google session 過期就是要重登），但可以把機率降到最低。
+
+### 三個更積極的策略
+
+#### 1. silent refresh 時機提前：過期前 5 分鐘 → 過期前 15 分鐘
+**之前**：token 剩 5 分鐘才 refresh。如果 refresh 失敗 + 3 次指數退避 retry（總 35 秒），運氣不好 token 在 retry 期間就過期。
+
+**現在**：剩 15 分鐘就 refresh，給整整 15 分鐘的 retry 窗口。即使連續多次失敗也有充分時間補回來。
+
+#### 2. 啟動主動 refresh 門檻放寬：30 分鐘 → 45 分鐘
+**之前**：啟動時 token 剩 < 30 分鐘才立刻 refresh。
+**現在**：剩 < 45 分鐘就立刻 refresh，更積極預防。
+
+#### 3. 新增 periodic refresh check（每 20 分鐘背景跑一次）
+**之前**：silent refresh 只在這些時機觸發：
+- 過期前 setTimeout
+- visibilitychange / focus / pageshow
+- heartbeat 偵測睡眠喚醒
+
+**現在**：再加一個獨立的 setInterval，每 20 分鐘**主動**檢查 token 還剩多少。如果剩 < 30 分鐘 → 立刻 refresh。即使使用者一直沒切 tab、沒切視窗、電腦沒睡眠，也會定期主動更新。
+
+```js
+const PERIODIC_REFRESH_CHECK_MS = 20 * 60 * 1000;
+const PERIODIC_REFRESH_THRESHOLD = 30 * 60 * 1000;
+function _periodicRefreshCheck() {
+  if (!isCloudSignedIn()) return;
+  const remaining = cloudAuthState.tokenExpiresAt - Date.now();
+  if (remaining < PERIODIC_REFRESH_THRESHOLD) _silentRefresh();
+}
+setInterval(_periodicRefreshCheck, PERIODIC_REFRESH_CHECK_MS);
+```
+
+### 對使用者體驗的影響
+
+#### 不影響操作
+silent refresh 是純背景 `requestAccessToken({prompt: ''})` 呼叫：
+- 沒有彈窗
+- 沒有頁面跳轉
+- 沒有 UI 變化（最多 sync indicator pill 短暫顯示「⌛」< 1 秒）
+- 使用者打字、編輯 modal、拖曳、按按鈕都不會被打斷
+
+#### 預期效果
+- 「重登」事件從「每 1-3 天一次」降到「**只在 Google session 真的過期才會發生**」（純前端的極致）
+- 一般情境下 silent refresh 永遠在後台無感運作
+
+### 仍然會重登的情境（純前端 Implicit Flow 硬性限制）
+- Chrome 完全重啟（不只 tab）
+- Google session 真過期（公司 IT 政策強制登出 / 隔超過 Google 安全策略時間）
+- 公司網路擋 Google OAuth 端點
+- 使用者主動在 myaccount.google.com 登出
+
+**真正 100% 避免重登**只能：(a) 加 Cloudflare Worker backend + Code Model（拿 refresh_token） (b) Capacitor wrap 成 Android app（用 Google Sign-In SDK）
+
+### 影響範圍
+- `js/app.js`：
+  - REFRESH_BEFORE_EXPIRY_MS：5 分鐘 → 15 分鐘
+  - PROACTIVE_REFRESH_THRESHOLD（啟動）：30 分鐘 → 45 分鐘
+  - 新增 PERIODIC_REFRESH_CHECK_MS（20 分鐘）+ `_periodicRefreshCheck` + `setInterval`
+  - APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 同步鐵則 self-review 8 項 ✅
+1. 新觸發點會跟既有路徑撞車嗎？— `_periodicRefreshCheck` 內呼叫 `_silentRefresh`，已有 `_isSilentRefreshing` 防併發
+2. 每個 mutable 入口都有併發保護嗎？— silent refresh flag + safety timer 雙重保險
+3. 時間戳更新邏輯一致嗎？— 沒動
+4. 失敗路徑會打斷使用者嗎？— periodic check 失敗只 log，不打斷
+5. finally 區塊清理乾淨嗎？— 沒新 finally
+6. 無變動還會 push 嗎？— 沒動 push
+7. 新加的 setTimeout 在睡眠 throttle 下會失靈嗎？— **這是 setInterval**，throttle 但會 catch up；醒來時 heartbeat 也會補做
+8. 異地兩台電腦同時操作場景跑得過嗎？— 沒動同步邏輯
+
 ## v3.24.27 — silent refresh 卡死保護 + 訊息友善化（2026-05-13）
 
 ### 背景

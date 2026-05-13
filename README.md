@@ -101,6 +101,7 @@
 | **v3.24.25** | **silent refresh 強化：(1) 修「成功後 retry timer 沒清」造成多餘 silent refresh (2) MAX_REFRESH_RETRIES 1→3 容忍網路抖動 (3) 改指數退避 5s→10s→20s 總共 35 秒重試窗口** | ✅ **完成（2026-05-13）** |
 | **v3.24.26** | **🚨 修「睡眠喚醒後紅 banner 誤觸發」bug：driveFetch 進入時 token 無效 → 立刻 throw 比 silent refresh 完成早 → 跳紅 banner 嚇人。修法：新增 ensureValidToken async helper，driveFetch 入口先 await 等 silent refresh 完成（最多 15 秒）才 throw。所有 driveFetch 呼叫者（push/pull/init/calendar）都自動受惠** | ✅ **完成（2026-05-13）** |
 | **v3.24.27** | **silent refresh 卡死保護 + 訊息友善化：(1) `_silentRefresh` 加 30 秒 safety timer 防 GIS SDK 不 callback 卡死 (2) DriveAuthError 訊息從技術術語「access token 已過期」改成行動指示「Google 連線需要重新整理，請點右上角『重新登入』」 (3) ensureValidToken timeout 15s→30s 給 silent refresh 失敗+3 次 retry 充分時間** | ✅ **完成（2026-05-13）** |
+| **v3.24.28** | **純前端極致 silent refresh（最大化降低重登機率）：(1) silent refresh 時機提前 5min→15min 給充分 retry 窗口 (2) 啟動主動 refresh 門檻 30min→45min (3) 新增 periodic refresh check 每 20 分鐘背景主動檢查（即使使用者一直停留同一分頁、電腦沒睡眠也會跑）** | ✅ **完成（2026-05-13）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
