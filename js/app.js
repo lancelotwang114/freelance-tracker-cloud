@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-13-v3.24.24';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-13-v3.24.25';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -300,8 +300,10 @@ function cloudSignIn() {
 //   3. 失敗時不清 cloudAuthState，避免「無預警閃登出」— 改顯示 sync error，user 主動點重登
 //   4. 加詳細 console log，方便 user F12 自己看
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 過期前 5 分鐘預先 refresh
-const REFRESH_RETRY_DELAY_MS = 5 * 1000;        // 失敗 5 秒後重試
-const MAX_REFRESH_RETRIES = 1;                  // 最多重試 1 次
+// v3.24.25：指數退避陣列（覆蓋 35 秒總長，能挺過更長的網路抖動）
+// 之前固定 5 秒 × 1 次太保守，網路抖動就跳紅 banner；改成 5s → 10s → 20s 共 3 次
+const REFRESH_RETRY_DELAYS_MS = [5000, 10000, 20000];
+const MAX_REFRESH_RETRIES = REFRESH_RETRY_DELAYS_MS.length;  // 3
 let _silentRefreshTimer = null;
 let _silentRefreshRetryTimer = null;
 let _isSilentRefreshing = false;  // 區分手動登入 vs 背景 refresh
@@ -391,12 +393,14 @@ function _heartbeatTick() {
 setInterval(_heartbeatTick, HEARTBEAT_CHECK_MS);
 
 // v3.22.10：silent refresh 失敗時的處理（不清 state，retry 後仍 fail 才提示）
+// v3.24.25：指數退避（5s → 10s → 20s），總共 3 次 retry 容忍 35 秒網路抖動
 function _handleSilentRefreshFailure(errMsg) {
   if (_silentRefreshRetries < MAX_REFRESH_RETRIES) {
+    const delay = REFRESH_RETRY_DELAYS_MS[_silentRefreshRetries] || REFRESH_RETRY_DELAYS_MS[REFRESH_RETRY_DELAYS_MS.length - 1];
     _silentRefreshRetries++;
-    console.log(`[cloud-auth] silent refresh retry #${_silentRefreshRetries} in ${REFRESH_RETRY_DELAY_MS/1000}s`);
+    console.log(`[cloud-auth] silent refresh retry #${_silentRefreshRetries}/${MAX_REFRESH_RETRIES} in ${delay/1000}s`);
     if (_silentRefreshRetryTimer) clearTimeout(_silentRefreshRetryTimer);
-    _silentRefreshRetryTimer = setTimeout(_silentRefresh, REFRESH_RETRY_DELAY_MS);
+    _silentRefreshRetryTimer = setTimeout(_silentRefresh, delay);
     return;
   }
   // 重試也失敗 → 通知 user 但不清 state（避免閃登出）
@@ -434,6 +438,11 @@ async function cloudOnTokenResponse(resp) {
   cloudAuthState.tokenExpiresAt = Date.now() + expiresIn * 1000;
   // v3.22.10：成功 → retry 計數歸零
   _silentRefreshRetries = 0;
+  // v3.24.25：成功時也清掉 retry timer，避免之前失敗排的 retry timer 在成功後 5-20 秒又跑一次多餘的 silent refresh
+  if (_silentRefreshRetryTimer) {
+    clearTimeout(_silentRefreshRetryTimer);
+    _silentRefreshRetryTimer = null;
+  }
 
   // v3.22.2：silent refresh 只更新 token + 持久化，不要重抓 userinfo / 不要重跳 calendar prompt
   if (wasSilentRefresh) {

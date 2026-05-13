@@ -1,5 +1,67 @@
 ﻿# 版本更新歷史
 
+## v3.24.25 — silent refresh 強化（容忍網路抖動 + 清乾淨 timer）（2026-05-13）
+
+### 主動 audit 發現的問題
+
+#### 1. 🔴 silent refresh 成功時沒清 `_silentRefreshRetryTimer`
+**情境**：
+1. token 接近過期 → silent refresh 跑 → 失敗（網路抖動）
+2. `_handleSilentRefreshFailure` 排 retry timer
+3. 5 秒過去前，使用者切回分頁 → visibilitychange → `_silentRefresh` → 這次成功
+4. 成功路徑只清了計數器、**沒清 retry timer**
+5. 5 秒後 retry timer fire → 又跑一次多餘的 silent refresh
+
+**修法**：`cloudOnTokenResponse` 拿到 token 成功路徑也 `clearTimeout(_silentRefreshRetryTimer)`。
+
+#### 2. 🟡 `MAX_REFRESH_RETRIES = 1` 太保守
+**問題**：連續失敗 1 次就跳紅 banner。但網路抖動、Google API 短暫 503、DNS 慢都會誤觸發。
+
+**修法**：改成 3 次。
+
+#### 3. 🟡 retry 間隔固定 5 秒 → 改指數退避
+**問題**：5 秒不夠覆蓋 10 秒級網路斷線；固定間隔也容易跟對方暫時故障的恢復節奏不同步。
+
+**修法**：改成陣列 `[5000, 10000, 20000]`：
+- 第 1 次 retry 在 5 秒後
+- 第 2 次 retry 在 10 秒後
+- 第 3 次 retry 在 20 秒後
+- 總共 35 秒重試窗口，能挺過多數網路抖動
+
+3 次都失敗才跳「請重新登入」紅 banner。
+
+### 影響範圍
+- `js/app.js`：
+  - 移除 `REFRESH_RETRY_DELAY_MS` 常數
+  - 新增 `REFRESH_RETRY_DELAYS_MS` 陣列（指數退避）
+  - `MAX_REFRESH_RETRIES = REFRESH_RETRY_DELAYS_MS.length`（3）
+  - `_handleSilentRefreshFailure` 從陣列取對應延遲
+  - `cloudOnTokenResponse` 成功路徑加 `clearTimeout(_silentRefreshRetryTimer)`
+  - APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 不動的部分
+- 沒動觸發機制（visibilitychange / focus / pageshow / heartbeat 都保留）
+- 沒動 hint:email 邏輯
+- 沒動 auto pull 邏輯
+- 沒動 token 過期前 5 分鐘預先 refresh
+- 沒動 schema / push / pull / merge
+
+### 你會看到的差別
+- **網路偶爾抖動不再立刻跳紅 banner**：3 次 retry 在 35 秒內全失敗才提示
+- console log 從「silent refresh retry #1」變「retry #1/3」「retry #2/3」「retry #3/3」，更清楚
+- 不會看到「成功後 5 秒又跑一次」的多餘 log
+
+### 同步鐵則 self-review（v3.24.23 起強制 8 項）
+1. ✅ 新觸發點會跟既有路徑撞車嗎？ — 沒新加觸發點
+2. ✅ 每個 mutable 入口都有併發保護嗎？ — `_isSilentRefreshing` 已有
+3. ✅ 時間戳 / 版本號更新邏輯一致嗎？ — 沒動
+4. ✅ 失敗路徑會打斷使用者嗎？ — 提升容忍度後反而更少誤觸發
+5. ✅ finally 區塊清理乾淨嗎？ — **本版主要修這個（retry timer 清乾淨）**
+6. ✅ 無變動還會 push 嗎？ — 沒動 push
+7. ✅ 新加的 setTimeout 在睡眠 throttle 下會失靈嗎？ — heartbeat 已 catch up
+8. ✅ 異地兩台電腦同時操作場景跑得過嗎？ — 沒動同步邏輯
+
 ## v3.24.24 — 修「sync indicator 殘留 ○ 未啟用」bug（2026-05-13）
 
 ### 症狀
