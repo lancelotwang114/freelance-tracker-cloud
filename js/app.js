@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-13-v3.24.25';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-13-v3.24.26';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -894,6 +894,32 @@ function isCloudSignedIn() {
   return !!cloudAuthState.user && !!cloudAuthState.accessToken;
 }
 
+// v3.24.26：確保 access token 仍有效，無效則主動觸發 silent refresh 並等待結果
+// 修「電腦睡眠喚醒後 silent refresh 還沒完成、driveFetch 就先 throw → 紅 banner 誤觸發」bug
+// 用法：在 driveFetch 入口呼叫，token 無效就 await refresh 完成再繼續
+async function ensureValidToken(timeoutMs = 15000) {
+  if (getValidAccessToken()) return true;
+  // 沒登入 / SDK 沒 ready → 不能 refresh
+  if (!cloudAuthState.user || !cloudAuthState.tokenClient) return false;
+
+  // 觸發 silent refresh（若已在跑就讓它跑、不重複觸發）
+  if (!_isSilentRefreshing) {
+    _silentRefresh();
+  }
+
+  // 等 silent refresh 完成（_isSilentRefreshing 變 false 且 token valid），或 timeout
+  const startTime = Date.now();
+  while (true) {
+    if (getValidAccessToken()) return true;
+    if (!_isSilentRefreshing) {
+      // refresh 結束但 token 還無效 → 失敗（可能 Google session 過期、要使用者重登）
+      return false;
+    }
+    if (Date.now() - startTime > timeoutMs) return false;
+    await new Promise(r => setTimeout(r, 200));  // poll 每 200ms
+  }
+}
+
 // v3.24.15：多 tab 偵測（BroadcastChannel）
 // 同一個瀏覽器開兩個 tab 時，兩 tab 的 push 會互相蓋（race condition）
 // 偵測到時用紅 banner 提示使用者，避免他在多 tab 上同時編輯
@@ -985,9 +1011,21 @@ class DriveAuthError extends Error {
 
 // 內部 helper：包裝 fetch，自動附 Authorization header、統一錯誤訊息
 // v3.1.0：除了 Drive API、Calendar API 也共用此 wrapper，所以錯誤標籤改為 generic「Google API」
+// v3.24.26：token 無效時主動等 silent refresh 完成（修「睡眠喚醒後 driveFetch 比 silent refresh 早跑造成紅 banner 誤觸發」）
 async function driveFetch(url, options = {}) {
-  const token = getValidAccessToken();
-  if (!token) throw new DriveAuthError('未登入 Google 或 access token 已過期，請先登入');
+  let token = getValidAccessToken();
+  if (!token) {
+    // v3.24.26：先等 silent refresh 把 token 補上（最多等 15 秒）
+    const ok = await ensureValidToken();
+    if (!ok) {
+      throw new DriveAuthError('未登入 Google 或 access token 已過期，請先登入');
+    }
+    token = getValidAccessToken();
+    if (!token) {
+      // ensureValidToken 回 true 但 token 還是無效（極罕見的 race）
+      throw new DriveAuthError('refresh 後仍拿不到有效 access token');
+    }
+  }
   const headers = new Headers(options.headers || {});
   headers.set('Authorization', 'Bearer ' + token);
   const r = await fetch(url, { ...options, headers });

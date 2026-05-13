@@ -1,5 +1,63 @@
 ﻿# 版本更新歷史
 
+## v3.24.26 — 🚨 修「睡眠喚醒後紅 banner 誤觸發」bug（2026-05-13）
+
+### 症狀
+使用者昨晚在公司電腦登入並同步成功，今早到公司電腦看到紅色 banner：
+> ⚠️ 資料未同步到雲端（**未登入 Google 或 access token 已過期，請先登入**）　本機資料安全，但兩地電腦不會即時一致
+
+### 根因（前幾版都沒修到）
+v3.24.13~v3.24.25 修了 silent refresh 機制（重試、心跳偵測、清 timer 等等），但漏掉一個關鍵：**`driveFetch` 不會等 silent refresh 完成**。
+
+具體 race：
+1. 早上喚醒電腦 → visibilitychange / focus / heartbeat 三個事件都觸發
+2. `_checkAndRefreshIfNeeded` 看 token 過期 → 觸發 `_silentRefresh()`（**async**，需 1-2 秒）
+3. **同時間**某個 cloud API（cloudPushNow / cloudPullNow / cloudInitTrackerFile）也跑了
+4. → 進入 `driveFetch` → `getValidAccessToken()` 看 token 還沒被 refresh → 回 null
+5. → `driveFetch` 立刻 throw `DriveAuthError('未登入 Google 或 access token 已過期，請先登入')`
+6. → 被 catch 後設成 `cloudSetSyncStatus('error', e.message)`
+7. → 紅 banner 顯示這個訊息
+
+silent refresh 即使最後成功，紅 banner 也已經跳出來嚇到使用者。
+
+### 修法
+新增 `ensureValidToken(timeoutMs)` async 函式：
+- 若已有 valid token → 立刻回 true
+- 若無 valid token + 已登入 + tokenClient ready → 主動觸發 `_silentRefresh()`（如果還沒在跑）
+- 用 200ms polling 等到 `_isSilentRefreshing = false`（refresh 結束）或 timeout（15 秒）
+- 結束後再檢查 token 是否 valid，回對應結果
+
+`driveFetch` 入口從「token 無效立刻 throw」改成「token 無效 → await ensureValidToken → 拿到新 token 再繼續」。
+
+→ 所有用 driveFetch 的地方（push / pull / init / calendar）**都自動受惠**，不需要逐個改。
+
+### 影響範圍
+- `js/app.js`：
+  - 新增 `ensureValidToken(timeoutMs)` async helper
+  - `driveFetch` 入口改成 await 等 silent refresh 完成才 throw
+  - APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 不動的部分
+- 沒動 schema / push 邏輯 / pull 邏輯 / mergeStates
+- 沒動 silent refresh 本身（v3.24.25 強化的指數退避 / clear retry timer 仍生效）
+- 沒新增 localStorage key
+
+### 你會看到的差別
+- 公司電腦早上喚醒 → 自動 silent refresh 完成 → driveFetch 拿到新 token → 同步成功 → **不會看到紅 banner**
+- 真的 silent refresh 失敗（Google session 真過期）才會看到紅 banner，這時是合理的提示
+- 體感：早上開公司電腦 → 一切自動完成，看不到錯誤
+
+### 同步鐵則 self-review 8 項
+1. ✅ 新觸發點會跟既有路徑撞車嗎？— ensureValidToken 內呼叫 _silentRefresh，但 _isSilentRefreshing flag 已防併發
+2. ✅ 每個 mutable 入口都有併發保護嗎？— 沒改變
+3. ✅ 時間戳更新邏輯一致嗎？— 沒動
+4. ✅ 失敗路徑會打斷使用者嗎？— 失敗的 driveFetch 是 caller 決定要不要 alert，多半是 silent 模式不打斷
+5. ✅ finally 區塊清理乾淨嗎？— ensureValidToken 是 polling，沒 timer 要清
+6. ✅ 無變動還會 push 嗎？— 沒動 push
+7. ✅ 新加的 setTimeout 在睡眠 throttle 下會失靈嗎？— polling 是 await，喚醒後會 catch up
+8. ✅ 異地兩台電腦同時操作場景跑得過嗎？— 沒動同步邏輯
+
 ## v3.24.25 — silent refresh 強化（容忍網路抖動 + 清乾淨 timer）（2026-05-13）
 
 ### 主動 audit 發現的問題
