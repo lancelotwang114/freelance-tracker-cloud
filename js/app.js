@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-13-v3.24.23';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-13-v3.24.24';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -206,6 +206,10 @@ async function cloudInitGoogleAuth() {
     }
   }
   // restored 的情境 cloudRenderSignedIn() 已經在前面呼叫過 cloudUpdateSyncIndicator()
+  // v3.24.24：防禦性保險 — 不論哪條路徑，init 完成都強制再呼叫一次
+  // 修「重整後 sync-indicator 殘留 HTML 預設值『○ 未啟用』而沒被覆蓋」的 bug
+  // （可能因為前面 await cloudWaitForGoogleSDK 期間 DOM race / async timing 造成 indicator 沒成功覆蓋）
+  cloudUpdateSyncIndicator();
 
   // v3.22.2 + v3.22.10：多重事件觸發 refresh check
   // 分頁休眠（Chrome Tab Discarding / Edge Sleeping Tabs）會讓 setTimeout 暫停，
@@ -952,6 +956,8 @@ setTimeout(() => {
   if (typeof cloudUpdateSyncBanner === 'function') cloudUpdateSyncBanner();
   // v3.24.20：行事曆 master toggle disable 狀態也同步一次
   if (typeof cloudUpdateCalSigninGate === 'function') cloudUpdateCalSigninGate();
+  // v3.24.24：sync-indicator 也再保險一次（修「重整後殘留 ○ 未啟用」的 bug）
+  if (typeof cloudUpdateSyncIndicator === 'function') cloudUpdateSyncIndicator();
 }, 1000);
 
 // ============== ☁️ Drive API Client（v3.0.0-alpha.2 起新增）==============

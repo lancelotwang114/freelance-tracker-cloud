@@ -97,6 +97,7 @@
 | **v3.24.21** | **🚨 修無限推送迴圈：v3.24.15 樂觀鎖時間戳不對等 bug（本機 wrapper.lastModifiedAt vs Drive modifiedTime 差 200-500ms 永遠誤判雲端較新）→ 改用 Drive 回傳 modifiedTime + 加 5 秒緩衝；cloudResolveAndMerge / Case B 內 applyTrackerData 後清 push timer 防 race** | ✅ **完成（2026-05-11）** |
 | **v3.24.22** | **兩地電腦無感切換：(1) silent refresh 成功後自動 pull（修「重登後要手動同步」bug）(2) visibilitychange/focus 也 throttle 後 auto pull（家裡推 → 公司切回分頁自動拿）(3) 心跳偵測（30 秒一次，> 5 分鐘 gap = 睡眠喚醒 → 補 refresh+pull）(4) requestAccessToken 帶 hint:email 跳過帳號選擇器** | ✅ **完成（2026-05-11）** |
 | **v3.24.23** | **同步併發保護 + 無變動跳過 push：(1) cloudPullNow 加 cloudPullInProgress flag + silent 參數 (2) cloudResolveAndMerge 內 push 搶 cloudPushInProgress 鎖 + 處理 pendingAfter (3) merged === remote 跳過 driveUpdateFile 避免無謂版本 +1（新 logAction event cloud-merge-noop）(4) cloudInitTrackerFile 加 cloudInitInProgress（hideInitOverlay 內順手 reset）(5) cloudPullNow 完成更新 _lastAutoPullAt** | ✅ **完成（2026-05-13）** |
+| **v3.24.24** | **修「sync indicator 殘留 ○ 未啟用」bug：cloudInitGoogleAuth 結尾無條件再呼叫 cloudUpdateSyncIndicator（修 async race timing 造成 HTML 預設值沒被覆蓋）+ 啟動 1 秒後 setTimeout 內也補一次（雙層保險）** | ✅ **完成（2026-05-13）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

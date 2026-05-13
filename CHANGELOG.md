@@ -1,5 +1,42 @@
 ﻿# 版本更新歷史
 
+## v3.24.24 — 修「sync indicator 殘留 ○ 未啟用」bug（2026-05-13）
+
+### 症狀
+使用者已登入（帳號 pill 顯示 James、設定頁顯示「已登入」），但 **top bar 的 sync indicator 還是顯示 HTML 預設值「○ 未啟用」**，沒被覆蓋成「✓ N 分前同步」或「○ 未連雲端」。
+
+### 根因（推測）
+`cloudInitGoogleAuth` 內，restored=true 路徑只依賴 `cloudRenderSignedIn` 內部呼叫 `cloudUpdateSyncIndicator()`。整個流程有：
+- Step 1：cloudLoadAuthState → 還原 user → cloudRenderSignedIn → cloudUpdateSyncIndicator（這時 GIS SDK 還沒 ready）
+- Step 2：await cloudWaitForGoogleSDK（async timing）
+- Step 3：init tokenClient + 排 silent refresh
+
+中間如果 await 期間 DOM race / 別的 timer 改了 sync-indicator innerHTML（或某個 exception 中斷），「○ 未啟用」HTML 預設值會殘留。
+
+### 修法（防禦性，兩層保險）
+1. **`cloudInitGoogleAuth` 結尾無條件呼叫 `cloudUpdateSyncIndicator()`**
+   - 不論 restored / 未 restored 都跑
+   - 即使中間 async 出狀況，最後保證覆蓋一次
+
+2. **啟動 1 秒後 setTimeout 內也補一次**
+   - 已有的 setTimeout（cloudUpdateSyncBanner / cloudUpdateCalSigninGate）加 cloudUpdateSyncIndicator
+   - 對 race condition / DOM ready 延遲再做一道保險
+
+### 影響範圍
+- `js/app.js`：
+  - cloudInitGoogleAuth 結尾加 `cloudUpdateSyncIndicator()`
+  - 啟動 setTimeout 內加 `cloudUpdateSyncIndicator()`
+  - APP_VERSION
+- `service-worker.js` / `index.html`：bump 版本
+
+### 不動的部分
+- 沒動 schema / 同步邏輯 / push 邏輯
+- 不影響資料正確性（這純粹是 UI 顯示問題）
+
+### 你會看到的差別
+- 重整頁面後 sync indicator **一定會在 1 秒內**從「○ 未啟用」變成正確的狀態（「✓ 剛剛同步」或「○ 未連雲端」）
+- 不再殘留 HTML 預設值
+
 ## v3.24.23 — 同步併發保護 + 無變動跳過 push（2026-05-13）
 
 v3.24.22 加了多個 auto pull 觸發點（visibilitychange / heartbeat / silent refresh recover），暴露了既有架構的併發 race。本版補上完整保護 + 順手做幾個 polish。
