@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.32';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.33';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -211,6 +211,17 @@ async function cloudInitGoogleAuth() {
   // 修「重整後 sync-indicator 殘留 HTML 預設值『○ 未啟用』而沒被覆蓋」的 bug
   // （可能因為前面 await cloudWaitForGoogleSDK 期間 DOM race / async timing 造成 indicator 沒成功覆蓋）
   cloudUpdateSyncIndicator();
+
+  // v3.24.33：restored from localStorage 時也要跑 cloudInitTrackerFile
+  // 修「重整頁面後右上角顯示登入，但編輯資料 sync indicator 卡 N 小時前同步」bug
+  // 根因：restored path 缺 cloudInitTrackerFile 呼叫（只有新登入時 cloudOnTokenResponse 才呼叫）
+  //       若 meta.trackerFileId 不存在（清過 cache / 切帳號 / init 失敗過），
+  //       cloudSchedulePush 會在 !meta.trackerFileId 時 silent return，indicator 維持 idle
+  //       → 使用者看到「✓ N 小時前同步」但資料其實沒上雲端
+  // fire-and-forget：init 內部有 cloudInitInProgress 併發保護，不會撞車
+  if (restored && typeof cloudInitTrackerFile === 'function') {
+    cloudInitTrackerFile().catch(e => console.error('[cloud-init] restored path async failed:', e));
+  }
 
   // v3.22.2 + v3.22.10：多重事件觸發 refresh check
   // 分頁休眠（Chrome Tab Discarding / Edge Sleeping Tabs）會讓 setTimeout 暫停，
@@ -2250,7 +2261,21 @@ function cloudSchedulePush() {
     return;
   }
   const meta = cloudGetMeta();
-  if (!meta.trackerFileId) return;  // tracker.json 還沒 init 完成
+  if (!meta.trackerFileId) {
+    // v3.24.33：trackerFileId 不存在 → 主動觸發 init 補救（不再 silent return）
+    // 修「重整後編輯資料 indicator 卡 N 小時前同步」bug
+    // 之前：silent return → indicator 維持 idle → 使用者誤以為已同步
+    // 現在：標 pending + 主動跑 init，init 完成後使用者再操作就會正常 push
+    console.warn('[cloud-push] trackerFileId 不存在 → 主動跑 cloudInitTrackerFile 補救');
+    cloudSetSyncStatus('pending');  // 至少讓 indicator 顯示「⌛」提示使用者
+    if (typeof cloudInitTrackerFile === 'function' && !cloudInitInProgress) {
+      cloudInitTrackerFile().then(() => {
+        // init 完成後重新試一次 schedulePush（cloudPendingChangesCount 應該還有沒推的）
+        if (cloudPendingChangesCount > 0) cloudSchedulePush();
+      }).catch(e => console.error('[cloud-push] init 補救 failed:', e));
+    }
+    return;
+  }
 
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => {

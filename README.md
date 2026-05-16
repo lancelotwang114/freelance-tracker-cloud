@@ -106,6 +106,7 @@
 | **v3.24.30** | **🚨 修「同步卡 N 天前、沒登出但顯示不同步」bug：診斷確認 cloudPushNow 達 MAX retries 後永久停止 + silent refresh 成功後沒復活卡死的 push。修法：(1) silent refresh ok 時偵測卡住的 push（pending > 0 或 retries > 0）→ 歸零計數 + 1 秒後主動重試 (2) cloudPushNow 達 MAX 後改 5 分鐘 watchdog 不再完全放棄 (3) focus / visibilitychange 偵測卡住的 push → 復活** | ✅ **完成（2026-05-16）** |
 | **v3.24.31** | **🚨 沒同步就不准編輯 + 衝突一律採雲端（使用者明確要求）：(1) sync error 持續 20 秒 → 半透明 overlay 蓋住整個 app，只能「立刻重試 / 重新登入 / 暫時關閉」(2) cloudResolveAndMerge 衝突自動 remote-wins 改寫 merged，不再開「選本機 / 雲端」modal (3) cloudShowConflictModal 變 dead code 保留** | ✅ **完成（2026-05-16）** |
 | **v3.24.32** | **🛡️ 衝突採雲端前自動備份本機到 Drive：v3.24.31 後使用者擔心「本機改動被蓋」風險，加 cloudResolveAndMerge 偵測 conflicts > 0 → fire-and-forget 呼叫 cloudCreateSnapshot('manual', '衝突備份_N筆_時間') 備份本機後再 remote-wins。可從設定頁「Drive 備份」卡片找該標籤還原** | ✅ **完成（2026-05-16）** |
+| **v3.24.33** | **🚨 修「重整後右上角登入但編輯資料 indicator 卡 N 小時前」bug：兩個獨立 bug — (A) cloudInitGoogleAuth restored path 沒呼叫 cloudInitTrackerFile（只有新登入呼叫）→ 切帳號 / 清 cache 後 trackerFileId 缺失 (B) cloudSchedulePush 在 !trackerFileId 時 silent return，indicator 維持 idle 假裝已同步。修法：restored path 補 cloudInitTrackerFile + schedulePush trackerFileId 缺失時主動 init 補救** | ✅ **完成（2026-05-16）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

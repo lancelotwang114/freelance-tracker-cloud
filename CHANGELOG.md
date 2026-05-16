@@ -1,5 +1,93 @@
 ﻿# 版本更新歷史
 
+## v3.24.33 — 修「重整後右上角登入但編輯資料 indicator 卡 N 小時前」bug（2026-05-16）
+
+### 問題現象
+使用者重整頁面：
+- 右上角 pill 顯示已登入 Google ✓
+- 編輯資料（改案件 / 業主等）
+- **但 sync indicator 一直卡「✓ N 小時前同步」**，沒變「⌛ 推送中…」或「⏳ 同步中…」
+- 也沒顯示同步失敗紅 banner
+- 實際資料只在 localStorage、沒上雲端
+
+### 根本原因（兩個獨立 bug）
+
+#### Bug #A：cloudInitGoogleAuth 的 restored path 沒呼叫 cloudInitTrackerFile
+新登入流程（`cloudOnTokenResponse` line ~542）：
+```js
+cloudInitTrackerFile().catch(e => console.error('[cloud-init] async failed:', e));
+```
+
+重整頁面從 localStorage 還原時（`cloudInitGoogleAuth` line 158-213）：
+```js
+const restored = cloudLoadAuthState();
+if (restored) {
+  cloudRenderSignedIn();
+  // ... silent refresh schedule，沒呼叫 cloudInitTrackerFile ❌
+}
+```
+
+如果使用者切過帳號 / 清過 cache / 之前 init 失敗，`meta.trackerFileId` 不在 localStorage 裡，restored path 又不會跑 init → tracker file 永遠拿不到 id。
+
+#### Bug #B：cloudSchedulePush 在 trackerFileId 缺失時 silent return
+```js
+function cloudSchedulePush() {
+  ...
+  const meta = cloudGetMeta();
+  if (!meta.trackerFileId) return;  // ← silent return，indicator 不變
+  ...
+  cloudSetSyncStatus('pending');
+}
+```
+
+`!meta.trackerFileId` 時直接 return，**indicator 維持原本 idle 狀態**，顯示「✓ N 小時前同步」（從舊 `lastSyncedAt` 抓的）→ 使用者誤以為已同步，但實際資料根本沒被排程推送。
+
+### Fix
+
+#### Fix A：restored path 補 cloudInitTrackerFile（line ~213）
+```js
+if (restored && typeof cloudInitTrackerFile === 'function') {
+  cloudInitTrackerFile().catch(e => console.error('[cloud-init] restored path async failed:', e));
+}
+```
+靠既有 `cloudInitInProgress` flag 擋併發。
+
+#### Fix B：cloudSchedulePush 主動補救（line ~2080）
+```js
+if (!meta.trackerFileId) {
+  console.warn('[cloud-push] trackerFileId 不存在 → 主動跑 cloudInitTrackerFile 補救');
+  cloudSetSyncStatus('pending');  // 至少讓使用者看到「⌛」知道在處理
+  if (typeof cloudInitTrackerFile === 'function' && !cloudInitInProgress) {
+    cloudInitTrackerFile().then(() => {
+      if (cloudPendingChangesCount > 0) cloudSchedulePush();  // init 完重排
+    }).catch(e => console.error('[cloud-push] init 補救 failed:', e));
+  }
+  return;
+}
+```
+
+### 影響範圍
+- `js/app.js`：`cloudInitGoogleAuth`（line ~213）、`cloudSchedulePush`（line ~2080）
+- `index.html`：meta version → v3.24.33
+- `service-worker.js`：CACHE_VERSION → v3.24.33
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ 兩個入口都靠既有 `cloudInitInProgress` flag 擋
+2. **mutable 入口併發保護？** ✓ 同上
+3. **時間戳一致？** ✓ 不動
+4. **失敗會 alert？** ✓ 只 console，不 alert
+5. **finally 清理？** ✓ 既有 hideInitOverlay 已 reset flag（line 708）
+6. **無變動還 push？** ✓ init 完成後再呼叫 cloudSchedulePush，會走既有 debounce + skipPush
+7. **睡眠 throttle？** ✓ 重整時跑一次性，不依賴 timer
+8. **異地兩台場景？** ✓ 兩邊重整都會跑 init → pull 雲端 → merge → 推回 → 一致
+
+### 跟 v3.24.31 / v3.24.32 的關係
+- v3.24.31 加 sync-error overlay + 衝突自動 remote-wins
+- v3.24.32 加衝突前自動備份本機
+- v3.24.33 修「重整後沒 init → 編輯沒 push → 假裝已同步」這個獨立 bug — **這個 bug 在 v3.24.30 以前就一直存在**，v3.24.31/32 沒處理它
+
+---
+
 ## v3.24.32 — 衝突採雲端前自動備份本機到 Drive 快照（2026-05-16）
 
 ### 背景
