@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-13-v3.24.29';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.32';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -227,6 +227,15 @@ async function cloudInitGoogleAuth() {
       // v3.24.22：即使 token 還新，也 throttle 後 auto pull 一次（5 分鐘節流，不會狂打 API）
       if (typeof cloudAutoPullThrottled === 'function') {
         cloudAutoPullThrottled(trigger);
+      }
+      // v3.24.30：token 還有效但 sync 卡 error → 表示是 push 端的問題，主動重試
+      // 修「同步指示器卡 N 天前同步，沒登出但顯示不同步」bug
+      if (cloudSyncStatus === 'error' && cloudPendingChangesCount > 0 && typeof cloudPushNow === 'function') {
+        console.log(`[cloud-auth] ${trigger}: 偵測到卡死的 push（pending=${cloudPendingChangesCount}），復活`);
+        cloudPushFailRetries = 0;
+        setTimeout(() => {
+          cloudPushNow().catch(e => console.error('[cloud-push] focus revive failed:', e));
+        }, 500);
       }
     }
     cloudUpdateSyncIndicator();
@@ -493,10 +502,27 @@ async function cloudOnTokenResponse(resp) {
     _scheduleSilentRefresh();  // 排下一次 refresh
     // v3.22.10：refresh 成功時若之前是 sync error 狀態，恢復為正常
     const wasErrorState = cloudSyncStatus === 'error';
+    // v3.24.30：偵測「卡住的 push」— pending 改動 > 0 或之前失敗計數 > 0
+    const hadStuckPush = (cloudPendingChangesCount > 0) || (cloudPushFailRetries > 0);
     if (wasErrorState && typeof cloudSetSyncStatus === 'function') {
       cloudSetSyncStatus('idle');
     }
     console.log('[cloud-auth] silent refresh ok, next refresh in ~', Math.round((expiresIn - 300) / 60), 'min');
+
+    // v3.24.30：silent refresh 成功 → 復活卡死的 push
+    // 修「同步時間卡 5/13、沒登出但顯示不同步」bug
+    // 根因：push 達 MAX retries 後永遠停止，silent refresh 後來成功但沒重啟 push
+    // 修法：歸零 fail 計數；若有 pending 改動 → 1 秒後主動 push（給 SDK 時間穩定）
+    if (hadStuckPush) {
+      console.log(`[cloud-auth] 偵測到卡住的 push（pending=${cloudPendingChangesCount}, retries=${cloudPushFailRetries}），復活中…`);
+      cloudPushFailRetries = 0;
+      if (cloudPendingChangesCount > 0 && typeof cloudPushNow === 'function') {
+        setTimeout(() => {
+          cloudPushNow().catch(e => console.error('[cloud-push] revive failed:', e));
+        }, 1000);
+      }
+    }
+
     // v3.24.22：silent refresh 成功 → 自動拉雲端最新（解「重登後要手動按同步」bug）
     // 從 error 恢復的話一定要 pull；正常 refresh 也 pull（會被 5 分鐘節流擋）
     if (typeof cloudAutoPullThrottled === 'function') {
@@ -681,6 +707,79 @@ function cloudSetSyncStatus(status, errMsg) {
       mascotSetState('idle');
     }
   }
+  // v3.24.31：sync error 持續一定時間 → 擋編輯 overlay；恢復 → 立刻撤
+  if (typeof _syncErrorGuardOnStatusChange === 'function') {
+    _syncErrorGuardOnStatusChange(status, prev);
+  }
+}
+
+// v3.24.31：「沒同步就不准編輯」守門員
+// 使用者明確要求：兩地電腦（家裡 / 公司，家裡可能關機）情境下，
+// 同步失敗時繼續編輯會造成資料衝突 / 回溯風險，必須擋住編輯。
+// 設計：sync error 持續 grace period 後 → 半透明 overlay 蓋住整個 app，
+//      只留「重新登入 / 立刻重試 / 我堅持要看資料」三個出口。
+//      sync 恢復 idle → 立刻撤 overlay。
+const SYNC_ERROR_GUARD_GRACE_MS = 20 * 1000;  // 20 秒 grace（避免短暫網路抖動誤觸發）
+let _syncErrorGuardTimer = null;
+
+function _syncErrorGuardOnStatusChange(status, prev) {
+  // error 出現 → 排 grace timer
+  if (status === 'error' && prev !== 'error') {
+    if (_syncErrorGuardTimer) clearTimeout(_syncErrorGuardTimer);
+    _syncErrorGuardTimer = setTimeout(() => {
+      _syncErrorGuardTimer = null;
+      if (cloudSyncStatus === 'error') showSyncErrorOverlay();
+    }, SYNC_ERROR_GUARD_GRACE_MS);
+    return;
+  }
+  // error 持續但 status 變了（idle / syncing / pending）→ 取消 timer 並撤 overlay
+  if (status !== 'error') {
+    if (_syncErrorGuardTimer) {
+      clearTimeout(_syncErrorGuardTimer);
+      _syncErrorGuardTimer = null;
+    }
+    hideSyncErrorOverlay();
+  }
+}
+
+function showSyncErrorOverlay() {
+  if (document.getElementById('sync-error-overlay')) return;  // 已存在不重複
+  const o = document.createElement('div');
+  o.id = 'sync-error-overlay';
+  o.style.cssText =
+    'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.55);' +
+    'display:flex;align-items:center;justify-content:center;padding:20px;' +
+    'backdrop-filter:blur(2px);';
+  const errMsg = cloudLastSyncError ? `\n${cloudEscapeHtml(cloudLastSyncError)}` : '';
+  o.innerHTML =
+    '<div style="background:var(--card,#fff);color:var(--text,#111);border-radius:12px;' +
+    'padding:24px;max-width:480px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.4);' +
+    'border-top:6px solid #ef4444;">' +
+    '  <div style="font-size:22px;margin-bottom:8px;">⚠️ 同步中斷，編輯已暫停</div>' +
+    '  <div style="color:var(--muted,#666);font-size:13px;line-height:1.6;margin-bottom:16px;">' +
+    '    為了避免兩地電腦（家裡 / 公司）資料衝突或回溯，<br>' +
+    '    雲端同步恢復前 <b>無法再編輯</b>。<br><br>' +
+    '    請先「立刻重試」或「重新登入」，恢復連線後會自動解除。' +
+    (errMsg ? `<br><br><span style="color:#ef4444;font-size:12px;">錯誤：${errMsg}</span>` : '') +
+    '  </div>' +
+    '  <div style="display:flex;flex-direction:column;gap:8px;">' +
+    '    <button class="btn btn-primary" style="width:100%;" onclick="cloudRetryPush()">立刻重試同步</button>' +
+    '    <button class="btn btn-outline" style="width:100%;" onclick="cloudSignIn()">重新登入 Google</button>' +
+    '    <button class="btn btn-outline" style="width:100%;background:none;color:var(--muted);font-size:12px;" ' +
+    '            onclick="hideSyncErrorOverlay()" title="僅暫時關閉，下次 error 還是會出現">' +
+    '      暫時關閉（不建議，可能造成資料衝突）' +
+    '    </button>' +
+    '  </div>' +
+    '</div>';
+  document.body.appendChild(o);
+  if (typeof logAction === 'function') {
+    logAction('sync-error-guard-shown', { lastError: cloudLastSyncError });
+  }
+}
+
+function hideSyncErrorOverlay() {
+  const o = document.getElementById('sync-error-overlay');
+  if (o) o.remove();
 }
 
 // v3.24.15：cloud init 期間的 loading overlay
@@ -1599,6 +1698,8 @@ async function cloudInitTrackerFile() {
 let cloudConflictState = null;  // { mergedTentative, conflicts, choices, fileId, remoteMeta, trackerCreatedAt }
 
 // 主入口：拿到遠端資料後做三方合併、決定自動套用還是開 modal
+// v3.24.31：使用者明確要求「衝突一律採雲端，不要再跳選本機/雲端的 modal」
+//           合併出衝突 → 直接 remote-wins 改寫 merged，走 clean 分支推上去
 async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCreatedAt }) {
   const base = cloudGetLastSyncedSnapshot();
   const local = {
@@ -1608,6 +1709,68 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
     config: config
   };
   const result = mergeStates(base, local, remoteData);
+
+  // v3.24.31：有衝突 → 自動全採雲端（不再開 modal）
+  // 取捨：本機未推送的衝突欄位會被覆蓋；使用者場景是「家裡改→關電腦→公司改」單向接力，
+  //       配合 sync-error overlay 擋編輯，極少出現「兩邊都離線改同一筆」的情境
+  // v3.24.32：remote-wins 改寫前先自動備份本機（保護機制 A）
+  //   重用 cloudCreateSnapshot（manual 類型永久保留），檔名加「衝突備份_」前綴方便辨識
+  //   fire-and-forget：driveCreateFile 是 async，但內部第一步是同步抓 state 拷貝 + JSON.stringify
+  //                   所以後面 applyTrackerData 修改 state 不會影響備份內容
+  if (result.conflicts.length > 0) {
+    console.warn(`[cloud-merge] 偵測到 ${result.conflicts.length} 筆衝突 → 先備份本機 → 自動全採雲端`);
+    if (typeof cloudCreateSnapshot === 'function') {
+      const tsLabel = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+      const conflictLabel = `衝突備份_${result.conflicts.length}筆_${tsLabel}`;
+      cloudCreateSnapshot('manual', conflictLabel)
+        .then(created => {
+          console.log('[cloud-merge] ✓ 衝突前本機備份已建立:', created.id, conflictLabel);
+          if (typeof logAction === 'function') {
+            logAction('cloud-conflict-backup', {
+              fileId: created.id,
+              label: conflictLabel,
+              conflictCount: result.conflicts.length
+            });
+          }
+        })
+        .catch(e => {
+          console.error('[cloud-merge] 衝突前備份失敗（仍繼續 merge）:', e);
+          if (typeof logAction === 'function') {
+            logAction('cloud-conflict-backup-failed', { error: e.message || String(e) });
+          }
+        });
+    }
+    result.conflicts.forEach(c => {
+      if (c.kind === 'field-conflict') {
+        if (c.type === 'config') {
+          if (result.merged.config) result.merged.config[c.field] = c.remoteValue;
+        } else {
+          const list = c.type === 'client' ? result.merged.clients : result.merged.jobs;
+          const item = list && list.find(x => x.id === c.id);
+          if (item) item[c.field] = c.remoteValue;
+        }
+      } else if (c.kind === 'delete-vs-edit') {
+        // remote-deleted：雲端刪、本機改 → 採雲端「已刪」決定 → 從 list 移除
+        // local-deleted：本機刪、雲端改 → _cloudMergeEntity 已保留 remote → 不動
+        if (c.side === 'remote-deleted') {
+          const list = c.type === 'client' ? result.merged.clients : result.merged.jobs;
+          if (list) {
+            const idx = list.findIndex(x => x.id === c.id);
+            if (idx >= 0) list.splice(idx, 1);
+          }
+        }
+      }
+    });
+    if (typeof toast === 'function') {
+      toast(`☁️ ${result.conflicts.length} 筆衝突採雲端（本機已備份到 Drive 快照）`, 5000);
+    }
+    if (typeof logAction === 'function') {
+      logAction('cloud-merge-auto-remote-wins', { count: result.conflicts.length });
+    }
+    // 改寫完視為 clean，後面走 clean 分支自動 push
+    result.clean = true;
+    result.conflicts = [];
+  }
 
   if (result.clean) {
     // 無衝突 → 直接套用合併結果
@@ -1687,14 +1850,18 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
     return;
   }
 
-  // 有衝突 → 開 modal
-  cloudShowConflictModal({
-    mergedTentative: result.merged,
-    conflicts: result.conflicts,
-    fileId,
-    remoteMeta,
-    trackerCreatedAt
+  // v3.24.31：衝突 modal 已停用（衝突在前面自動 remote-wins resolve 了）
+  // 保險：若 result.clean 因任何原因仍為 false → log + 強制 push remote 版本不開 modal
+  console.error('[cloud-merge] 不該走到這：clean=false but no conflicts resolved。強制 fallback：套用 remote');
+  applyTrackerData(remoteData);
+  cloudSaveLastSyncedSnapshot(remoteData);
+  cloudSaveMeta({
+    trackerFileId: fileId,
+    trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
+    lastSyncedAt: remoteMeta.lastModifiedAt,
+    lastSyncedVersion: remoteMeta.version,
   });
+  if (typeof toast === 'function') toast('☁️ 已對齊雲端版本', 3000);
 }
 
 function cloudShowConflictModal({ mergedTentative, conflicts, fileId, remoteMeta, trackerCreatedAt }) {
@@ -2197,6 +2364,8 @@ async function cloudPushNow() {
     }
     cloudSetSyncStatus('error', e.message || String(e));  // α2-5
     // v3.24.13：失敗 → 指數退避自動重試（最多 5 次，再失敗就靠 banner 等使用者手動點重試）
+    // v3.24.30：達 MAX 後不再「完全放棄」，改為長間隔 watchdog（每 5 分鐘試一次直到成功）
+    //          修「push 卡住後永遠停止」bug — 配合 silent refresh recover 雙保險
     if (cloudPushFailRetries < CLOUD_PUSH_MAX_RETRIES) {
       const delay = CLOUD_PUSH_RETRY_DELAYS_MS[cloudPushFailRetries] || 180000;
       cloudPushFailRetries++;
@@ -2205,7 +2374,13 @@ async function cloudPushNow() {
         cloudPushNow().catch(err => console.error('[cloud-push] retry async failed:', err));
       }, delay);
     } else {
-      console.error('[cloud-push] 已達最大重試次數，請手動點 banner 重試');
+      // v3.24.30：達 MAX 後改長間隔 watchdog（5 分鐘一次），不再完全停止
+      // 之前 console.error 然後不動 → 使用者得手動點 banner 才復活
+      const WATCHDOG_DELAY = 5 * 60 * 1000;
+      console.warn(`[cloud-push] 已達 MAX retry，切換為 watchdog 模式（每 ${WATCHDOG_DELAY/60000} 分鐘重試一次）`);
+      setTimeout(() => {
+        cloudPushNow().catch(err => console.error('[cloud-push] watchdog retry async failed:', err));
+      }, WATCHDOG_DELAY);
     }
   } finally {
     cloudPushInProgress = false;

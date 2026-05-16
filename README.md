@@ -103,6 +103,9 @@
 | **v3.24.27** | **silent refresh 卡死保護 + 訊息友善化：(1) `_silentRefresh` 加 30 秒 safety timer 防 GIS SDK 不 callback 卡死 (2) DriveAuthError 訊息從技術術語「access token 已過期」改成行動指示「Google 連線需要重新整理，請點右上角『重新登入』」 (3) ensureValidToken timeout 15s→30s 給 silent refresh 失敗+3 次 retry 充分時間** | ✅ **完成（2026-05-13）** |
 | **v3.24.28** | **純前端極致 silent refresh（最大化降低重登機率）：(1) silent refresh 時機提前 5min→15min 給充分 retry 窗口 (2) 啟動主動 refresh 門檻 30min→45min (3) 新增 periodic refresh check 每 20 分鐘背景主動檢查（即使使用者一直停留同一分頁、電腦沒睡眠也會跑）** | ✅ **完成（2026-05-13）** |
 | **v3.24.29** | **🚨 修「每天跳衝突 modal」bug：診斷確認 base（cloud-last-synced-snapshot）= null 導致 mergeStates 把所有差異欄位誤判為「兩邊都改」，每天家裡↔公司切換就跳 modal。修法：(1) mergeStates 自動把 base=null 當成 base=local（雲端優先，本機獨有保留）(2) cloudInitTrackerFile 結尾偵測 base=null 主動 cloudPullNow 重建基準（雙層保險）** | ✅ **完成（2026-05-13）** |
+| **v3.24.30** | **🚨 修「同步卡 N 天前、沒登出但顯示不同步」bug：診斷確認 cloudPushNow 達 MAX retries 後永久停止 + silent refresh 成功後沒復活卡死的 push。修法：(1) silent refresh ok 時偵測卡住的 push（pending > 0 或 retries > 0）→ 歸零計數 + 1 秒後主動重試 (2) cloudPushNow 達 MAX 後改 5 分鐘 watchdog 不再完全放棄 (3) focus / visibilitychange 偵測卡住的 push → 復活** | ✅ **完成（2026-05-16）** |
+| **v3.24.31** | **🚨 沒同步就不准編輯 + 衝突一律採雲端（使用者明確要求）：(1) sync error 持續 20 秒 → 半透明 overlay 蓋住整個 app，只能「立刻重試 / 重新登入 / 暫時關閉」(2) cloudResolveAndMerge 衝突自動 remote-wins 改寫 merged，不再開「選本機 / 雲端」modal (3) cloudShowConflictModal 變 dead code 保留** | ✅ **完成（2026-05-16）** |
+| **v3.24.32** | **🛡️ 衝突採雲端前自動備份本機到 Drive：v3.24.31 後使用者擔心「本機改動被蓋」風險，加 cloudResolveAndMerge 偵測 conflicts > 0 → fire-and-forget 呼叫 cloudCreateSnapshot('manual', '衝突備份_N筆_時間') 備份本機後再 remote-wins。可從設定頁「Drive 備份」卡片找該標籤還原** | ✅ **完成（2026-05-16）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 

@@ -1,5 +1,236 @@
 ﻿# 版本更新歷史
 
+## v3.24.32 — 衝突採雲端前自動備份本機到 Drive 快照（2026-05-16）
+
+### 背景
+v3.24.31 把衝突自動 remote-wins 後，使用者問「會不會本機改動被蓋掉？」。誠實答：**會**，主要兩個情境：
+
+1. **跨機器同欄位都改過**：家裡離線改 X 金額 22000 → 公司線上改 X 金額 20000 → 家裡上線後 → 採雲端 20000，家裡的 22000 被蓋
+2. **使用者點 overlay 的「暫時關閉」繼續改**：後續同步如撞雲端 → 本機被蓋
+
+使用者選擇 **方案 A：衝突前先自動備份本機到 Drive 快照**。
+
+### Fix
+位置：`cloudResolveAndMerge`（line ~1606，conflicts 處理區塊開頭）
+
+```js
+if (result.conflicts.length > 0) {
+  // 先 fire-and-forget 備份本機到 Drive snapshot
+  const tsLabel = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+  const conflictLabel = `衝突備份_${result.conflicts.length}筆_${tsLabel}`;
+  cloudCreateSnapshot('manual', conflictLabel)
+    .then(created => console.log('[cloud-merge] ✓ 衝突前本機備份已建立:', created.id))
+    .catch(e => console.error('[cloud-merge] 衝突前備份失敗（仍繼續 merge）:', e));
+
+  // 接著走 remote-wins 改寫 + applyTrackerData + push
+  ...
+}
+```
+
+**關鍵實作細節：**
+- 重用既有 `cloudCreateSnapshot('manual', label)`（snapshot 機制成熟，UI 已支援還原 / 刪除）
+- **fire-and-forget**：`cloudCreateSnapshot` 內部第一步是同步抓 `state` 拷貝 + `JSON.stringify`，driveCreateFile 才是 async。所以後面 `applyTrackerData(result.merged)` 修改 state 不會影響備份內容
+- **失敗不擋 merge**：備份 fetch 失敗 → 只 console.error，merge 流程繼續（避免備份問題讓 sync 卡住）
+- **手動類型 = 永久保留**：不會被 `cloudPruneSnapshots` 砍掉
+- **toast 訊息**：「☁️ N 筆衝突採雲端（本機已備份到 Drive 快照）」讓使用者知道可還原
+
+### 還原方法
+1. 開設定頁
+2. 找「☁️ Drive 備份」卡片 → 快照列表
+3. 找 `🏷️ 衝突備份_X筆_時間` 那筆 → 點「還原」
+
+### 還沒解決的邊角
+- **真的 Drive 連完全斷線**：備份也會失敗（會 log error 但不擋 merge）。建議：使用者看到 `cloud-conflict-backup-failed` 日誌可手動處理
+- **備份時 Drive 配額爆滿**：同上，會失敗但不擋 merge
+- **使用者誤刪衝突備份**：那就沒救了。建議：之後可以加「衝突備份標籤特殊保護」（刪除前 confirm）
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ cloudCreateSnapshot 內部用 driveCreateFile 是新檔，跟既有 push（driveUpdateFile）不衝突
+2. **mutable 入口併發保護？** ✓ snapshot 是新檔不會撞 cloudPushInProgress
+3. **時間戳一致？** ✓ 不動 lastSyncedAt
+4. **失敗會 alert？** ✓ catch 內只 console.error，不 alert
+5. **finally 清理？** ✓ fire-and-forget 不需要 finally
+6. **無變動還 push？** ✓ snapshot 是獨立檔不影響 tracker.json push 邏輯
+7. **睡眠 throttle？** ✓ 純 async fetch，與 timer 無關
+8. **異地兩台場景？** ✓ 兩邊都改 → 衝突 → 雙邊都會留下自己版本的備份（在 Drive 都看得到）
+
+### 影響範圍
+- `js/app.js`：`cloudResolveAndMerge` conflicts 處理區塊加 fire-and-forget 備份
+- `index.html`：meta version → v3.24.32
+- `service-worker.js`：CACHE_VERSION → v3.24.32
+
+---
+
+## v3.24.31 — 沒同步就不准編輯 + 衝突一律採雲端（2026-05-16）
+
+### 背景
+使用者再次強調核心使用情境：
+> 「我的使用地方會有公司電腦和家裡電腦，且家裡電腦可能會關機。
+> 不要再發生沒同步又可以編輯。
+> 盡量避免出現要選雲端/本地的選項，全部都要雲端。」
+
+對應到程式的兩個硬需求：
+1. **同步失敗時必須擋編輯**：避免使用者離線改了資料、之後上雲端撞衝突
+2. **衝突一律採雲端**：不再跳「選本機 / 選雲端」modal
+
+### Fix 1：cloudResolveAndMerge 衝突自動 remote-wins（不再開 modal）
+位置：`cloudResolveAndMerge`（line ~1602）
+
+把「有衝突 → 開 cloudShowConflictModal」這條路徑改成：
+```js
+if (result.conflicts.length > 0) {
+  result.conflicts.forEach(c => {
+    if (c.kind === 'field-conflict') {
+      // 把 merged 內該欄位用 remote 值改寫
+    } else if (c.kind === 'delete-vs-edit' && c.side === 'remote-deleted') {
+      // 雲端刪、本機改 → 採雲端「刪」決定
+    }
+  });
+  toast(`☁️ ${count} 筆衝突已自動採雲端版本`, 4000);
+  result.clean = true;  // 改寫完當成 clean 走自動 push 分支
+}
+```
+
+`cloudShowConflictModal` 函式留著但永不再被呼叫（dead code，方便將來需要時恢復）。
+
+取捨：本機未推送的衝突欄位會被覆蓋。可接受性靠 Fix 2 保證（沒同步擋編輯，極少機會兩邊都離線改同一筆）。
+
+### Fix 2：sync error overlay 擋編輯
+位置：新增 `_syncErrorGuardOnStatusChange` / `showSyncErrorOverlay` / `hideSyncErrorOverlay`（line ~715）
+
+機制：
+- `cloudSetSyncStatus('error', ...)` 觸發 → 排 20 秒 grace timer（避免短暫網路抖動誤觸發）
+- 20 秒後若仍 error → 半透明 overlay 蓋住整個 app
+- overlay 內三個按鈕：「立刻重試同步」「重新登入 Google」「暫時關閉（不建議）」
+- `cloudSetSyncStatus('idle' | 'syncing' | 'pending')` 觸發 → 立刻清 timer + 撤 overlay
+
+```js
+const SYNC_ERROR_GUARD_GRACE_MS = 20 * 1000;
+function _syncErrorGuardOnStatusChange(status, prev) {
+  if (status === 'error' && prev !== 'error') {
+    _syncErrorGuardTimer = setTimeout(showSyncErrorOverlay, SYNC_ERROR_GUARD_GRACE_MS);
+    return;
+  }
+  if (status !== 'error') {
+    clearTimeout(_syncErrorGuardTimer);
+    hideSyncErrorOverlay();
+  }
+}
+```
+
+「暫時關閉」按鈕保留是因為極端情境（例如 Google 全球當機）使用者可能還是想看資料，但下次 status 又變 error 還是會跳。**沒有「直接編輯不顧同步」選項**。
+
+### 影響範圍
+- `js/app.js`：
+  - `cloudSetSyncStatus`（line ~691）→ 接通 sync error guard hook
+  - 新增 `_syncErrorGuardOnStatusChange` / `showSyncErrorOverlay` / `hideSyncErrorOverlay`（line ~712）
+  - `cloudResolveAndMerge`（line ~1602）→ 衝突自動 remote-wins
+  - `cloudShowConflictModal` → 不再被呼叫（dead code 保留）
+- `index.html`：meta version → v3.24.31
+- `service-worker.js`：CACHE_VERSION → v3.24.31
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ overlay 純 UI，不動同步邏輯
+2. **mutable 入口併發保護？** ✓ 不新增同步入口
+3. **時間戳一致？** ✓ 不動
+4. **失敗會 alert 打斷？** ✓ overlay 取代 alert，使用者主動操作
+5. **finally 清理？** ✓ grace timer 在 status 變化時 clearTimeout
+6. **無變動還 push？** ✓ remote-wins resolve 後仍走既有 skipPush 邏輯
+7. **睡眠 throttle？** ✓ overlay 不依賴 timer 持續跑
+8. **異地兩台場景？** ✓ 家裡關機後公司開 → pull 拿到家裡最後版本，無衝突直接套；若公司也離線改了 → 上線時衝突 → 自動採雲端（家裡版本）
+
+### 已寫入記憶
+本次決策已存到 `freelance-tracker-cloud 同步鐵則` memory 第 10 條，未來不需要再問。
+
+---
+
+## v3.24.30 — 修「同步卡 N 天前、沒登出但顯示不同步」bug（push 復活機制）（2026-05-16）
+
+### 問題現象
+使用者打開電腦看到：
+- 同步指示器卡「3 天前同步」（lastSyncedAt 是 5/13）
+- 紅 banner「⚠️ 資料未同步到雲端」
+- 右上 pill 仍是登入狀態（沒被踢出）
+- 但實際上中間幾天的改動沒上雲端
+
+### 根本原因（3 個 bug 疊加，主因 #1）
+
+#### Bug #1（主因）：silent refresh 成功後沒復活卡死的 push retry chain
+`cloudPushNow` 失敗時走 `CLOUD_PUSH_RETRY_DELAYS_MS = [3000, 8000, 20000, 60000, 180000]`，5 次 retry 共 ~4.5 分鐘。如果這段時間 token 一直無效（睡眠喚醒中 / 網路抖動 / silent refresh 也在 retry）→ 5 次全失敗 → `console.error('已達最大重試次數')` 後**永久停止**：
+- `cloudPushFailRetries = 5` 卡住，沒任何 timer / event 自動再試
+- 後來 silent refresh 終於成功（line 488-510）只做了 setSyncStatus('idle') + cloudAutoPullThrottled
+- **沒歸零 cloudPushFailRetries**、**沒重啟那個被丟掉的 push**
+- 本機 pending 改動永遠留在 localStorage 沒推上去 → lastSyncedAt 卡 5/13
+
+#### Bug #2：focus / visibilitychange 沒檢查卡住的 push
+`_checkAndRefreshIfNeeded`（line 219）只做 silent refresh + auto pull，不會重試卡死的 push。切視窗回來也救不回來。
+
+#### Bug #3：達 MAX 後完全死掉
+原本 `else { console.error('...') }` 完全不動，只有 `online` event 或手動點 banner 才復活。Wi-Fi 暫斷不重連時 `online` event 不會 fire → 永遠卡住。
+
+### 修正
+
+#### Fix 1：silent refresh 成功 → 復活卡死的 push（主修）
+位置：`cloudOnTokenResponse` 內 silent refresh ok 分支（line ~494）
+
+```js
+const hadStuckPush = (cloudPendingChangesCount > 0) || (cloudPushFailRetries > 0);
+if (hadStuckPush) {
+  cloudPushFailRetries = 0;  // 歸零，給新生機會
+  if (cloudPendingChangesCount > 0) {
+    setTimeout(() => cloudPushNow(), 1000);  // 1 秒後重啟（給 SDK 穩定）
+  }
+}
+```
+
+#### Fix 2：cloudPushNow 達 MAX → 改長間隔 watchdog（5 分鐘一次）
+位置：`cloudPushNow` catch block（line ~2210）
+
+```js
+} else {
+  const WATCHDOG_DELAY = 5 * 60 * 1000;
+  setTimeout(() => cloudPushNow(), WATCHDOG_DELAY);  // 不再完全放棄
+}
+```
+
+效果：即使所有事件都沒觸發、token 一直無效，每 5 分鐘還是會嘗試一次直到成功。
+
+#### Fix 3：focus / visibilitychange / pageshow → 復活卡死的 push
+位置：`_checkAndRefreshIfNeeded`（line ~219）
+
+```js
+if (cloudSyncStatus === 'error' && cloudPendingChangesCount > 0) {
+  cloudPushFailRetries = 0;
+  setTimeout(() => cloudPushNow(), 500);
+}
+```
+
+效果：切視窗 / 喚醒電腦時自動補救。
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ 三個 fix 都走 `cloudPushNow`，內部 `cloudPushInProgress` flag 擋併發
+2. **mutable 入口併發保護？** ✓ 全靠 cloudPushInProgress
+3. **時間戳 / 版本號一致？** ✓ 不動時間戳邏輯
+4. **失敗會打斷？** ✓ 全 console，不 alert
+5. **finally 清理？** ✓ 沿用既有 try/finally
+6. **無變動還 push？** ✓ cloudPushNow 內 version check + skipPush 已處理
+7. **睡眠 / throttle？** ✓ watchdog 用 setInterval-like 邏輯 + visibilitychange 雙保險
+8. **異地兩台場景？** ✓ 復活時 cloudPushNow 內部 version check 會 detect 雲端是否較新 → 走 cloudResolveAndMerge
+
+### 影響範圍
+- `js/app.js`：`cloudOnTokenResponse`（fix 1）、`cloudPushNow`（fix 2）、`_checkAndRefreshIfNeeded`（fix 3）
+- `index.html`：meta version → v3.24.30
+- `service-worker.js`：CACHE_VERSION → v3.24.30
+
+### 相關歷史
+- v3.24.22：silent refresh 成功後 auto pull（為了「重登後不用手動同步」）
+- v3.24.25：silent refresh retry 3 次 + 指數退避
+- v3.24.27：safety timer 防 GIS SDK 卡死
+- v3.24.28：periodic refresh check
+- **v3.24.30**：補上「push 那一端」的恢復機制（之前都只修 token 那端）
+
+---
+
 ## v3.24.29 — 修每天跳衝突 modal 的 bug（base=null 自動視為 local，雲端優先）（2026-05-13）
 
 ### 問題現象
