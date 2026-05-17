@@ -1,5 +1,74 @@
 ﻿# 版本更新歷史
 
+## v3.24.34 — app-version-badge 改顯示資料時間 + B 機自動偵測 A 機改動 toast（2026-05-16）
+
+### 背景 / 使用者回饋
+1. 右上角 app-version-badge 直接寫 app code 版本（v3.24.33）對使用者不直覺，使用者日常更在意「我這份資料新不新鮮」
+2. A 改 → B 開機後雖然自動 pull 雲端 + applyTrackerData 重繪 UI，但使用者沒有清楚提示「資料剛從另一台電腦同步下來」
+
+### Fix 1：app-version-badge 改成資料時間為主
+位置：`updateVersionBadge`（line ~13620）
+
+新顯示優先級：
+- **有新 app 版本** → 「🆕 vXXX 點此更新」（醒目樣式，保留 v3.24.14 強制備份入口）
+- **未登入** → 「📊 未連雲端」
+- **已登入** → 「📊 資料：N 分前同步」（從 `cloudGetMeta().lastSyncedAt` 抓相對時間）
+
+hover title 含完整 app 版本號（debug 用）+ 完整同步時間。
+
+接 hook：`cloudUpdateSyncIndicator` 內呼叫 `updateVersionBadge`，badge 隨 sync indicator 一起更新（每 30 秒 ticker 跑時相對時間自動跳）。
+
+### Fix 2：cloudResolveAndMerge 偵測遠端有新改動 → toast
+位置：`cloudResolveAndMerge`（line ~1602）
+
+```js
+// 比對 remote vs base（上次同步快照）— 不同表示「遠端有人改過」
+let remoteHasNewChanges = false;
+if (base) {
+  const baseSig = JSON.stringify({ clients: base.clients, jobs: base.jobs, invoiceHistory: base.invoiceHistory });
+  const remoteSig = JSON.stringify({ ... remote 同樣結構 });
+  remoteHasNewChanges = (baseSig !== remoteSig);
+}
+
+// 在 result.clean 分支 applyTrackerData 之後：
+if (remoteHasNewChanges && !hadConflicts && typeof toast === 'function') {
+  toast('☁️ 已同步另一台電腦的最新改動', 4000);
+}
+```
+
+跟既有「N 筆衝突採雲端」toast 分開：
+- 純 remote 更新（無衝突）→ toast「☁️ 已同步另一台電腦的最新改動」
+- 有衝突 → toast「☁️ N 筆衝突採雲端（本機已備份到 Drive 快照）」
+
+### 影響範圍
+- `js/app.js`：`updateVersionBadge`（line ~13620 大幅改寫）、`cloudUpdateSyncIndicator`（line ~785 加 updateVersionBadge 呼叫）、`cloudResolveAndMerge`（line ~1602 加 remoteHasNewChanges 偵測 + toast）
+- `index.html`：meta version → v3.24.34
+- `service-worker.js`：CACHE_VERSION → v3.24.34
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ 純 UI 改動 + toast，不動同步機制
+2. **mutable 入口併發保護？** ✓ 無新同步入口
+3. **時間戳一致？** ✓ 不動
+4. **失敗會 alert？** ✓ JSON 失敗 fallback 不 toast
+5. **finally 清理？** ✓ 純 string 比對
+6. **無變動還 push？** ✓ 既有 skipPush 邏輯保留
+7. **睡眠 throttle？** ✓ 不依賴 timer
+8. **異地兩台場景？** ✓ B 機 pull 雲端 → 偵測差異 → toast「已同步另一台電腦」→ UI 自動 re-render
+
+### 跟「A→B 隔天」場景的關係
+使用者問：「A 電腦改後隔天到 B 電腦會直接跳偵測到新資料嗎？還是 token 過期不會跳？」
+
+答案（v3.24.34 後行為）：
+| B 機 token 狀態 | 行為 |
+|----------------|------|
+| 還有效 | 重整 → cloudInitTrackerFile → pull → toast「☁️ 已同步另一台電腦的最新改動」 |
+| 過期 + silent refresh 成功 | 自動拿新 token → pull → 同上 toast |
+| 過期 + silent refresh 失敗 | 紅 banner「Google 連線過期，請重新登入」→ 重登後自動 pull + toast |
+
+**不會跳「點此重整頁面」modal**（那是 app code 更新才會的），資料同步是無感的，只有一個 4 秒 toast 提示。
+
+---
+
 ## v3.24.33 — 修「重整後右上角登入但編輯資料 indicator 卡 N 小時前」bug（2026-05-16）
 
 ### 問題現象

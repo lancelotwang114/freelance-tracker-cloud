@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.33';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.34';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -898,6 +898,8 @@ function cloudUpdateSyncIndicator() {
   cloudRenderAccountPill();
   // v3.24.20：行事曆 master toggle 隨登入狀態切換 disabled / 提示
   if (typeof cloudUpdateCalSigninGate === 'function') cloudUpdateCalSigninGate();
+  // v3.24.34：app-version-badge 也隨 sync 狀態更新（資料時間相對值會變）
+  if (typeof updateVersionBadge === 'function') updateVersionBadge();
 
   if (!el) return;
 
@@ -1719,7 +1721,33 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
     invoiceHistory: state.invoiceHistory,  // v3.12.0
     config: config
   };
+
+  // v3.24.34：偵測「遠端是否有新改動」— 比對 remote vs base
+  // base 是上次同步的快照；若 remote !== base → 遠端有人改過（很可能是另一台電腦）
+  // 用於 toast「☁️ 已同步另一台電腦的最新改動」提示
+  let remoteHasNewChanges = false;
+  if (base) {
+    try {
+      // 簡化比對：只看主要結構（clients/jobs/invoiceHistory），config 變化頻繁不算
+      const baseSig = JSON.stringify({
+        clients: base.clients || [],
+        jobs: base.jobs || [],
+        invoiceHistory: base.invoiceHistory || []
+      });
+      const remoteSig = JSON.stringify({
+        clients: remoteData.clients || [],
+        jobs: remoteData.jobs || [],
+        invoiceHistory: remoteData.invoiceHistory || []
+      });
+      remoteHasNewChanges = (baseSig !== remoteSig);
+    } catch (_) { /* JSON 失敗就不 toast */ }
+  }
+
   const result = mergeStates(base, local, remoteData);
+
+  // v3.24.34：抓「是否有衝突」flag，給後面 toast 區分用
+  // hadConflicts=true 表示走衝突 toast「N 筆衝突採雲端」；false 走「已同步另一台改動」
+  const hadConflicts = result.conflicts.length > 0;
 
   // v3.24.31：有衝突 → 自動全採雲端（不再開 modal）
   // 取捨：本機未推送的衝突欄位會被覆蓋；使用者場景是「家裡改→關電腦→公司改」單向接力，
@@ -1792,6 +1820,12 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
       cloudPushTimer = null;
     }
     cloudPendingChangesCount = 0;
+
+    // v3.24.34：純 remote 有新改動（無衝突）→ toast 提示「已同步另一台電腦」
+    // hadConflicts=true 時自己有 toast「N 筆衝突採雲端」，這裡不重複跳
+    if (remoteHasNewChanges && !hadConflicts && typeof toast === 'function') {
+      toast('☁️ 已同步另一台電腦的最新改動', 4000);
+    }
 
     // v3.24.23：合併結果跟雲端完全一致 → 跳過 push 避免無謂版本 +1
     // 比對 merged data vs remoteData（兩者都是 { clients, jobs, invoiceHistory, config } 結構）
@@ -13601,20 +13635,48 @@ async function hardReload() {
 }
 
 // 更新 header 的版本標籤
+// v3.24.34：badge 改成以「資料時間」為主要顯示
+//   - 預設：「📊 資料：N 分前同步」（讀 cloudGetMeta().lastSyncedAt）
+//   - 有新 app 版本 → 切換為「🆕 vXXX 點此更新」醒目樣式（紅黃，保留 v3.24.14 強制備份入口）
+//   - 未登入 → 「📊 未連雲端」
+//   - hover title 含完整 app 版本號（debug 用）+ 完整同步時間
 function updateVersionBadge() {
   const el = document.getElementById('app-version-badge');
   if (!el) return;
   const local = APP_VERSION.replace(/^\d{4}-\d{2}-\d{2}-/, '');
-  // v2.10.1: 改用 compareAppVersion 做數字版號比較
+
+  // 1. 有新版 → 醒目「🆕 點此更新」（蓋過資料時間顯示，提醒使用者）
   if (serverAppVersion && compareAppVersion(serverAppVersion, APP_VERSION) > 0) {
     const remote = serverAppVersion.replace(/^\d{4}-\d{2}-\d{2}-/, '');
-    el.innerHTML = `${local} · <span style="color: var(--warning); font-weight: 600;">🆕 ${remote} 點此更新</span>`;
+    el.innerHTML = `<span style="color: var(--warning); font-weight: 600;">🆕 ${remote} 點此更新</span>`;
     el.style.cursor = 'pointer';
-  } else {
-    el.innerHTML = `${local} · <span style="color: var(--muted);">最新</span>`;
-    el.style.cursor = 'pointer';
-    el.title = '點擊強制刷新（清除快取）';
+    el.title = `偵測到新版 ${serverAppVersion}（本機 ${APP_VERSION}）— 點擊強制備份 + 更新`;
+    return;
   }
+
+  // 2. 沒登入 → 顯示未連雲端
+  const signedIn = (typeof isCloudSignedIn === 'function') && isCloudSignedIn();
+  if (!signedIn) {
+    el.innerHTML = `📊 <span style="color: var(--muted);">未連雲端</span>`;
+    el.style.cursor = 'pointer';
+    el.title = `本機版本 ${APP_VERSION}\n（尚未登入 Google Drive，點擊強制刷新）`;
+    return;
+  }
+
+  // 3. 已登入 → 顯示資料時間
+  const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
+  const syncedAt = meta.lastSyncedAt || null;
+  const fullTime = syncedAt && typeof cloudFormatFullTime === 'function' ? cloudFormatFullTime(syncedAt) : '';
+  const relTime = syncedAt && typeof cloudFormatRelativeTime === 'function' ? cloudFormatRelativeTime(syncedAt) : '';
+
+  if (syncedAt) {
+    el.innerHTML = `📊 資料：<span style="color: var(--text);">${relTime}同步</span>`;
+    el.title = `本機 app 版本 ${APP_VERSION}\n資料最後同步：${fullTime}（${relTime}）\n（點擊強制刷新）`;
+  } else {
+    el.innerHTML = `📊 <span style="color: var(--muted);">資料尚未同步</span>`;
+    el.title = `本機 app 版本 ${APP_VERSION}\n尚未同步到雲端\n（點擊強制刷新）`;
+  }
+  el.style.cursor = 'pointer';
 }
 
 function checkAppVersionUpdate() {
