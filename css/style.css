@@ -1641,6 +1641,85 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--primary);
 }
 
+/* v3.24.38：sync-info chip — 雲端資料版本 + 同步時間 */
+.sync-info-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  background: var(--info-light, var(--primary-light));
+  border: 1px solid var(--info, var(--primary));
+  color: var(--info, var(--primary));
+  transition: background .15s, border-color .15s;
+}
+.sync-info-chip:hover { filter: brightness(1.05); }
+.sync-info-chip.is-error {
+  background: var(--danger-light);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.sync-info-chip.is-syncing {
+  background: var(--warning-light);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+.sync-info-chip.hidden { display: none; }
+
+/* v3.24.38：account-pill dropdown menu */
+.account-dropdown { position: relative; }
+.account-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  min-width: 240px;
+  padding: 6px;
+  z-index: 1000;
+}
+.account-dropdown-menu.hidden { display: none; }
+.account-dropdown-menu .ad-header {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.account-dropdown-menu .ad-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.account-dropdown-menu .ad-email { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.account-dropdown-menu .ad-status {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg);
+  border-radius: 6px;
+  margin: 0 0 4px;
+  line-height: 1.6;
+}
+.account-dropdown-menu button.ad-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.account-dropdown-menu button.ad-item:hover { background: var(--bg); }
+.account-dropdown-menu button.ad-item.ad-danger { color: var(--danger); }
+.account-dropdown-menu .ad-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
 /* v3.24.37：top-bar overflow menu（冷門 icon 收進來） */
 .topbar-overflow { position: relative; }
 .topbar-overflow-menu {

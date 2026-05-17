@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.37';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.38';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1035,6 +1035,8 @@ function cloudUpdateSyncIndicator() {
   const el = document.getElementById('sync-indicator');
   // v3.22.9：同時更新右側 account pill 的光暈狀態
   cloudRenderAccountPill();
+  // v3.24.38：sync-info chip 也跟著更新
+  if (typeof renderSyncInfoChip === 'function') renderSyncInfoChip();
   // v3.24.20：行事曆 master toggle 隨登入狀態切換 disabled / 提示
   if (typeof cloudUpdateCalSigninGate === 'function') cloudUpdateCalSigninGate();
   // v3.24.34：app-version-badge 也隨 sync 狀態更新（資料時間相對值會變）
@@ -1147,27 +1149,131 @@ function cloudRenderAccountPill() {
     ? `<img src="${picture}" alt="${escapeHtml(displayName)}" referrerpolicy="no-referrer">`
     : `<span class="pill-icon">${escapeHtml(initial)}</span>`;
 
-  // v3.24.37：sync-indicator 合進 pill，狀態用後綴顯示（不再雙重元件）
-  //   光暈顏色：synced（綠）/ syncing（藍）/ error（紅）/ idle（灰）→ 既有
-  //   後綴文字：error → ✗ 同步失敗 / syncing pending → ⏳ N 筆 / idle → 留白（光暈已表達）
+  // v3.24.38：sync 狀態文字搬到獨立 sync-info-chip，pill 只顯示帳號 + ▾
+  //   光暈仍保留（綠/藍/紅/灰）給快速辨識，點擊改 toggleAccountDropdown
+  pill.innerHTML = `${avatarHtml}<span class="pill-name">${escapeHtml(displayName)}</span><span style="font-size:10px;color:var(--muted);">▾</span>`;
+
+  // hover title：完整 email + 提示「點擊展開」
+  pill.title = `${u.email || ''}\n（點擊展開帳號選單）`;
+}
+
+// v3.24.38：renderSyncInfoChip — 雲端資料版本 + 同步時間獨立 chip
+function renderSyncInfoChip() {
+  const chip = document.getElementById('sync-info-chip');
+  const textEl = document.getElementById('sync-info-chip-text');
+  if (!chip || !textEl) return;
+
+  // 未登入 → 隱藏
+  if (typeof isCloudSignedIn !== 'function' || !isCloudSignedIn()) {
+    chip.classList.add('hidden');
+    return;
+  }
+  chip.classList.remove('hidden', 'is-error', 'is-syncing');
+
   const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
+  const ver = meta.lastSyncedVersion || 0;
   const syncedAt = meta.lastSyncedAt || null;
   const relTime = syncedAt ? cloudFormatRelativeTime(syncedAt) : '';
-  let suffix = '';
-  if (cloudSyncStatus === 'error') {
-    suffix = ' · <span style="color:var(--danger);font-weight:600;font-size:11px;">✗ 同步失敗</span>';
-  } else if (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'pending') {
-    const pendTag = (cloudPendingChangesCount > 0) ? ` ${cloudPendingChangesCount}` : '';
-    suffix = ` · <span style="color:var(--info);font-size:11px;">⏳${pendTag}</span>`;
-  }
-  // idle 時保留空白，靠光暈表達已同步狀態
-  pill.innerHTML = `${avatarHtml}<span class="pill-name">${escapeHtml(displayName)}</span>${suffix}`;
+  const fullTime = syncedAt ? cloudFormatFullTime(syncedAt) : '';
 
-  // hover title：完整 email + 同步狀態文字（給滑鼠停留看細節）
-  const statusText = (cloudSyncStatus === 'error') ? '✗ 同步失敗'
-    : (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'pending') ? '⏳ 同步中'
-    : (relTime ? `✓ ${relTime}同步` : '✓ 已連線');
-  pill.title = `${u.email || ''}\n${statusText}\n（點擊開啟設定頁）`;
+  if (cloudSyncStatus === 'error') {
+    chip.classList.add('is-error');
+    const errLine = cloudLastSyncError ? `\n錯誤：${cloudLastSyncError}` : '';
+    textEl.innerHTML = '⚠️ 同步失敗 · 點此重試';
+    chip.title = `Drive 同步失敗，點擊重試${errLine}`;
+    return;
+  }
+  if (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'pending') {
+    chip.classList.add('is-syncing');
+    const pendTag = (cloudPendingChangesCount > 0) ? ` (${cloudPendingChangesCount})` : '';
+    textEl.innerHTML = `⏳ 同步中…${pendTag}`;
+    chip.title = `正在跟 Drive 同步（${cloudPendingChangesCount} 筆待推）`;
+    return;
+  }
+  // idle
+  if (!syncedAt) {
+    textEl.innerHTML = '☁️ 等候同步…';
+    chip.title = '尚未同步過，等下次推送 / 拉取';
+    return;
+  }
+  textEl.innerHTML = `☁️ #${ver} · ${escapeHtml(relTime)}`;
+  chip.title = `已取得雲端最新資料\n雲端版本：#${ver}\n上次同步：${fullTime}（${relTime}）\n（點擊重新檢查雲端）`;
+}
+
+// v3.24.38：點 sync chip — error 時觸發 cloudRetryPush，其他時觸發 cloudPullNow
+function onSyncInfoChipClick() {
+  if (cloudSyncStatus === 'error') {
+    if (typeof cloudRetryPush === 'function') cloudRetryPush();
+    else if (typeof cloudPullNow === 'function') cloudPullNow();
+    return;
+  }
+  if (typeof cloudPullNow === 'function') {
+    cloudPullNow().catch(e => console.error('[sync-chip] pull failed:', e));
+    if (typeof toast === 'function') toast('☁️ 重新檢查雲端中…', 2000);
+  }
+}
+
+// v3.24.38：toggle account-pill dropdown menu
+function toggleAccountDropdown(forceState) {
+  const menu = document.getElementById('account-dropdown-menu');
+  if (!menu) return;
+
+  // 未登入 → 直接觸發 cloudSignIn（dropdown 沒意義）
+  if (!isCloudSignedIn() || !cloudAuthState.user) {
+    if (typeof cloudSignIn === 'function') cloudSignIn();
+    return;
+  }
+
+  const willShow = (forceState !== undefined) ? forceState : menu.classList.contains('hidden');
+  if (willShow) {
+    renderAccountDropdownMenu();
+    menu.classList.remove('hidden');
+    setTimeout(() => {
+      const closeHandler = (e) => {
+        if (!e.target.closest('#account-dropdown')) {
+          menu.classList.add('hidden');
+          document.removeEventListener('click', closeHandler);
+        }
+      };
+      document.addEventListener('click', closeHandler);
+    }, 0);
+  } else {
+    menu.classList.add('hidden');
+  }
+}
+
+// v3.24.38：dynamic 渲染 dropdown 內容（帳號 / 版本 / 動作）
+function renderAccountDropdownMenu() {
+  const menu = document.getElementById('account-dropdown-menu');
+  if (!menu || !cloudAuthState.user) return;
+  const u = cloudAuthState.user;
+  const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
+  const ver = meta.lastSyncedVersion || 0;
+  const syncedAt = meta.lastSyncedAt || null;
+  const relTime = syncedAt ? cloudFormatRelativeTime(syncedAt) : '尚未同步';
+  const statusIcon = (cloudSyncStatus === 'error') ? '⚠️'
+    : (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'pending') ? '⏳' : '☁️';
+  menu.innerHTML = `
+    <div class="ad-header">
+      <div class="ad-name">${escapeHtml(u.name || '已登入')}</div>
+      <div class="ad-email">${escapeHtml(u.email || '')}</div>
+    </div>
+    <div class="ad-status">
+      ${statusIcon} 雲端版本 #${ver}<br>
+      🕐 ${cloudSyncStatus === 'error' ? '同步失敗（點下方重試）' : relTime + '同步'}
+    </div>
+    <button class="ad-item" onclick="toggleAccountDropdown(false); onSyncInfoChipClick();">🔍 重新檢查雲端</button>
+    <button class="ad-item" onclick="toggleAccountDropdown(false); switchTab('settings');">⚙️ 雲端同步設定</button>
+    <div class="ad-divider"></div>
+    <button class="ad-item ad-danger" onclick="toggleAccountDropdown(false); confirmCloudSignOut();">🚪 登出 Google</button>
+  `;
+}
+
+// v3.24.38：dropdown 內登出前 confirm（避免誤點）
+function confirmCloudSignOut() {
+  if (!isCloudSignedIn()) return;
+  const ok = confirm('登出 Google？\n\n本機資料會保留，但不會再跟 Drive 同步。\n下次登入會自動拉雲端最新版本。');
+  if (ok && typeof cloudSignOut === 'function') cloudSignOut();
 }
 
 // v3.24.37：top-bar overflow menu 開關

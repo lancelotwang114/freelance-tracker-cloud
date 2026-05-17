@@ -1,5 +1,67 @@
 ﻿# 版本更新歷史
 
+## v3.24.38 — 加 sync-info chip + account pill 改 dropdown menu（2026-05-16）
+
+### 背景
+使用者要求「右上角多一顆顯示『已取得雲端最新資料 版本:****』」+「點 Google 圖示不要跳設定，要登出/其他功能」。
+
+### Fix 1：sync-info chip（新元件）
+位置：`#cloud-account-pill` 左邊新增 `#sync-info-chip`
+
+顯示邏輯：
+- **未登入** → 隱藏
+- **idle + 有 lastSyncedAt** → 藍底「☁️ #N · X 分前」
+- **idle + 尚未同步** → 「☁️ 等候同步…」
+- **syncing / pending** → 黃底「⏳ 同步中…(N)」
+- **error** → 紅底「⚠️ 同步失敗 · 點此重試」
+
+點擊行為：
+- error → 觸發 `cloudRetryPush()`
+- 其他 → 觸發 `cloudPullNow()` + toast「☁️ 重新檢查雲端中…」
+
+hover title 顯示完整時間 + 版本資訊。
+
+### Fix 2：cloud-account-pill 改 dropdown menu
+位置：HTML 包進 `<div class="account-dropdown">`，onclick 從 `cloudOnPillClick` 改 `toggleAccountDropdown`
+
+Pill 顯示改成：「頭像 + James ▾」（移除 sync 後綴文字，那部分由 chip 接管）。
+
+點擊行為：
+- **未登入** → 直接觸發 `cloudSignIn()`
+- **已登入** → 展開 dropdown menu，再點外面關閉
+
+dropdown 內容（5 個區塊）：
+1. **帳號資訊**（不可點）：姓名 + email
+2. **狀態資訊**（不可點）：☁️ 雲端版本 #N / 🕐 N 分前同步
+3. **🔍 重新檢查雲端**（點擊 → 同 chip 行為）
+4. **⚙️ 雲端同步設定**（點擊 → 跳設定頁）
+5. **🚪 登出 Google**（紅字 + `confirm()` 確認後 `cloudSignOut()`）
+
+### 順便清掉
+v3.24.37 在設定頁雲端區加的「進階：手動觸發」摺疊區 — chip + dropdown 都接管了，那個冗餘，移除。
+
+### 邏輯整合
+- `cloudRenderAccountPill`：拿掉 sync 後綴文字（chip 接管）
+- `cloudUpdateSyncIndicator`：內部呼叫 `renderSyncInfoChip` 確保 chip 跟著 status 變化
+- 30 秒 indicator ticker 也會跑 chip 渲染（相對時間「5 分前 → 6 分前」自動跳）
+
+### 影響範圍
+- `index.html`：top-bar 加 `#sync-info-chip` + 包 `#cloud-account-pill` 進 `.account-dropdown`；設定頁刪「進階：手動觸發」摺疊
+- `css/style.css`：新增 `.sync-info-chip` / `.account-dropdown-menu` / `.ad-header` / `.ad-status` / `.ad-item` / `.ad-divider` 樣式
+- `js/app.js`：新增 `renderSyncInfoChip` / `onSyncInfoChipClick` / `toggleAccountDropdown` / `renderAccountDropdownMenu` / `confirmCloudSignOut`；`cloudRenderAccountPill` 改為純帳號顯示；`cloudUpdateSyncIndicator` 接通 chip
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ chip 點擊呼叫既有 cloudPullNow / cloudRetryPush，無新同步入口
+2. **mutable 入口併發保護？** ✓ 沿用既有 flag
+3. **時間戳一致？** ✓ 不動，僅顯示
+4. **失敗 alert？** ✓ confirm() 給登出（避免誤點），其他無 alert
+5. **finally 清理？** ✓ dropdown 點外面關閉走 closeHandler
+6. **無變動還 push？** ✓ chip 點擊走既有 pull，內部 skipPush 邏輯保留
+7. **睡眠 throttle？** ✓ 30 秒 ticker 處理相對時間更新
+8. **異地兩台場景？** ✓ chip 隨 cloudResolveAndMerge 完成自動更新版本號
+
+---
+
 ## v3.24.37 — UX/UI 直覺化 ABDEF 大改裝 + revert badge（2026-05-16）
 
 ### 背景
