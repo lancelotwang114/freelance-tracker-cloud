@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.36';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.37';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1147,16 +1147,49 @@ function cloudRenderAccountPill() {
     ? `<img src="${picture}" alt="${escapeHtml(displayName)}" referrerpolicy="no-referrer">`
     : `<span class="pill-icon">${escapeHtml(initial)}</span>`;
 
-  pill.innerHTML = `${avatarHtml}<span class="pill-name">${escapeHtml(displayName)}</span>`;
-
-  // hover title：完整 email + 同步狀態文字
+  // v3.24.37：sync-indicator 合進 pill，狀態用後綴顯示（不再雙重元件）
+  //   光暈顏色：synced（綠）/ syncing（藍）/ error（紅）/ idle（灰）→ 既有
+  //   後綴文字：error → ✗ 同步失敗 / syncing pending → ⏳ N 筆 / idle → 留白（光暈已表達）
   const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
   const syncedAt = meta.lastSyncedAt || null;
   const relTime = syncedAt ? cloudFormatRelativeTime(syncedAt) : '';
+  let suffix = '';
+  if (cloudSyncStatus === 'error') {
+    suffix = ' · <span style="color:var(--danger);font-weight:600;font-size:11px;">✗ 同步失敗</span>';
+  } else if (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'pending') {
+    const pendTag = (cloudPendingChangesCount > 0) ? ` ${cloudPendingChangesCount}` : '';
+    suffix = ` · <span style="color:var(--info);font-size:11px;">⏳${pendTag}</span>`;
+  }
+  // idle 時保留空白，靠光暈表達已同步狀態
+  pill.innerHTML = `${avatarHtml}<span class="pill-name">${escapeHtml(displayName)}</span>${suffix}`;
+
+  // hover title：完整 email + 同步狀態文字（給滑鼠停留看細節）
   const statusText = (cloudSyncStatus === 'error') ? '✗ 同步失敗'
     : (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'pending') ? '⏳ 同步中'
     : (relTime ? `✓ ${relTime}同步` : '✓ 已連線');
   pill.title = `${u.email || ''}\n${statusText}\n（點擊開啟設定頁）`;
+}
+
+// v3.24.37：top-bar overflow menu 開關
+function toggleTopbarOverflow(forceState) {
+  const menu = document.getElementById('topbar-overflow-menu');
+  if (!menu) return;
+  const willShow = (forceState !== undefined) ? forceState : menu.classList.contains('hidden');
+  if (willShow) {
+    menu.classList.remove('hidden');
+    // 點外面關閉
+    setTimeout(() => {
+      const closeHandler = (e) => {
+        if (!e.target.closest('#topbar-overflow')) {
+          menu.classList.add('hidden');
+          document.removeEventListener('click', closeHandler);
+        }
+      };
+      document.addEventListener('click', closeHandler);
+    }, 0);
+  } else {
+    menu.classList.add('hidden');
+  }
 }
 
 // v3.22.3：每 30 秒更新一次 indicator，讓相對時間「30 秒前」自動跳成「1 分前」等
@@ -4316,11 +4349,11 @@ const JOBS_VIEW_KEY = 'cloud-ftJobsView_v1';
 let jobsView = (function () {
   try {
     const v = localStorage.getItem(JOBS_VIEW_KEY);
-    if (!v) return 'table';  // v3.21.0：新使用者預設報表模式
-    // 舊 'list' → 'comfort'
-    if (v === 'list') return 'comfort';
+    if (!v) return 'compact';  // v3.24.37：預設改列表（compact，一行一筆）— 報表對新使用者太重
+    // 舊 'list' → 'compact'（v3.21.0 時叫 'comfort'，v3.24.37 合併成 'compact'）
+    if (v === 'list' || v === 'comfort' || v === 'card') return 'compact';
     return v;
-  } catch (_) { return 'table'; }
+  } catch (_) { return 'compact'; }
 })();
 
 // v3.18.0：列表分組模式（none / date / client / status / tag）
@@ -7904,7 +7937,7 @@ const MASCOT_COOLDOWN_MS = 30 * 1000;          // 同類事件 30 秒不重複
 const MASCOT_BUBBLE_HIDE_MS = 5000;            // 對話框 5 秒消失
 const MASCOT_SHAKE_MS = 400;                   // 抖動動畫
 let mascotState = {
-  enabled: true,                               // 預設 ON
+  enabled: false,                              // v3.24.37：預設 OFF（討厭過度設計的人不被打擾）
   name: '',                                    // 個人化名字
   lastTriggerTimes: {},                        // event → timestamp
   hideTimer: null,
@@ -8105,7 +8138,8 @@ const MASCOT_EVENT_TO_STATE = {
 function mascotInit() {
   if (mascotInited) return;
   mascotInited = true;
-  mascotState.enabled = config.mascotEnabled !== false;  // 預設 true（首次也是）
+  // v3.24.37：預設 false（首次使用不被打擾），既有使用者 config.mascotEnabled === true 仍維持開啟
+  mascotState.enabled = config.mascotEnabled === true;
   mascotState.name = config.mascotName || '';
   const c = document.getElementById('mascot-container');
   if (c) {
@@ -8210,6 +8244,9 @@ function onMascotEnabledChange(checked) {
   saveConfigOnly();
   const c = document.getElementById('mascot-container');
   if (c) c.classList.toggle('hidden', !mascotState.enabled);
+  // v3.24.37：取名字 / 試試看區塊跟著 toggle 顯示
+  const extra = document.getElementById('mascot-extra-settings');
+  if (extra) extra.classList.toggle('hidden', !mascotState.enabled);
   if (!mascotState.enabled) mascotHideBubble();
   toast(checked ? '✓ 已啟用小幫手' : '✓ 已關閉小幫手', 2000);
 }
@@ -11409,13 +11446,16 @@ function renderTodayTodo() {
     });
   }
 
-  // 沒任何重點 → 隱藏卡
+  // v3.24.37：沒任何重點 → 顯示空 state（不再隱藏卡，行動永遠優先顯示）
+  card.classList.remove('hidden');
   if (items.length === 0) {
-    card.classList.add('hidden');
+    box.innerHTML = `<div class="today-todo-item" style="opacity:.65;">
+      <span class="today-todo-icon">☕</span>
+      <span class="today-todo-text">今天沒有截止 / 拖款警告 / 月底提醒，享受空檔吧</span>
+    </div>`;
     return;
   }
 
-  card.classList.remove('hidden');
   // 按 priority 排序
   items.sort((a, b) => a.priority - b.priority);
   box.innerHTML = items.map(it => {
@@ -11728,7 +11768,10 @@ function setJobDetailsOpenState(j) {
   if (j) {
     if (discount) discount.open = (j.discountType && j.discountType !== 'none') || (+j.discountValue > 0);
     if (subtasks) subtasks.open = (j.subtasks || []).length > 0;
-    if (payments) payments.open = (j.payments || []).length > 0 || (+j.writeOff > 0);
+    // v3.24.37：已完成 + 金額 > 0 + 還沒全收 → 收款狀況預設展開（標收款是最常見動作）
+    const hasPayments = (j.payments || []).length > 0 || (+j.writeOff > 0);
+    const doneNeedsPay = !!j.done && (+j.amount > 0) && !j.paid;
+    if (payments) payments.open = hasPayments || doneNeedsPay;
   } else {
     // 新增模式：全部收摺
     if (discount) discount.open = false;
@@ -13919,48 +13962,22 @@ async function hardReload() {
 }
 
 // 更新 header 的版本標籤
-// v3.24.34：badge 改成以「資料時間」為主要顯示
-//   - 預設：「📊 資料：N 分前同步」（讀 cloudGetMeta().lastSyncedAt）
-//   - 有新 app 版本 → 切換為「🆕 vXXX 點此更新」醒目樣式（紅黃，保留 v3.24.14 強制備份入口）
-//   - 未登入 → 「📊 未連雲端」
-//   - hover title 含完整 app 版本號（debug 用）+ 完整同步時間
+// v3.24.37：revert v3.24.34，恢復顯示 app 版本號為主
+//   資料時間已在右上角 sync-indicator pill 顯示，不再 badge 重複
 function updateVersionBadge() {
   const el = document.getElementById('app-version-badge');
   if (!el) return;
   const local = APP_VERSION.replace(/^\d{4}-\d{2}-\d{2}-/, '');
-
-  // 1. 有新版 → 醒目「🆕 點此更新」（蓋過資料時間顯示，提醒使用者）
   if (serverAppVersion && compareAppVersion(serverAppVersion, APP_VERSION) > 0) {
     const remote = serverAppVersion.replace(/^\d{4}-\d{2}-\d{2}-/, '');
-    el.innerHTML = `<span style="color: var(--warning); font-weight: 600;">🆕 ${remote} 點此更新</span>`;
+    el.innerHTML = `${local} · <span style="color: var(--warning); font-weight: 600;">🆕 ${remote} 點此更新</span>`;
     el.style.cursor = 'pointer';
     el.title = `偵測到新版 ${serverAppVersion}（本機 ${APP_VERSION}）— 點擊強制備份 + 更新`;
-    return;
-  }
-
-  // 2. 沒登入 → 顯示未連雲端
-  const signedIn = (typeof isCloudSignedIn === 'function') && isCloudSignedIn();
-  if (!signedIn) {
-    el.innerHTML = `📊 <span style="color: var(--muted);">未連雲端</span>`;
-    el.style.cursor = 'pointer';
-    el.title = `本機版本 ${APP_VERSION}\n（尚未登入 Google Drive，點擊強制刷新）`;
-    return;
-  }
-
-  // 3. 已登入 → 顯示資料時間
-  const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
-  const syncedAt = meta.lastSyncedAt || null;
-  const fullTime = syncedAt && typeof cloudFormatFullTime === 'function' ? cloudFormatFullTime(syncedAt) : '';
-  const relTime = syncedAt && typeof cloudFormatRelativeTime === 'function' ? cloudFormatRelativeTime(syncedAt) : '';
-
-  if (syncedAt) {
-    el.innerHTML = `📊 資料：<span style="color: var(--text);">${relTime}同步</span>`;
-    el.title = `本機 app 版本 ${APP_VERSION}\n資料最後同步：${fullTime}（${relTime}）\n（點擊強制刷新）`;
   } else {
-    el.innerHTML = `📊 <span style="color: var(--muted);">資料尚未同步</span>`;
-    el.title = `本機 app 版本 ${APP_VERSION}\n尚未同步到雲端\n（點擊強制刷新）`;
+    el.innerHTML = `${local} · <span style="color: var(--muted);">最新</span>`;
+    el.style.cursor = 'pointer';
+    el.title = `本機 app 版本 ${APP_VERSION}\n（點擊強制刷新）`;
   }
-  el.style.cursor = 'pointer';
 }
 
 function checkAppVersionUpdate() {

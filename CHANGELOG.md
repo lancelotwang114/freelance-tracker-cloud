@@ -1,5 +1,55 @@
 ﻿# 版本更新歷史
 
+## v3.24.37 — UX/UI 直覺化 ABDEF 大改裝 + revert badge（2026-05-16）
+
+### 背景
+使用者要求「左上版本號保留原樣 + 其他 UX/UI 看有沒有改善空間 直覺一點」。spawn Plan agent 找到 15 條建議，使用者選做 A+B+D+E+F（跳過 C 請款分頁雙軌制）。額外驗證「立即同步」按鈕必要性 → 選保留但去主視覺化。
+
+### revert v3.24.34
+- `updateVersionBadge` 回顯示「v3.24.37 · 最新 / 🆕 點此更新」，資料時間已在 cloud-account-pill 顯示，不再 badge 重複
+
+### A. 右上工具列瘦身
+- **A1**：砍 `#sync-indicator` pill，狀態合進 `#cloud-account-pill`（光暈顏色 + 後綴文字「· ⏳ 3」「· ✗ 同步失敗」）。一個元件講一件事
+- **A2**：↻ 重新整理 + 📜 操作日誌 收進 `⋮` overflow menu（新增 `toggleTopbarOverflow` + CSS `.topbar-overflow-menu`）
+- **A3**：主題按鈕從 `<button>主題</button>` 改 emoji `🌓` + 統一 `topbar-icon-btn` class，視覺一致
+
+### B. Dashboard 行動優先
+- **B1**：`#today-todo-card` 永遠顯示在 stat-grid 上面（空 state 顯示「☕ 今天沒有截止 / 拖款警告 / 月底提醒，享受空檔吧」）— 取代原本 hidden 設計
+- **B2**：stat 4 卡 → 3 卡（已收 / 待收 / 待完成），年度收益降為次行 caption `.stat-year-caption`（單行小字）
+
+### D. 案件視覺
+- **D1**：5 視圖 → 3 視圖（comfort + card 砍掉，跟 compact 重疊）。保留：📋 列表（compact，預設）/ 📊 報表 / 🗂️ 看板。按鈕加文字 label
+  - 既有使用者 localStorage 'comfort' / 'card' 自動 mapping 到 'compact'
+- **D2**：進行中案件加左色條 `border-left: 3px solid var(--primary)` indicator（`.row.state-pending` / `.row-compact.state-pending`），一眼分辨「還在做」
+- **D3**：案件 modal 已完成 + amount > 0 + 未付清 → 收款狀況預設展開（標收款是最高頻動作）
+
+### E. 設定頁瘦身
+- **E1**：「💾 離線資料備份」`<details>` 從 collapsed 改 `open`（匯出 JSON 是常用操作）
+- **E2**：mascot 預設 OFF（`mascotState.enabled = false`、`mascotInit` 改 `=== true` 嚴格判斷）。既有使用者 `config.mascotEnabled === true` 仍維持
+- **E3**：9 個 mascot 狀態預覽 dev tool 整段移除（idle/loading/thinking/success/error/searching/celebrating/sleeping/wink），完全不該在 user UI
+- **E4**：「🔄 立即同步」改純文字連結樣式 `🔍 重新檢查雲端`，搬進「▸ 進階：手動觸發」摺疊區，附說明「平常會自動同步，這裡是給想手動驗證用的」
+
+### F. 其他
+- **F1**：行事曆 legend 從純文字「方框內顏色=業主色 · 黃框=完成未收款 ...」改 chip-style 視覺示意（`.cal-legend-chip` 三個彩色 chip + 一句 hint）
+- **F2**：stat 卡左框 3px → 4px（4 種角色 warning/danger/success/info/year 更明顯）
+- **F3**：案件 modal sticky 儲存列 — 一查 `.modal-actions` 在 v3.6.x 就是 sticky 了，跳過
+
+### 影響範圍
+- `index.html`：top-bar 結構（A1+A2+A3）、dashboard（B1+B2）、案件 tab 視圖切換（D1）、行事曆 legend（F1）、設定頁雲端區（E4）、mascot 區（E2+E3）、離線備份 details（E1）
+- `css/style.css`：`.topbar-overflow-menu` 樣式、stat 卡 4px 邊框、`.stat-year-caption`、`.row.state-pending` 進行中色條、`.cal-legend-chip` 行事曆 legend
+- `js/app.js`：`cloudRenderAccountPill` 後綴文字、`toggleTopbarOverflow`、`renderTodayTodo` 空 state、`jobsView` 預設改 compact + 舊值 mapping、`setJobDetailsOpenState` 已完成展開收款、`onMascotEnabledChange` 顯示 extra-settings、`mascotState.enabled` 預設 false、`updateVersionBadge` revert
+- `service-worker.js`：CACHE_VERSION → v3.24.37
+
+### 取捨 / 沒做的
+- 跳過 C 請款分頁雙軌制（5 preset + 5 checkbox + 5 匯出按鈕統一改造）— 使用者明確不選
+- 砍 mascot 整段：使用者明確說「對孤獨工作者是情緒燃料，留 toggle」→ 預設關 + 砍 dev tool 即可
+
+### 反建議（不做的事）
+- 不加「立即同步」主按鈕到 top bar — 同步應該隱形，使用者只看狀態就好
+- 不把「子任務」「折扣」details 改成預設展開 — 案件 modal 已經夠長
+
+---
+
 ## v3.24.36 — 第二輪深挖：修 push 死循環 / 「永不重登」UX 8 個 bug（2026-05-16）
 
 ### 背景

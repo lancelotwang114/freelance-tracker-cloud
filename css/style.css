@@ -254,12 +254,34 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .stat .label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .stat .value { font-size: 22px; font-weight: 700; }
 .stat .delta { font-size: 12px; color: var(--success); margin-top: 2px; }
-.stat.warning { border-left: 3px solid var(--warning); }
-.stat.danger { border-left: 3px solid var(--danger); }
+/* v3.24.37：stat 卡左框 3px → 4px，4 種角色（warning/danger/success/info）更明顯 */
+.stat.warning { border-left: 4px solid var(--warning); }
+.stat.danger { border-left: 4px solid var(--danger); }
 /* v3.24.18：stat 卡顏色語意統一（已收款=綠 / 待完成=藍 / 年度=紫，跟現有 warning=黃 / danger=紅 對齊） */
-.stat.success { border-left: 3px solid var(--success); }
-.stat.info { border-left: 3px solid var(--primary); }
-.stat.year { border-left: 3px solid #a855f7; }  /* 紫色，跟收益分頁累計收入 legend 一致 */
+.stat.success { border-left: 4px solid var(--success); }
+.stat.info { border-left: 4px solid var(--primary); }
+.stat.year { border-left: 4px solid #a855f7; }  /* 紫色，跟收益分頁累計收入 legend 一致 */
+
+/* v3.24.37：年度收益降為次行 caption */
+.stat-grid-3 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.stat-year-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--card);
+  border-radius: 8px;
+  border-left: 3px solid #a855f7;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.stat-year-caption:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,.06); }
+.stat-year-caption .label { color: var(--muted); font-size: 12px; }
+.stat-year-caption .value { font-weight: 700; color: var(--text); font-size: 15px; }
+.stat-year-caption .delta { color: var(--muted); font-size: 12px; margin-left: auto; }
 /* v3.6.0：可點擊的 stat（hover 提示可互動）*/
 .stat.clickable { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
 .stat.clickable:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.05); border-color: var(--primary); }
@@ -327,6 +349,41 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .row.state-prepaid { background: linear-gradient(to right, transparent 60%, var(--primary-light)); }
 .row.state-prepaid .amount { color: var(--primary); }
 .row.state-prepaid .amount::after { content: " · 已收·待做"; font-size: 11px; font-weight: 500; }
+
+/* v3.24.37：進行中案件（未完成 + 未收款）加左色條 indicator
+   jobStatus 回 'pending'，class 為 .row.state-pending
+   修「進行中跟已完成已收款混在一起，無法一眼分辨哪些還在做」UX 問題 */
+.row.state-pending {
+  border-left: 3px solid var(--primary);
+  padding-left: 8px;
+}
+.row-compact.state-pending {
+  border-left: 3px solid var(--primary);
+}
+
+/* v3.24.37：行事曆 chip-style legend（取代純文字說明） */
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 11px;
+}
+.cal-legend-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: white;
+  font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.cal-legend-hint {
+  color: var(--muted);
+  margin-left: 4px;
+}
 
 /* 行事曆 prepaid chip */
 .cal-chip.prepaid { outline: 1.5px solid var(--primary); outline-offset: -1.5px; }
@@ -1583,6 +1640,36 @@ input:focus, select:focus, textarea:focus {
   background: var(--bg);
   border-color: var(--primary);
 }
+
+/* v3.24.37：top-bar overflow menu（冷門 icon 收進來） */
+.topbar-overflow { position: relative; }
+.topbar-overflow-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 180px;
+  padding: 4px;
+  z-index: 1000;
+}
+.topbar-overflow-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.topbar-overflow-menu button:hover { background: var(--bg); }
+.topbar-overflow-menu.hidden { display: none; }
 
 /* ==================== Job modal v2 分區重排（v3.6.4）==================== */
 /* 標題列 + 估價單 toggle */

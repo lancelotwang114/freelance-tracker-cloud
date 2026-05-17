@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-16-v3.24.36">
+<meta name="app-version" content="2026-05-16-v3.24.37">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -74,13 +74,19 @@
           <button id="active-timer-toggle-btn" onclick="event.stopPropagation(); onActiveTimerToggleBtn()" class="active-timer-btn" title="暫停 / 繼續">⏸</button>
           <button onclick="event.stopPropagation(); finishActiveTimer()" class="active-timer-btn" title="結束計時並加到工時欄">✓</button>
         </div>
-        <!-- v3.6.1：右上 icon 按鈕統一放大（font-size 18px、padding 7px 11px） -->
+        <!-- v3.24.37：top-bar 工具列瘦身 — 常駐只留 🔍 / 主題 / overflow ⋮ / cloud pill -->
         <button id="global-search-toggle-btn" onclick="toggleGlobalSearch()" title="全域搜尋（業主 / 案件 / 備註）" class="topbar-icon-btn" aria-label="搜尋">🔍</button>
-        <button id="hard-reload-btn" onclick="hardReload()" title="重新整理（清除所有快取、Service Worker、Cookie）" class="topbar-icon-btn" aria-label="重新整理">↻</button>
-        <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" class="topbar-icon-btn" aria-label="操作日誌">📜</button>
-        <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" style="background: none; border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer; color: var(--text); white-space: nowrap;">主題</button>
-        <div id="sync-indicator" class="sync-indicator sync-idle" onclick="switchTab('settings')" title="點擊開啟設定頁">○ 未啟用</div>
-        <!-- v3.22.9 + v3.22.10：Google 帳號 pill（頭像 + 名字，光暈反映同步狀態；error 時點擊直接重連） -->
+        <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" class="topbar-icon-btn" aria-label="切換主題">🌓</button>
+        <!-- v3.24.37：冷門 icon 收進 overflow menu（操作日誌、重新整理） -->
+        <div class="topbar-overflow" id="topbar-overflow">
+          <button id="topbar-overflow-btn" onclick="toggleTopbarOverflow()" title="更多" class="topbar-icon-btn" aria-label="更多">⋮</button>
+          <div class="topbar-overflow-menu hidden" id="topbar-overflow-menu">
+            <button onclick="openActionLogModal(); toggleTopbarOverflow(false);">📜 操作日誌</button>
+            <button onclick="hardReload();">↻ 重新整理 / 清快取</button>
+          </div>
+        </div>
+        <!-- v3.22.9 + v3.22.10：Google 帳號 pill（頭像 + 名字 + 同步狀態後綴）
+             v3.24.37：sync-indicator 合進來，狀態靠光暈 + pill 後綴文字（不再雙重顯示） -->
         <div id="cloud-account-pill" class="cloud-account-pill status-idle" onclick="cloudOnPillClick()" title="尚未登入 Google Drive（點擊登入）">
           <span class="pill-icon">＋</span><span class="pill-name">登入</span>
         </div>
@@ -123,15 +129,14 @@
       </div>
     </div>
 
-    <!-- v3.24.18：今天該做什麼 -->
-    <div class="card today-todo-card hidden" id="today-todo-card">
+    <!-- v3.24.18：今天該做什麼 / v3.24.37：移到 stat-grid 上方 + 永遠顯示（空 state 由 renderTodayTodo 處理） -->
+    <div class="card today-todo-card" id="today-todo-card">
       <h3 style="margin: 0 0 8px 0; font-size: 14px;">⚡ 今天的重點</h3>
       <div id="today-todo-list"></div>
     </div>
 
-    <!-- v3.6.0：4 張 stat 卡可點擊，跳轉案件 tab 自動套對應 filter -->
-    <!-- v3.24.18：HTML 預設「$0」→「NT$0」初始 flash 一致；stat-paid 加 success class、stat-pending 加 info class（顏色語意統一） -->
-    <div class="stat-grid">
+    <!-- v3.6.0：3 張 stat 卡可點擊（v3.24.37 從 4→3：年度收益降為次行 caption，本月聚焦） -->
+    <div class="stat-grid stat-grid-3">
       <div class="stat success clickable" onclick="dashStatJump('paid')" title="點擊查看本月已收款的案件">
         <div class="label">本月已收款</div>
         <div class="value" id="stat-paid">NT$0</div>
@@ -147,11 +152,12 @@
         <div class="value" id="stat-pending">NT$0</div>
         <div class="delta" id="stat-pending-sub" style="color: var(--muted);">0 筆</div>
       </div>
-      <div class="stat year clickable" onclick="dashStatJump('year')" title="點擊查看年度已收款的案件">
-        <div class="label">年度已收款</div>
-        <div class="value" id="stat-year">NT$0</div>
-        <div class="delta" id="stat-year-sub"></div>
-      </div>
+    </div>
+    <!-- v3.24.37：年度收益降為次行 caption（單行小字），跟「本月」3 卡並列會混淆 -->
+    <div class="stat-year-caption clickable" onclick="dashStatJump('year')" title="點擊查看年度已收款的案件">
+      📊 <span class="label">年度累積</span>
+      <span class="value" id="stat-year">NT$0</span>
+      <span class="delta" id="stat-year-sub"></span>
     </div>
 
     <div class="card">
@@ -179,15 +185,15 @@
   <section id="tab-jobs" class="hidden">
     <div class="filter-bar" id="job-filter"></div>
     <div class="card">
-      <!-- v3.21.0：視圖切換 5 種（完整/緊湊/報表/卡片/看板），預設報表 -->
+      <!-- v3.21.0：視圖切換 / v3.24.37：5 → 3 視圖（comfort 跟 card 視圖砍掉，跟 compact/board 重疊）
+           保留：列表（compact，一行一筆，預設）/ 報表（table）/ 看板（board，看板拖曳）
+           按鈕加文字 label，emoji-only 不直覺 -->
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
           <div class="jobs-view-toggle" id="jobs-view-toggle">
-            <button data-view="comfort" onclick="setJobsView('comfort')" title="完整列表（每筆一張卡）">📋</button>
-            <button data-view="compact" onclick="setJobsView('compact')" title="緊湊列表（一行一筆）">📑</button>
-            <button class="active" data-view="table" onclick="setJobsView('table')" title="報表模式（spreadsheet 表格）">📊</button>
-            <button data-view="card" onclick="setJobsView('card')" title="卡片視圖（grid 排列）">🎴</button>
-            <button data-view="board" onclick="setJobsView('board')" title="看板模式（4 column 拖曳）">🗂️</button>
+            <button class="active" data-view="compact" onclick="setJobsView('compact')" title="列表（一行一筆）">📋 列表</button>
+            <button data-view="table" onclick="setJobsView('table')" title="報表（spreadsheet 表格）">📊 報表</button>
+            <button data-view="board" onclick="setJobsView('board')" title="看板（4 column 拖曳）">🗂️ 看板</button>
           </div>
           <!-- v3.18.0：分組（僅列表模式有效） -->
           <label class="rev-control-group" id="jobs-group-control">
@@ -228,8 +234,12 @@
         <button class="btn btn-outline btn-sm" onclick="calToday()">今天</button>
       </div>
       <div class="cal-grid" id="cal-grid"></div>
-      <div style="font-size: 11px; color: var(--muted); text-align: center; margin-top: 8px;">
-        方框內顏色=業主色 · 黃框=完成未收款 · 淡化=已收款 · 點卡片可編輯
+      <!-- v3.24.37：純文字 legend → chip-style 視覺示意 -->
+      <div class="cal-legend">
+        <span class="cal-legend-chip" style="background:#3b82f6;">業主色</span>
+        <span class="cal-legend-chip" style="background:transparent; border:2px solid var(--warning); color:var(--text);">黃框=待收</span>
+        <span class="cal-legend-chip" style="background:transparent; opacity:.5; border:1px solid var(--border); color:var(--muted);">淡化=已收</span>
+        <span class="cal-legend-hint">點卡片可編輯</span>
       </div>
     </div>
     <div class="card">
@@ -690,12 +700,21 @@
             <button type="button" class="btn btn-outline btn-sm" onclick="cloudSignOut()">登出</button>
           </div>
 
-          <!-- 立即同步按鈕（v3.24.19：移除下方「token 1 小時過期」說明，silent refresh 已自動續） -->
-          <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-            <button type="button" class="btn btn-outline btn-sm" onclick="cloudPullNow()" title="從 Drive 拉取最新版本">
-              🔄 立即同步
-            </button>
-          </div>
+          <!-- v3.24.37：立即同步按鈕去主視覺化（自動觸發已涵蓋 99% 場景，這個只是心理控制感）
+               改純文字連結樣式，搬進「進階」摺疊區 -->
+          <details class="cloud-sub-section" style="margin-top: 8px;">
+            <summary style="cursor: pointer; font-size: 11px; color: var(--muted); padding: 4px 0;">▸ 進階：手動觸發</summary>
+            <div style="margin-top: 8px; padding: 8px 0;">
+              <button type="button" onclick="cloudPullNow()"
+                      style="background:none; border:none; padding:4px 0; font-size:12px; color:var(--primary); cursor:pointer; text-decoration:underline;"
+                      title="主動從 Drive 拉最新版本（平常會自動同步，這個是手動觸發檢查用）">
+                🔍 重新檢查雲端
+              </button>
+              <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+                平常切回分頁 / 編輯時會自動同步，這裡是給「想手動驗證」用的。
+              </div>
+            </div>
+          </details>
         </div>
 
         <!-- v3.24.20：📦 雲端版本歷史 改 details 折疊 -->
@@ -717,8 +736,9 @@
         </div>
         </details>
 
-        <!-- v3.24.20：💾 離線資料備份 改 details 折疊 -->
-        <details class="cloud-sub-section">
+        <!-- v3.24.20：💾 離線資料備份 改 details 折疊
+             v3.24.37：預設展開（匯出 JSON 是常用操作，給「想保險」的人方便存檔） -->
+        <details class="cloud-sub-section" open>
         <summary><span class="cloud-sub-title">💾 離線資料備份</span></summary>
         <div class="cloud-sub-body">
         <h4 style="margin: 8px 0; font-size: 14px; font-weight: 600; display: none;">💾 離線資料備份</h4>
@@ -761,41 +781,26 @@
 
         <div class="section-divider"></div>
 
-        <!-- 🤖 小幫手 sub-section（v3.24.16 從原獨立 card 搬來） -->
+        <!-- 🤖 小幫手 sub-section（v3.24.16 從原獨立 card 搬來；v3.24.37 預設關閉 + 砍 dev tool 預覽） -->
         <h4 style="margin: 4px 0 8px; font-size: 14px; font-weight: 600;">🤖 小幫手</h4>
         <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
-          <input type="checkbox" id="pref-mascot-enabled" onchange="onMascotEnabledChange(this.checked)" checked style="margin-top: 3px;">
+          <input type="checkbox" id="pref-mascot-enabled" onchange="onMascotEnabledChange(this.checked)" style="margin-top: 3px;">
           <div>
-            <div style="font-weight: 500;">啟用小幫手</div>
+            <div style="font-weight: 500;">啟用小幫手（預設關閉）</div>
             <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
-              左下角浮動的小角色。完成案件 / 收款 / 新增案件等時候會跳鼓勵文字。
+              左下角浮動的小角色。完成案件 / 收款 / 新增案件等時候會跳鼓勵文字。想要鼓勵動畫的人可以勾起來。
             </div>
           </div>
         </label>
-        <div style="margin-top: 12px; padding: 12px; background: var(--bg); border-radius: 8px;">
+        <div id="mascot-extra-settings" class="hidden" style="margin-top: 12px; padding: 12px; background: var(--bg); border-radius: 8px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">給它取個名字（選填）</label>
           <input type="text" id="pref-mascot-name" placeholder="例如：小機、嘟嘟、肝寶…" maxlength="8" oninput="onMascotNameChange(this.value)" style="width: 100%; max-width: 200px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
           <div style="margin-top: 6px; font-size: 11px; color: var(--muted);">取了名字之後，小幫手講話會自動帶上稱呼（例：「小機：完成一筆，做得好！」）</div>
-        </div>
-        <div style="margin-top: 12px;">
-          <button class="btn btn-outline btn-sm" onclick="mascotTestSay()">試試看 ▶</button>
-          <span style="margin-left: 8px; font-size: 11px; color: var(--muted);">（隨機說一句鼓勵的話）</span>
-        </div>
-        <!-- v3.24.17：9 個狀態預覽按鈕收進 details 預設折疊，避免一打開卡片就一堆按鈕 -->
-        <details style="margin-top: 12px;">
-          <summary style="cursor: pointer; font-size: 12px; color: var(--muted); padding: 6px 12px; background: var(--bg); border-radius: 8px;">▸ 預覽其他狀態（看左下角 mascot 反應）</summary>
-          <div style="margin-top: 8px; padding: 10px 12px; background: var(--bg); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('idle')">😊 待機</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('loading')">⌛ 處理中</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('thinking')">🤔 思考</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('success')">✅ 完成</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('error')">❌ 錯誤</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('searching')">🔍 搜尋中</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('celebrating')">🎉 慶祝</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotSetState('sleeping')">😴 睡覺</button>
-            <button class="btn btn-outline btn-sm" onclick="mascotWink()">😉 眨眼</button>
+          <div style="margin-top: 10px;">
+            <button class="btn btn-outline btn-sm" onclick="mascotTestSay()">試試看 ▶</button>
+            <span style="margin-left: 8px; font-size: 11px; color: var(--muted);">（隨機說一句鼓勵的話）</span>
           </div>
-        </details>
+        </div>
       </div>
     </div>
 
