@@ -1,5 +1,91 @@
 ﻿# 版本更新歷史
 
+## v3.24.36 — 第二輪深挖：修 push 死循環 / 「永不重登」UX 8 個 bug（2026-05-16）
+
+### 背景
+使用者要求「繼續尋找 然後確保我各地電腦編輯都不會出現同步跟登入登出問題等等」。並行 spawn 2 個獨立 agent 從不同角度深挖（同步 race / 登入登出 UX），各找到 6+9 個新問題。本次修最致命的 8 個。
+
+### Fix N16（🔴 critical push 死循環）：cloudPushNow version check inline merge
+**問題**：cloudPushNow 在 version check 偵測到雲端較新時 `await cloudResolveAndMerge(...)`。但 cloudPushNow 已搶 cloudPushInProgress 鎖 → cloudResolveAndMerge 內部偵測 in progress → 設 pendingAfter return → 沒實際 push → finally setTimeout 觸發 pendingAfter cloudPushNow → 又進 version check → 又走 cloudResolveAndMerge → 又走 pendingAfter → **死循環 fetch/merge 但永遠 push 不上去**（直到網路抖動或對齊 modifiedTime）。
+
+**修法**：把 cloudPushNow version-check 路徑改為 inline 處理 mergeStates + conflict + skipPush，不再呼叫會自己搶鎖的 cloudResolveAndMerge：
+- 純函式 mergeStates
+- 衝突自動 remote-wins + fire-and-forget 備份
+- skipPush 路徑提早 return
+- 需要 push：state 已是 merged → 繼續走外層 cloudPushNow 後面的 buildTrackerWrapper + driveUpdateFile（caller 已搶鎖）
+
+### Fix N1（🔴 critical init flag 卡死）：cloudInitTrackerFile 包 try/finally
+**問題**：cloudResolveAndMerge throw → cloudInitInProgress 永遠 true → 後續所有 cloudInitTrackerFile 被擋 → 整個 app 拿不到雲端資料。
+
+**修法**：把主體包 try/finally，finally 內 `cloudInitInProgress = false` + `hideInitOverlay()`（雙保險）。
+
+### Fix B5（🔴 critical 假登入卡死）：access_denied / invalid_grant 直接登出
+**問題**：Google 端撤銷 token → `resp.error === 'access_denied'` → 走 `_handleSilentRefreshFailure` 3 次 retry 全失敗 → 卡 error，但 `cloudAuthState.user` 還在、pill 仍顯示登入 → 使用者困惑地「✗ 同步失敗 + 已登入」。
+
+**修法**：cloudOnTokenResponse 內偵測 error code = `access_denied` / `invalid_grant` / `unauthorized_client` → 直接 `cloudSignOut()` 清狀態 + toast「Google 端已撤銷授權，請重新登入」。
+
+### Fix B6（🔴 critical 編輯被覆蓋）：modal 開啟時延後 auto pull
+**問題**：使用者編輯案件 modal 中，silent refresh 成功 → cloudAutoPullThrottled → cloudPullNow → applyTrackerData → state 被改寫 → 使用者按存檔可能蓋掉 remote 改動 / 找不到原本 job。
+
+**修法**：cloudAutoPullThrottled 內加 `_isAnyModalOpen()` 檢查，modal 開啟時延後 30 秒再試。
+
+### Fix B7（🟡 鐵則被繞過）：暫時關閉期間每 30 秒積極 retry
+**問題**：使用者按「暫時關閉 5 分鐘」後 overlay 移除，但 status 仍 error。5 分鐘內可不停編輯，背景沒主動修復。
+
+**修法**：`dismissSyncErrorOverlayTemp` 內排 `_syncErrorAggressiveRetryTimer` 每 30 秒主動 silent refresh + push retry，5 分鐘到才 stop 並 reshow overlay。
+
+### Fix B1（🔴 永不重登核心）：silent refresh 3 次失敗後 5 分鐘長間隔 retry
+**問題**：`_handleSilentRefreshFailure` 達 MAX 後不主動 retry，靠 visibility / focus / heartbeat / periodic 外部 trigger。使用者不切視窗 + 不編輯 + 電腦不睡眠 → silent refresh 永遠不會再試 → 即使 Google session 恢復可用，使用者仍要手動重登。
+
+**修法**：3 次失敗後排 `_silentRefreshLongRetryTimer` 5 分鐘後再試（計數歸零，下次仍走 3 次指數退避）。
+
+### Fix B3（🟡 ensureValidToken 誤判）：retry pending 期間視為仍在 refresh
+**問題**：silent refresh 第 1 次失敗 → 排 5 秒後 retry → 5 秒內使用者編輯 → `cloudPushNow` → `ensureValidToken` 看 `_isSilentRefreshing=false` → return false → push 失敗紅 banner。但其實 5 秒後 retry 就會恢復。
+
+**修法**：ensureValidToken 內檢查 `_silentRefreshRetryTimer` / `_silentRefreshLongRetryTimer` 是否還排著，是 → 視為「仍在 refresh 中」繼續等。
+
+### Fix B4（🟡 手動登入被當 silent）：cloudSignIn 設 `_isManualSignIn` flag
+**問題**：使用者卡在 silent refresh 中按重新登入 → callback `wasSilentRefresh = _isSilentRefreshing = true` → 走 silent refresh 分支 → 不更新 user info、不跳 calendar prompt → UI 沒反應。
+
+**修法**：新增 `_isManualSignIn` flag，cloudSignIn 入口 set true + 清 silent refresh 進行中 state。cloudOnTokenResponse 內優先 `_isManualSignIn`，true 時不走 silent 分支。
+
+### Fix N4（🟡 no-base 路徑沒備份）：cloudPullNow 沒 snapshot 時也備份本機
+**問題**：cloudPullNow line 4070 fallback「沒 base 但有 fileId → 直接 apply」會覆蓋本機。
+
+**修法**：偵測本機有資料 + 跟雲端不同 → fire-and-forget cloudCreateSnapshot 備份本機。
+
+### 順便加的小改進
+- **Y6 修**：cloudSignIn 加 2 秒 debounce 防連點開兩個 popup
+- **G1 修**：getValidAccessToken 的 token expire buffer 從 60s 拉長到 5 分鐘（Drive API 大檔上傳期間 token 剛好過期 401 風險）
+- 衝突備份失敗時加醒目 toast 10 秒提示（cloudResolveAndMerge + cloudPushNow inline 都加）
+- cloudSignOut 加清 `_silentRefreshLongRetryTimer` / `_syncErrorGuardReshowTimer` / `_isManualSignIn`
+
+### 還沒處理（agent 報告中的 high，可分批處理）
+- **N2**：driveListAppFolder 不分頁，衝突備份累積後 list snapshots 變慢
+- **N3**：衝突備份 fire-and-forget 失敗仍 push（已改 toast 提示，但仍非強制）
+- **N5 / B9**：BroadcastChannel 沒同步 token / state（multi-tab race）
+- **B2 / B8**：GIS callback race window（safety timer 30s 後遲到 callback 走錯分支）
+- **Y1 / Y2 / Y4**：restored path init 沒 showInitOverlay 時間差、登出 race、SDK 載入失敗 + restored=true
+- **G2 / G4**：periodic refresh check 在 error 時也試、BroadcastChannel 廣播 sign-out
+- **L1-L7**：dead code 清理等低優先
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ inline merge 接管 push 路徑，cloudResolveAndMerge 三個 caller 鎖邏輯明確
+2. **mutable 入口併發保護？** ✓ cloudPushInProgress 仍是唯一 push 入口鎖
+3. **時間戳一致？** ✓ inline 用 result.meta.lastModifiedAt（雲端權威）
+4. **失敗 alert？** ✓ silent refresh 失敗用 toast，access_denied 用 toast
+5. **finally 清理？** ✓ cloudInitTrackerFile 包 try/finally 雙保險
+6. **無變動還 push？** ✓ inline merge skipPush check 跟原 cloudResolveAndMerge 一致
+7. **睡眠 throttle？** ✓ B1 用 setTimeout 5 分鐘，睡眠時 throttle 但喚醒 catchUp + heartbeat 雙保險
+8. **異地兩台場景？** ✓ N16 inline merge 直接修「version check 偵測雲端新版」場景
+
+### 影響範圍
+- `js/app.js`：cloudPushNow（inline merge）、cloudInitTrackerFile（try/finally）、_handleSilentRefreshFailure（B1 + B5）、cloudOnTokenResponse（B5 + B4）、cloudSignIn（B4 + Y6 + debounce）、cloudSignOut（清新 timer）、cloudAutoPullThrottled（B6 + _isAnyModalOpen）、dismissSyncErrorOverlayTemp（B7）、ensureValidToken（B3）、getValidAccessToken（G1 buffer）、cloudPullNow no-base 路徑（N4 備份）、cloudResolveAndMerge + cloudPushNow 衝突備份失敗 toast
+- `index.html`：meta version → v3.24.36
+- `service-worker.js`：CACHE_VERSION → v3.24.36
+
+---
+
 ## v3.24.35 — 獨立 code review 找到 7 個 critical/high bug 全修（2026-05-16）
 
 ### 背景

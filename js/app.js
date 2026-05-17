@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.35';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.36';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -296,11 +296,30 @@ async function cloudInitGoogleAuth() {
 }
 
 // 點「使用 Google 登入」按鈕（index.html 的 onclick 直接呼叫）
+// v3.24.36（Y6 修）：debounce 連點重新登入按鈕，避免開兩個 popup
+let _cloudSignInClickAt = 0;
+const CLOUD_SIGNIN_DEBOUNCE_MS = 2000;
 function cloudSignIn() {
   if (!cloudAuthState.initialized || !cloudAuthState.tokenClient) {
     alert('Google 登入元件還沒準備好，請稍候再試');
     return;
   }
+  // 2 秒內重複點 → 忽略
+  const now = Date.now();
+  if (now - _cloudSignInClickAt < CLOUD_SIGNIN_DEBOUNCE_MS) {
+    console.log('[cloud-auth] cloudSignIn debounced (< 2s since last click)');
+    return;
+  }
+  _cloudSignInClickAt = now;
+
+  // v3.24.36（B4 修）：清理 silent refresh 進行中的狀態，標記為手動登入
+  //   修「silent refresh 中按重新登入 → callback 走 silent 分支不更新 user info」bug
+  _isManualSignIn = true;
+  _isSilentRefreshing = false;
+  if (_silentRefreshSafetyTimer) { clearTimeout(_silentRefreshSafetyTimer); _silentRefreshSafetyTimer = null; }
+  if (_silentRefreshRetryTimer) { clearTimeout(_silentRefreshRetryTimer); _silentRefreshRetryTimer = null; }
+  if (_silentRefreshLongRetryTimer) { clearTimeout(_silentRefreshLongRetryTimer); _silentRefreshLongRetryTimer = null; }
+
   // prompt: '' = 已授權直接放行、未授權跳同意畫面（一般情境用這個）
   // v3.24.22：帶 hint 加速重登 — 指定上次的 Google 帳號，避免跳出帳號選擇器
   const hint = cloudAuthState.user && cloudAuthState.user.email;
@@ -328,8 +347,11 @@ const REFRESH_RETRY_DELAYS_MS = [5000, 10000, 20000];
 const MAX_REFRESH_RETRIES = REFRESH_RETRY_DELAYS_MS.length;  // 3
 let _silentRefreshTimer = null;
 let _silentRefreshRetryTimer = null;
+let _silentRefreshLongRetryTimer = null;  // v3.24.36：3 次 retry 失敗後排的 5 分鐘長間隔 retry timer（B1 修）
+const SILENT_REFRESH_LONG_RETRY_MS = 5 * 60 * 1000;
 let _isSilentRefreshing = false;  // 區分手動登入 vs 背景 refresh
 let _silentRefreshRetries = 0;    // 連續失敗次數（成功就歸零）
+let _isManualSignIn = false;  // v3.24.36：B4 修 — 區分使用者手動重登 vs silent refresh，callback 內優先這個
 
 function _scheduleSilentRefresh() {
   if (_silentRefreshTimer) {
@@ -402,12 +424,31 @@ function cloudAutoPullThrottled(trigger) {
     console.log(`[auto-pull] ${trigger}: throttled (${Math.round((now - _lastAutoPullAt)/1000)}s < 5min)`);
     return;
   }
+  // v3.24.36（B6 修）：如果使用者正在編輯 modal → 延後 auto pull
+  //   修「silent refresh 成功 → cloudAutoPullThrottled → cloudPullNow → applyTrackerData 蓋掉編輯中內容」bug
+  //   檢查方式：找有 .open class 的 modal，或 .modal-bg.show
+  if (_isAnyModalOpen()) {
+    console.log(`[auto-pull] ${trigger}: modal 開啟中，延後 30 秒再試`);
+    setTimeout(() => cloudAutoPullThrottled(trigger), 30 * 1000);
+    return;
+  }
   _lastAutoPullAt = now;
   console.log(`[auto-pull] ${trigger}: pulling…`);
   if (typeof cloudPullNow === 'function') {
     // v3.24.23：auto 觸發 → silent 模式，不跳 alert（race condition 時 token 失效不會打斷使用者）
     cloudPullNow(true).catch(e => console.warn('[auto-pull] failed:', e));
   }
+}
+
+// v3.24.36：偵測是否有 modal 開啟（auto pull 期間擋編輯）
+function _isAnyModalOpen() {
+  // 找有 .open 或 .show 的 modal-bg / modal class
+  const selectors = ['.modal-bg.open', '.modal-bg.show', '.modal.open', '.modal.show',
+                     '#job-modal.open', '#client-modal.open', '#invoice-modal.open'];
+  for (const sel of selectors) {
+    try { if (document.querySelector(sel)) return true; } catch (_) {}
+  }
+  return false;
 }
 
 // v3.24.22：心跳偵測 — 每 30 秒檢查「距上次心跳的時間差」
@@ -460,7 +501,7 @@ function _handleSilentRefreshFailure(errMsg) {
   }
   // 重試也失敗 → 通知 user 但不清 state（避免閃登出）
   _silentRefreshRetries = 0;
-  console.error('[cloud-auth] silent refresh failed after retries:', errMsg);
+  console.error('[cloud-auth] silent refresh failed after 3 retries:', errMsg);
   // v3.24.13：toast 飄一下不夠醒目 → 觸發 banner（cloudSetSyncStatus 會連動 banner）
   if (typeof cloudSetSyncStatus === 'function') {
     cloudSetSyncStatus('error', 'Google 連線過期，請點右上角「重新登入」');
@@ -468,12 +509,27 @@ function _handleSilentRefreshFailure(errMsg) {
   if (typeof toast === 'function') {
     toast('⚠️ Google 連線過期，請點頂部紅條重新登入（資料未同步）', 10000);
   }
+  // v3.24.36（B1 修）：5 分鐘後主動排下一次 retry，計數歸零讓下次仍走 3 次指數退避
+  //   修「3 次失敗後不主動 retry」設計脆弱：使用者不切視窗 / 不編輯 → silent refresh 永遠不會再試
+  //   即使 Google session 已恢復可用，使用者也要手動點重新登入才會恢復
+  if (_silentRefreshLongRetryTimer) clearTimeout(_silentRefreshLongRetryTimer);
+  _silentRefreshLongRetryTimer = setTimeout(() => {
+    _silentRefreshLongRetryTimer = null;
+    if (cloudAuthState.user && cloudAuthState.tokenClient && !getValidAccessToken()) {
+      console.log('[cloud-auth] 5 分鐘長間隔 retry 觸發 silent refresh');
+      _silentRefresh();
+    }
+  }, SILENT_REFRESH_LONG_RETRY_MS);
 }
 
 // GIS callback：拿到 access token（成功 or 失敗都會進這裡）
 async function cloudOnTokenResponse(resp) {
   // v3.22.2：抓 silent refresh flag 後立刻清，避免後續流程誤判
-  const wasSilentRefresh = _isSilentRefreshing;
+  // v3.24.36（B4 修）：優先看 _isManualSignIn — 使用者手動點重登時不論 silent flag 都當 manual
+  //   修「卡在 silent refresh 又按重登」時 callback 走錯分支不更新 user info / 不跳 calendar prompt 問題
+  const wasManualSignIn = _isManualSignIn;
+  _isManualSignIn = false;
+  const wasSilentRefresh = _isSilentRefreshing && !wasManualSignIn;
   _isSilentRefreshing = false;
   // v3.24.27：GIS callback 來了 → 清 safety timer（避免 30 秒後誤觸發 force reset）
   if (_silentRefreshSafetyTimer) {
@@ -483,6 +539,20 @@ async function cloudOnTokenResponse(resp) {
 
   if (resp.error) {
     console.error('[cloud-auth] token error:', resp);
+    // v3.24.36（B5 修）：Google 端撤銷 token / 拒絕授權 → 直接登出避免「假登入」永遠卡住
+    //   原本走 _handleSilentRefreshFailure → 永遠 retry 失敗，pill 仍顯示登入但 token 過期
+    //   修法：偵測 access_denied / invalid_grant → cloudSignOut 清狀態 + 明確訊息
+    const errCode = (resp.error || '').toLowerCase();
+    if (errCode === 'access_denied' || errCode === 'invalid_grant' || errCode === 'unauthorized_client') {
+      console.warn('[cloud-auth] Google 端已撤銷授權 (' + errCode + ')，強制登出');
+      if (typeof cloudSignOut === 'function') cloudSignOut();
+      if (typeof toast === 'function') {
+        toast('⚠️ Google 端已撤銷授權，請重新登入', 8000);
+      } else {
+        alert('Google 端已撤銷授權，請重新登入');
+      }
+      return;
+    }
     if (wasSilentRefresh) {
       // v3.22.10：背景 refresh 失敗 → 走 retry 流程（不清 state，避免閃登出）
       _handleSilentRefreshFailure(resp.error_description || resp.error);
@@ -667,18 +737,21 @@ function cloudSignOut() {
   try { localStorage.removeItem(CLOUD_META_KEY); } catch (_) {}
 
   // v3.24.35：登出時清掉所有背景 timer，避免跨帳號污染
-  // 修「watchdog setTimeout 已排在 5 分鐘後，使用者登出 → 換帳號 → watchdog fire → 用新帳號 token 推舊資料」bug
+  // v3.24.36：加 _silentRefreshLongRetryTimer + _syncErrorGuardReshowTimer + _isManualSignIn
   if (_cloudPushWatchdogTimer) { clearTimeout(_cloudPushWatchdogTimer); _cloudPushWatchdogTimer = null; }
   if (cloudPushTimer) { clearTimeout(cloudPushTimer); cloudPushTimer = null; }
   if (_silentRefreshTimer) { clearTimeout(_silentRefreshTimer); _silentRefreshTimer = null; }
   if (_silentRefreshRetryTimer) { clearTimeout(_silentRefreshRetryTimer); _silentRefreshRetryTimer = null; }
   if (_silentRefreshSafetyTimer) { clearTimeout(_silentRefreshSafetyTimer); _silentRefreshSafetyTimer = null; }
+  if (_silentRefreshLongRetryTimer) { clearTimeout(_silentRefreshLongRetryTimer); _silentRefreshLongRetryTimer = null; }
   if (_syncErrorGuardTimer) { clearTimeout(_syncErrorGuardTimer); _syncErrorGuardTimer = null; }
+  if (_syncErrorGuardReshowTimer) { clearTimeout(_syncErrorGuardReshowTimer); _syncErrorGuardReshowTimer = null; }
   cloudPushFailRetries = 0;
   cloudPendingChangesCount = 0;
   cloudPushPendingAfter = false;
   _silentRefreshRetries = 0;
   _isSilentRefreshing = false;
+  _isManualSignIn = false;
   // 清 sync error overlay（如果在顯示）
   if (typeof hideSyncErrorOverlay === 'function') hideSyncErrorOverlay();
 
@@ -781,18 +854,41 @@ function _syncErrorGuardOnStatusChange(status, prev) {
 //   修 H2/H3 bug：按一次暫時關閉後若 status 維持 error 不變化，
 //   _syncErrorGuardOnStatusChange 永遠不會重新排 grace timer → overlay 永遠不回來 → 鐵則被繞過
 //   修法：點下去 → 移除 overlay + 排 5 分鐘 timer，到時若仍 error 自動重新顯示
+// v3.24.36（B7 修）：暫時關閉期間更積極 retry — 每 30 秒嘗試 silent refresh + push，
+//   修「使用者按暫時關閉後 5 分鐘內持續編輯，但背景沒有積極修復」鐵則漏洞
+let _syncErrorAggressiveRetryTimer = null;
 function dismissSyncErrorOverlayTemp() {
   hideSyncErrorOverlay();
   if (_syncErrorGuardReshowTimer) clearTimeout(_syncErrorGuardReshowTimer);
   _syncErrorGuardReshowTimer = setTimeout(() => {
     _syncErrorGuardReshowTimer = null;
+    if (_syncErrorAggressiveRetryTimer) { clearInterval(_syncErrorAggressiveRetryTimer); _syncErrorAggressiveRetryTimer = null; }
     if (cloudSyncStatus === 'error') {
       console.warn('[sync-guard] 5 分鐘後仍 error，重新顯示 overlay');
       showSyncErrorOverlay();
     }
   }, SYNC_ERROR_GUARD_RESHOW_MS);
+
+  // v3.24.36：每 30 秒積極 retry（5 分鐘內最多 10 次）
+  if (_syncErrorAggressiveRetryTimer) clearInterval(_syncErrorAggressiveRetryTimer);
+  _syncErrorAggressiveRetryTimer = setInterval(() => {
+    if (cloudSyncStatus !== 'error') {
+      clearInterval(_syncErrorAggressiveRetryTimer);
+      _syncErrorAggressiveRetryTimer = null;
+      return;
+    }
+    console.log('[sync-guard] 積極 retry：silent refresh + push');
+    if (cloudAuthState.user && cloudAuthState.tokenClient && !getValidAccessToken()) {
+      _silentRefresh();
+    }
+    if (cloudPendingChangesCount > 0 && typeof cloudPushNow === 'function') {
+      cloudPushFailRetries = 0;  // 給新機會
+      cloudPushNow().catch(() => {});
+    }
+  }, 30 * 1000);
+
   if (typeof toast === 'function') {
-    toast('⚠️ 已暫時關閉提示，5 分鐘後若仍未同步會再次提醒', 4000);
+    toast('⚠️ 已暫時關閉提示，背景每 30 秒嘗試恢復，5 分鐘後若仍未同步會再次提醒', 5000);
   }
 }
 
@@ -1077,10 +1173,11 @@ function cloudStartIndicatorTicker() {
 // ---------- 對外 API（alpha.2 開始寫 Drive API 同步時會用到）----------
 
 // 拿可用的 access token；過期或未登入回 null
-// 留 60 秒 buffer 避免「拿到但下一秒就過期」的競爭
+// 留 5 分鐘 buffer 避免「拿到但下一秒就過期」的競爭
+// v3.24.36（G1 修）：60 秒 → 5 分鐘，避免 Drive API 大檔上傳期間 token 剛好過期 401
 function getValidAccessToken() {
   if (!cloudAuthState.accessToken) return null;
-  if (Date.now() > cloudAuthState.tokenExpiresAt - 60_000) return null;
+  if (Date.now() > cloudAuthState.tokenExpiresAt - 5 * 60_000) return null;
   return cloudAuthState.accessToken;
 }
 
@@ -1104,11 +1201,17 @@ async function ensureValidToken(timeoutMs = 30000) {
   }
 
   // 等 silent refresh 完成（_isSilentRefreshing 變 false 且 token valid），或 timeout
+  // v3.24.36（B3 修）：retry timer / long retry timer 還排著時視為「仍在 refresh 中」繼續等
+  //   修「silent refresh 第 1 次失敗 → 排 5 秒後 retry → 5 秒內使用者編輯 → ensureValidToken
+  //   看到 _isSilentRefreshing=false → 直接 return false → push 失敗紅 banner」誤判
   const startTime = Date.now();
   while (true) {
     if (getValidAccessToken()) return true;
-    if (!_isSilentRefreshing) {
-      // refresh 結束但 token 還無效 → 失敗（可能 Google session 過期、要使用者重登）
+    const stillRefreshing = _isSilentRefreshing
+      || (_silentRefreshRetryTimer !== null && _silentRefreshRetries > 0 && _silentRefreshRetries < MAX_REFRESH_RETRIES)
+      || (_silentRefreshLongRetryTimer !== null);
+    if (!stillRefreshing) {
+      // refresh 真的結束且 token 還無效 → 失敗
       return false;
     }
     if (Date.now() - startTime > timeoutMs) return false;
@@ -1624,6 +1727,13 @@ async function cloudInitTrackerFile() {
   // （race condition：剛改的東西可能被 merge 結果覆蓋）
   if (typeof showInitOverlay === 'function') showInitOverlay();
 
+  // v3.24.36：包 try/finally 確保任何異常都 reset flag
+  //   修 N1 bug：原本 cloudResolveAndMerge throw → cloudInitInProgress 永遠 true
+  //   → 後續所有 cloudInitTrackerFile 呼叫都被擋（line 1617 early return）
+  //   → 「整個 app 永遠拿不到雲端資料」
+  // 用 IIFE 把原本的主體包進去，失敗時 finally 一定會 hide overlay + reset flag
+  try {
+
   let trackerFile = null;
   try {
     const files = await driveListAppFolder(`name = "${TRACKER_FILENAME}" and trashed = false`);
@@ -1748,6 +1858,15 @@ async function cloudInitTrackerFile() {
       cloudPullNow(true).catch(e => console.error('[cloud-init] base 重建 pull failed:', e));
     }
   }
+  } catch (e) {
+    // v3.24.36：包 try 確保異常時也 reset flag
+    console.error('[cloud-init] unhandled error:', e);
+    if (typeof logAction === 'function') logAction('cloud-init-error', { error: e.message || String(e) });
+  } finally {
+    // 保證 flag reset（hideInitOverlay 已經會 reset，這裡是雙保險）
+    cloudInitInProgress = false;
+    if (typeof hideInitOverlay === 'function') hideInitOverlay();
+  }
 }
 
 // ---------- 衝突解決 modal（α2-4b）----------
@@ -1820,6 +1939,10 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
         })
         .catch(e => {
           console.error('[cloud-merge] 衝突前備份失敗（仍繼續 merge）:', e);
+          // v3.24.36：備份失敗 → 醒目 toast 提示使用者，避免「悄悄被覆蓋」
+          if (typeof toast === 'function') {
+            toast('⚠️ 衝突備份失敗，本機改動可能被覆蓋！建議手動建備份', 10000);
+          }
           if (typeof logAction === 'function') {
             logAction('cloud-conflict-backup-failed', { error: e.message || String(e) });
           }
@@ -2429,26 +2552,97 @@ async function cloudPushNow() {
             remoteModifiedTime, lastSyncedAt, fileId: meta.trackerFileId
           });
         }
-        // 重 pull → 跑 cloudResolveAndMerge 重新合併（內部會處理衝突 modal 或自動合併後 push）
+        // 重 pull → inline 跑 mergeStates（不呼叫 cloudResolveAndMerge）
+        // v3.24.36：原本 await cloudResolveAndMerge → 內部偵測 cloudPushInProgress=true（外層 cloudPushNow 已搶）
+        //   → 走 pendingAfter return → cloudPushNow finally 觸發 pendingAfter setTimeout 重排
+        //   → 新 cloudPushNow 又進 version check → 又走 cloudResolveAndMerge → 又走 pendingAfter
+        //   → **死循環 fetch/merge 但永遠 push 不上去**（直到網路/雲端對齊 modifiedTime）
+        // 修法：cloudPushNow 自己 inline 處理 mergeStates + conflict + skipPush，不再走 cloudResolveAndMerge，
+        //       因為 caller 已搶 cloudPushInProgress 鎖，不該再呼叫會自己搶鎖的函式
         const remoteText = await driveDownloadFile(meta.trackerFileId);
         const result = unwrapTracker(remoteText);
         if (result.ok) {
-          // 走完整 merge 流程（會 push 結果）
-          await cloudResolveAndMerge({
-            remoteData: result.data,
-            remoteMeta: result.meta,
-            fileId: meta.trackerFileId,
-            trackerCreatedAt: result.meta.createdAt
-          });
-          // resolveAndMerge 內已 push + setMeta，這裡直接收尾
-          cloudPushFailRetries = 0;
+          // 跑 mergeStates（純函式）
+          const base = cloudGetLastSyncedSnapshot();
+          const local = {
+            clients: state.clients,
+            jobs: state.jobs,
+            invoiceHistory: state.invoiceHistory,
+            config: config
+          };
+          const mr = mergeStates(base, local, result.data);
+          const hadConflicts = mr.conflicts.length > 0;
+
+          // 衝突 → 先備份本機 → remote-wins 改寫（同 cloudResolveAndMerge 邏輯）
+          if (hadConflicts) {
+            console.warn(`[cloud-push] version-check 偵測到 ${mr.conflicts.length} 筆衝突 → 先備份本機 → remote-wins`);
+            if (typeof cloudCreateSnapshot === 'function') {
+              const tsLabel = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+              const conflictLabel = `衝突備份_${mr.conflicts.length}筆_${tsLabel}`;
+              cloudCreateSnapshot('manual', conflictLabel)
+                .then(c => console.log('[cloud-push] ✓ 衝突備份已建立:', c.id))
+                .catch(e => {
+                  console.error('[cloud-push] 衝突備份失敗:', e);
+                  if (typeof toast === 'function') {
+                    toast('⚠️ 衝突備份失敗，本機改動可能被覆蓋！建議手動建備份', 10000);
+                  }
+                });
+            }
+            mr.conflicts.forEach(c => {
+              if (c.kind === 'field-conflict') {
+                if (c.type === 'config') {
+                  if (mr.merged.config) mr.merged.config[c.field] = c.remoteValue;
+                } else {
+                  const list = c.type === 'client' ? mr.merged.clients : mr.merged.jobs;
+                  const item = list && list.find(x => x.id === c.id);
+                  if (item) item[c.field] = c.remoteValue;
+                }
+              } else if (c.kind === 'delete-vs-edit' && c.side === 'remote-deleted') {
+                const list = c.type === 'client' ? mr.merged.clients : mr.merged.jobs;
+                if (list) {
+                  const idx = list.findIndex(x => x.id === c.id);
+                  if (idx >= 0) list.splice(idx, 1);
+                }
+              }
+            });
+            if (typeof toast === 'function') {
+              toast(`☁️ ${mr.conflicts.length} 筆衝突採雲端（本機已備份到 Drive 快照）`, 5000);
+            }
+          }
+
+          // 套用 merged 結果到本機
+          applyTrackerData(mr.merged);
           cloudPendingChangesCount = 0;
-          cloudSetSyncStatus('idle');
-          if (typeof toast === 'function') toast('✓ 偵測到雲端有新版，已自動合併', 3000);
-          return;
+
+          // skipPush check：merged === remote → 無需 push
+          let skipPush = false;
+          try {
+            if (JSON.stringify(mr.merged) === JSON.stringify(result.data)) skipPush = true;
+          } catch (_) {}
+
+          if (skipPush) {
+            cloudSaveMeta({
+              trackerFileId: meta.trackerFileId,
+              trackerCreatedAt: meta.trackerCreatedAt || result.meta.createdAt,
+              lastSyncedAt: result.meta.lastModifiedAt,
+              lastSyncedVersion: result.meta.version,
+            });
+            cloudSaveLastSyncedSnapshot(result.data);
+            cloudPushFailRetries = 0;
+            cloudSetSyncStatus('idle');
+            if (typeof toast === 'function') toast('☁️ 對齊雲端版本完成', 3000);
+            return;
+          }
+
+          // 需要 push：state 已是 merged，繼續往下走 cloudPushNow 後面的 buildTrackerWrapper + driveUpdateFile
+          // 注意：要用 result.meta.version 當 base（剛拉下來的版本），不是 meta.lastSyncedVersion
+          // 把 meta.lastSyncedVersion 暫時設成 result.meta.version 讓 buildTrackerWrapper 算出正確的下個版本
+          meta.lastSyncedVersion = result.meta.version;
+          console.log(`[cloud-push] inline merge 完成，繼續推 merged → 雲端 v${result.meta.version + 1}`);
+        } else {
+          // unwrap 失敗 → 走原本流程（風險較高但不能讓 push 永遠卡住）
+          console.warn('[cloud-push] 雲端 unwrap 失敗，仍照原本流程嘗試 push');
         }
-        // unwrap 失敗 → 走原本流程（風險較高但不能讓 push 永遠卡住）
-        console.warn('[cloud-push] 雲端 unwrap 失敗，仍照原本流程嘗試 push');
       }
     } catch (e) {
       // version check 失敗（網路 / token）→ 不阻塞 push，繼續走原本流程
@@ -3874,7 +4068,34 @@ async function cloudPullNow(silent) {
       });
       cloudSetSyncStatus('idle');
     } else {
-      // 沒 base 但有 fileId（不太可能發生的狀態）→ 直接 apply 視為「重新初始化 base」
+      // 沒 base 但有 fileId（snapshot 被清掉 / 從未寫入）→ 直接 apply 視為「重新初始化 base」
+      // v3.24.36（N4 修）：本機有資料且本機 vs 雲端不同 → 先 fire-and-forget 備份本機後再 apply
+      //   修「snapshot=null + 本機有改動 → cloudPullNow 直接覆蓋本機」資料丟失風險
+      const localHasData = (state.clients && state.clients.length > 0)
+                         || (state.jobs && state.jobs.length > 0)
+                         || (state.invoiceHistory && state.invoiceHistory.length > 0);
+      if (localHasData) {
+        // 比對本機 vs 雲端是否真的不同
+        let differs = false;
+        try {
+          const localSig = JSON.stringify({ clients: state.clients || [], jobs: state.jobs || [], invoiceHistory: state.invoiceHistory || [] });
+          const remoteSig = JSON.stringify({ clients: result.data.clients || [], jobs: result.data.jobs || [], invoiceHistory: result.data.invoiceHistory || [] });
+          differs = (localSig !== remoteSig);
+        } catch (_) { differs = true; }  // JSON 失敗就當不同（保守備份）
+
+        if (differs && typeof cloudCreateSnapshot === 'function') {
+          const tsLabel = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+          const backupLabel = `Pull前備份_無base_${tsLabel}`;
+          console.warn('[cloud-pull] no-base + 本機有資料 vs 雲端不同 → 先備份本機');
+          cloudCreateSnapshot('manual', backupLabel)
+            .then(c => console.log('[cloud-pull] ✓ no-base 路徑備份已建立:', c.id))
+            .catch(e => {
+              console.error('[cloud-pull] no-base 路徑備份失敗:', e);
+              if (typeof toast === 'function') toast('⚠️ 同步基準重建備份失敗，本機改動可能被覆蓋', 10000);
+            });
+          if (typeof toast === 'function') toast('☁️ 已從雲端載入資料（本機已備份到 Drive 快照）', 5000);
+        }
+      }
       applyTrackerData(result.data);
       cloudSaveLastSyncedSnapshot(result.data);
       cloudSaveMeta({
