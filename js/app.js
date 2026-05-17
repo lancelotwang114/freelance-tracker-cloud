@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.34';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.35';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -666,6 +666,22 @@ function cloudSignOut() {
   try { localStorage.removeItem(CLOUD_LAST_SYNCED_KEY); } catch (_) {}
   try { localStorage.removeItem(CLOUD_META_KEY); } catch (_) {}
 
+  // v3.24.35：登出時清掉所有背景 timer，避免跨帳號污染
+  // 修「watchdog setTimeout 已排在 5 分鐘後，使用者登出 → 換帳號 → watchdog fire → 用新帳號 token 推舊資料」bug
+  if (_cloudPushWatchdogTimer) { clearTimeout(_cloudPushWatchdogTimer); _cloudPushWatchdogTimer = null; }
+  if (cloudPushTimer) { clearTimeout(cloudPushTimer); cloudPushTimer = null; }
+  if (_silentRefreshTimer) { clearTimeout(_silentRefreshTimer); _silentRefreshTimer = null; }
+  if (_silentRefreshRetryTimer) { clearTimeout(_silentRefreshRetryTimer); _silentRefreshRetryTimer = null; }
+  if (_silentRefreshSafetyTimer) { clearTimeout(_silentRefreshSafetyTimer); _silentRefreshSafetyTimer = null; }
+  if (_syncErrorGuardTimer) { clearTimeout(_syncErrorGuardTimer); _syncErrorGuardTimer = null; }
+  cloudPushFailRetries = 0;
+  cloudPendingChangesCount = 0;
+  cloudPushPendingAfter = false;
+  _silentRefreshRetries = 0;
+  _isSilentRefreshing = false;
+  // 清 sync error overlay（如果在顯示）
+  if (typeof hideSyncErrorOverlay === 'function') hideSyncErrorOverlay();
+
   const setText = (id, txt) => {
     const el = document.getElementById(id);
     if (el) el.textContent = txt;
@@ -731,7 +747,11 @@ function cloudSetSyncStatus(status, errMsg) {
 //      只留「重新登入 / 立刻重試 / 我堅持要看資料」三個出口。
 //      sync 恢復 idle → 立刻撤 overlay。
 const SYNC_ERROR_GUARD_GRACE_MS = 20 * 1000;  // 20 秒 grace（避免短暫網路抖動誤觸發）
+// v3.24.35：使用者按「暫時關閉」後，N 分鐘後若仍 error 自動重新顯示
+//   修「按一次暫時關閉就整段 session 失去保護」bug（違反鐵則「沒同步擋編輯」）
+const SYNC_ERROR_GUARD_RESHOW_MS = 5 * 60 * 1000;  // 5 分鐘
 let _syncErrorGuardTimer = null;
+let _syncErrorGuardReshowTimer = null;  // v3.24.35：「暫時關閉」後排重新顯示
 
 function _syncErrorGuardOnStatusChange(status, prev) {
   // error 出現 → 排 grace timer
@@ -749,7 +769,30 @@ function _syncErrorGuardOnStatusChange(status, prev) {
       clearTimeout(_syncErrorGuardTimer);
       _syncErrorGuardTimer = null;
     }
+    if (_syncErrorGuardReshowTimer) {
+      clearTimeout(_syncErrorGuardReshowTimer);
+      _syncErrorGuardReshowTimer = null;
+    }
     hideSyncErrorOverlay();
+  }
+}
+
+// v3.24.35：「暫時關閉」按鈕專屬 handler（取代直接 hideSyncErrorOverlay）
+//   修 H2/H3 bug：按一次暫時關閉後若 status 維持 error 不變化，
+//   _syncErrorGuardOnStatusChange 永遠不會重新排 grace timer → overlay 永遠不回來 → 鐵則被繞過
+//   修法：點下去 → 移除 overlay + 排 5 分鐘 timer，到時若仍 error 自動重新顯示
+function dismissSyncErrorOverlayTemp() {
+  hideSyncErrorOverlay();
+  if (_syncErrorGuardReshowTimer) clearTimeout(_syncErrorGuardReshowTimer);
+  _syncErrorGuardReshowTimer = setTimeout(() => {
+    _syncErrorGuardReshowTimer = null;
+    if (cloudSyncStatus === 'error') {
+      console.warn('[sync-guard] 5 分鐘後仍 error，重新顯示 overlay');
+      showSyncErrorOverlay();
+    }
+  }, SYNC_ERROR_GUARD_RESHOW_MS);
+  if (typeof toast === 'function') {
+    toast('⚠️ 已暫時關閉提示，5 分鐘後若仍未同步會再次提醒', 4000);
   }
 }
 
@@ -777,8 +820,8 @@ function showSyncErrorOverlay() {
     '    <button class="btn btn-primary" style="width:100%;" onclick="cloudRetryPush()">立刻重試同步</button>' +
     '    <button class="btn btn-outline" style="width:100%;" onclick="cloudSignIn()">重新登入 Google</button>' +
     '    <button class="btn btn-outline" style="width:100%;background:none;color:var(--muted);font-size:12px;" ' +
-    '            onclick="hideSyncErrorOverlay()" title="僅暫時關閉，下次 error 還是會出現">' +
-    '      暫時關閉（不建議，可能造成資料衝突）' +
+    '            onclick="dismissSyncErrorOverlayTemp()" title="暫時關閉 5 分鐘，仍未同步會自動重新顯示">' +
+    '      暫時關閉 5 分鐘（不建議，可能造成資料衝突）' +
     '    </button>' +
     '  </div>' +
     '</div>';
@@ -1552,9 +1595,12 @@ function applyTrackerData(data) {
 
 // 本機是否完全空白（沒業主、沒案件 → 視為「全新裝置」可直接拉雲端）
 function isLocalDataEmpty() {
+  // v3.24.35：也檢查 invoiceHistory（v3.12.0 加的，原本漏判）
+  //   修「本機只剩 invoiceHistory 但 clients/jobs 是空 → cloudInitTrackerFile 走 Case B applyTrackerData 蓋掉本機」bug
   const noClients = !state.clients || state.clients.length === 0;
   const noJobs = !state.jobs || state.jobs.length === 0;
-  return noClients && noJobs;
+  const noInvoiceHistory = !state.invoiceHistory || state.invoiceHistory.length === 0;
+  return noClients && noJobs && noInvoiceHistory;
 }
 
 // 登入後初始化 tracker.json
@@ -1859,7 +1905,11 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
     // 如果有 push 正在跑 → 標記 pending after，讓 push 結束後再推一次（cloudResolveAndMerge 這次跳過自己的 push）
     if (cloudPushInProgress) {
       cloudPushPendingAfter = true;
-      console.log('[cloud-merge] cloudPushNow 正在跑，標記 pendingAfter，本次 merge 不 push');
+      // v3.24.35：補寫 snapshot — 避免下次 cloudResolveAndMerge 又看到 base=null 走補救 pull 迴圈
+      //   merged 結果就是本機要 push 的內容，先當成「上次同步」存起來；
+      //   pendingAfter 真正 push 成功後 cloudPushNow 會再覆寫 snapshot
+      try { cloudSaveLastSyncedSnapshot(result.merged); } catch (_) {}
+      console.log('[cloud-merge] cloudPushNow 正在跑，標記 pendingAfter，本次 merge 不 push（snapshot 已先存）');
       return;
     }
     cloudPushInProgress = true;
@@ -2250,17 +2300,19 @@ function _cloudMergeConfig(base, local, remote) {
 // 主入口：對 { clients, jobs, config } 三方合併
 // 回傳：{ merged, conflicts, clean }
 function mergeStates(base, local, remote) {
-  // v3.24.29：base=null 自動視為 base=local（避免每天跳衝突 modal）
-  // 背景：歷史同步事故 / localStorage 被清，cloud-last-synced-snapshot 為 null
-  //       原本 baseObj = {} → bV = undefined → 每個欄位都被誤判為「兩邊都改過」
-  //       → 觸發 cloudShowConflictModal，每天開電腦都被打斷
-  // 修法：base = local 後，lChanged 一律 false，rChanged 為真才採 remote
-  //       → 等效於「雲端版本權威，本機獨有的欄位 / 案件保留」
-  //       使用者原話：「基本上只要有上傳到雲端 就抓雲端版本」
-  if (!base) {
-    console.warn('[mergeStates] base=null → 自動視為 base=local（避免誤判全欄位衝突，雲端優先）');
-    base = local;
-  }
+  // v3.24.35：revert v3.24.29 的 `base = local` 自動降級
+  // 背景：v3.24.29 為了避免 base=null 跳衝突 modal 改 `base = local`，
+  //       但這造成 _cloudMergeEntity 對「本機獨有 entity」的判斷錯誤——
+  //       base = local 後，baseMap = localMap，當 entity 只在 local 沒在 remote 時：
+  //         line 2161: `if (_cloudDeepEqual(base, local))` → 永遠 true
+  //         → return { deleted: true } → 本機獨有 entity 全部被誤刪！
+  //       場景：新裝置 / 清 cache + 雲端有資料 → 登入後本機剛建的案件消失
+  // 修法：恢復原本 baseObj = {} 邏輯。
+  //       v3.24.31 已把衝突 modal 改為自動 remote-wins（不再彈出干擾），
+  //       所以 base=null 走 baseObj={} 的「每個欄位都被判 conflict」也 OK——
+  //       conflict 路徑現在會自動採雲端（衝突前還有 cloudCreateSnapshot 備份）。
+  //       而 list-level 行為（!local && !base → remote 新增；!remote && !base → local 新增）
+  //       現在能正確保留兩邊獨有的 entity 而不誤刪。
   const baseData = base || {};
   const c = _cloudMergeEntityList('client', baseData.clients, local.clients, remote.clients);
   const j = _cloudMergeEntityList('job', baseData.jobs, local.jobs, remote.jobs);
@@ -2283,6 +2335,7 @@ let cloudPushInProgress = false;  // 推送中旗標（防併發）
 let cloudPushPendingAfter = false;  // v3.24.13：進行中收到新 save 的話標記「結束後立刻再推」
 let cloudPushFailRetries = 0;       // v3.24.13：失敗次數，指數退避重試
 let cloudPendingChangesCount = 0;   // v3.24.15：距離上次成功 push，本機改動筆數（顯示在 sync indicator）
+let _cloudPushWatchdogTimer = null;  // v3.24.35：達 MAX 後的長間隔 watchdog timer ref（cloudSignOut 要清）
 const CLOUD_PUSH_DEBOUNCE_MS = 2000;
 const CLOUD_PUSH_MAX_RETRIES = 5;
 const CLOUD_PUSH_RETRY_DELAYS_MS = [3000, 8000, 20000, 60000, 180000];  // 3s, 8s, 20s, 1m, 3m
@@ -2339,7 +2392,10 @@ async function cloudPushNow() {
     return;
   }
   if (!isCloudSignedIn()) {
-    cloudSetSyncStatus('error', '未登入 Google，資料只在本機');
+    // v3.24.35：使用者已登出（不是同步失敗）→ 設 idle 而非 error，避免 sync-error overlay 在登出後跳出來
+    //   cloudSchedulePush 本來就有「!isCloudSignedIn → setSyncStatus error」的處理，那條 path 表示「曾編輯但未登入」
+    //   cloudPushNow 走到這 99% 是 watchdog / pendingAfter setTimeout 跨登出觸發，已不是 error 情境
+    cloudSetSyncStatus('idle');
     return;
   }
   const meta = cloudGetMeta();
@@ -2435,9 +2491,12 @@ async function cloudPushNow() {
     } else {
       // v3.24.30：達 MAX 後改長間隔 watchdog（5 分鐘一次），不再完全停止
       // 之前 console.error 然後不動 → 使用者得手動點 banner 才復活
+      // v3.24.35：用 module-level ref 存 timer，cloudSignOut 才能清掉避免跨帳號污染
       const WATCHDOG_DELAY = 5 * 60 * 1000;
       console.warn(`[cloud-push] 已達 MAX retry，切換為 watchdog 模式（每 ${WATCHDOG_DELAY/60000} 分鐘重試一次）`);
-      setTimeout(() => {
+      if (_cloudPushWatchdogTimer) clearTimeout(_cloudPushWatchdogTimer);
+      _cloudPushWatchdogTimer = setTimeout(() => {
+        _cloudPushWatchdogTimer = null;
         cloudPushNow().catch(err => console.error('[cloud-push] watchdog retry async failed:', err));
       }, WATCHDOG_DELAY);
     }
@@ -4326,6 +4385,10 @@ function save() {
 function saveConfigOnly() {
   config.lastModifiedAt = new Date().toISOString();  // 給 mergeStates 比對用
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  // v3.24.35：補上 cloudPendingChangesCount++（之前漏了）
+  //   修「config-only 改動（toggle / userInfo / paymentAccounts）indicator 不顯示待推筆數」bug
+  //   違反 v3.24.30 修的「沒同步卻顯示已同步」精神
+  if (typeof cloudPendingChangesCount !== 'undefined') cloudPendingChangesCount++;
   if (typeof cloudSchedulePush === 'function') cloudSchedulePush();
   if (typeof cloudScheduleCalendarSync === 'function') cloudScheduleCalendarSync();
 }

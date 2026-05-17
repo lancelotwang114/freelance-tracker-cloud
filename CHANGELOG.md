@@ -1,5 +1,89 @@
 ﻿# 版本更新歷史
 
+## v3.24.35 — 獨立 code review 找到 7 個 critical/high bug 全修（2026-05-16）
+
+### 背景
+使用者要求「仔細巡一遍利用現有 SKILL 看一下有什麼問題 久一點沒關係」。spawn 獨立 Agent 用 `engineering:code-review` skill 從外部視角審視 v3.24.29 → v3.24.34 全部改動。Agent 在沒看過對話的前提下發現 7 個 critical + 11 個 high。本次優先修 critical + 影響核心鐵則的 high。
+
+### Fix C2（🔴 critical 資料丟失）：revert v3.24.29 的 `base=local`
+**問題**：v3.24.29 為避免 base=null 跳衝突 modal，把 `base = local`。但這造成 `_cloudMergeEntity` 對「本機獨有 entity」誤判：
+- baseMap = localMap（同一份）
+- entity 只在 local 沒在 remote → 走 `if (_cloudDeepEqual(base, local))` → 永遠 true → `return { deleted: true }` → **本機獨有案件全部消失**
+- 場景：新裝置 / 清 cache + 雲端有資料 → 登入後本機剛建的案件全部不見
+
+**修法**：恢復原本 `const baseData = base || {}`。
+- v3.24.31 後衝突已自動 remote-wins（不會跳 modal 干擾），所以 base=null 走 baseObj={} 邏輯安全
+- list-level 行為正確：`!local && !base → remote 新增`、`!remote && !base → local 新增`
+- field-level 行為：每個欄位被判 conflict → remote-wins 改寫（衝突前還有 cloudCreateSnapshot 備份）
+
+### Fix C7（🔴 critical 跨帳號污染）：cloudSignOut 清所有 timer
+**問題**：watchdog `setTimeout` 沒 ref → 登出後仍會 fire → 若使用者已換帳號 → watchdog 用新帳號 token 推舊資料到新帳號 tracker.json。
+
+**修法**：
+- `_cloudPushWatchdogTimer` 改 module-level ref
+- `cloudSignOut` 內 `clearTimeout` 全部 timer：watchdog / pushTimer / silentRefresh* / syncErrorGuard*
+- 順便 reset：`cloudPushFailRetries`、`cloudPendingChangesCount`、`cloudPushPendingAfter`、`_silentRefreshRetries`、`_isSilentRefreshing`
+- 清 sync error overlay（如果在顯示）
+
+### Fix H6（🟡 indicator 騙人）：saveConfigOnly 補 cloudPendingChangesCount++
+**問題**：只動 config 的儲存（userInfo / paymentAccounts / 各種 toggle）走 `saveConfigOnly`，**沒 `cloudPendingChangesCount++`**。indicator 上「N 筆待推」顯示 0，使用者看「⌛ 推送中…(0)」可能誤以為沒在 push。違反 v3.24.30 修的「沒同步卻顯示已同步」精神。
+
+**修法**：`saveConfigOnly` 內加 `cloudPendingChangesCount++`。
+
+### Fix H2+H3（🟡 鐵則被繞過）：「暫時關閉」overlay 後 5 分鐘自動重新顯示
+**問題**：使用者按「暫時關閉」呼叫 `hideSyncErrorOverlay()` 只 remove DOM。狀態仍是 error，`_syncErrorGuardTimer` 在第一次 setTimeout fire 後是 null，**不會再有新的 grace timer**。若 status 一直卡 error 不變化 → overlay 永遠不會再跳 → 違反鐵則「沒同步擋編輯」。
+
+**修法**：
+- 新增 `dismissSyncErrorOverlayTemp()` 取代「暫時關閉」按鈕的 onclick
+- 排 5 分鐘 `_syncErrorGuardReshowTimer`，到時若仍 error → 重新顯示 overlay
+- toast 提示「⚠️ 已暫時關閉提示，5 分鐘後若仍未同步會再次提醒」
+- 按鈕文字改成「暫時關閉 5 分鐘」明確化
+
+### Fix C1（🟢 邊角資料丟失）：isLocalDataEmpty 也檢查 invoiceHistory
+**問題**：v3.12.0 加了 `invoiceHistory` 但 `isLocalDataEmpty` 只看 clients / jobs。若本機 clients/jobs 是空但 invoiceHistory 有東西 → 走 Case B `applyTrackerData` 蓋掉本機 invoiceHistory。
+
+**修法**：加上 `noInvoiceHistory` 判斷。
+
+### Fix H5（🟡 base=null 循環）：cloudResolveAndMerge pendingAfter 路徑也寫 snapshot
+**問題**：cloudResolveAndMerge 走 clean 分支但搶不到 cloudPushInProgress 鎖時直接 return，**沒寫 snapshot**。下次 mergeStates 又看到 base=null → cloudInitTrackerFile 結尾走補救 pull → 冗餘流程。
+
+**修法**：pendingAfter return 之前 `cloudSaveLastSyncedSnapshot(result.merged)`。pendingAfter 真正 push 成功後 cloudPushNow 會再覆寫 snapshot。
+
+### Fix H11（🟡 登出後 overlay 誤跳）：cloudPushNow 在 isCloudSignedIn=false 時設 idle
+**問題**：cloudPushNow 在登出後（watchdog / pendingAfter 跨登出觸發）走 `setSyncStatus('error', '未登入')` → 紅 banner + 20 秒後 overlay 跳出，但其實是登出狀態，error overlay 不合理。
+
+**修法**：改設 `idle`（登出不是同步失敗）。
+
+### 還沒處理（agent 報告 high 的剩餘項目，可分批處理）
+- H1：`delete-vs-edit` 的 `local-deleted` 分支只走 remote 復活，UX 提示不夠（使用者本機刪了又出現會困惑）
+- H4：`cloudConflictApply` 是 dead code 但內部仍直接 `driveUpdateFile` 繞過 cloudPushInProgress 鎖
+- H7：衝突備份（`衝突備份_*` snapshot）累積無限 prune
+- H8：toast「已同步另一台電腦」在 snapshot 沒寫成功時誤觸發
+- H9：focus push 復活只在 token 還新時 branch 跑
+- H10：ensureValidToken 30s vs safety timer 30s 對齊
+- C3+C4：cloudResolveAndMerge + cloudPushNow 互相搶 cloudPushInProgress 鎖（pendingAfter 機制收斂但脆弱）
+- C5：cloudCreateSnapshot fire-and-forget 拷貝時機 — agent 確認實際 OK，CHANGELOG v3.24.32 解釋錯誤但行為正確
+- C6：cloudInitTrackerFile fire-and-forget vs cloudPullNow init 競賽
+
+低優先（L1-L7）：版本註解過多、dead code、命名一致性等。
+
+### self-review 8 項
+1. **新觸發點撞車？** ✓ 改動都是「行為修正」沒新增同步入口
+2. **mutable 入口併發保護？** ✓ cloudSignOut 全部清乾淨 + cloudPushNow 新走 idle 路徑不會誤觸發 overlay
+3. **時間戳一致？** ✓ 不動
+4. **失敗會 alert？** ✓ 不 alert
+5. **finally 清理？** ✓ snapshot 補寫 + timer 集中清
+6. **無變動還 push？** ✓ pendingAfter snapshot 不影響既有 skipPush
+7. **睡眠 throttle？** ✓ 不依賴新 timer
+8. **異地兩台場景？** ✓ revert base=local 修「本機獨有消失」災難場景
+
+### 影響範圍
+- `js/app.js`：`mergeStates`（revert base=local）、`isLocalDataEmpty`、`saveConfigOnly`、`cloudSignOut`、`cloudPushNow`（catch block + isCloudSignedIn）、`cloudResolveAndMerge`（pendingAfter）、`_syncErrorGuardOnStatusChange` + 新增 `dismissSyncErrorOverlayTemp`、sync overlay 按鈕 onclick、新增 `_cloudPushWatchdogTimer` / `_syncErrorGuardReshowTimer` module-level vars
+- `index.html`：meta version → v3.24.35
+- `service-worker.js`：CACHE_VERSION → v3.24.35
+
+---
+
 ## v3.24.34 — app-version-badge 改顯示資料時間 + B 機自動偵測 A 機改動 toast（2026-05-16）
 
 ### 背景 / 使用者回饋

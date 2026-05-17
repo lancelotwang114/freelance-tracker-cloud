@@ -108,6 +108,7 @@
 | **v3.24.32** | **🛡️ 衝突採雲端前自動備份本機到 Drive：v3.24.31 後使用者擔心「本機改動被蓋」風險，加 cloudResolveAndMerge 偵測 conflicts > 0 → fire-and-forget 呼叫 cloudCreateSnapshot('manual', '衝突備份_N筆_時間') 備份本機後再 remote-wins。可從設定頁「Drive 備份」卡片找該標籤還原** | ✅ **完成（2026-05-16）** |
 | **v3.24.33** | **🚨 修「重整後右上角登入但編輯資料 indicator 卡 N 小時前」bug：兩個獨立 bug — (A) cloudInitGoogleAuth restored path 沒呼叫 cloudInitTrackerFile（只有新登入呼叫）→ 切帳號 / 清 cache 後 trackerFileId 缺失 (B) cloudSchedulePush 在 !trackerFileId 時 silent return，indicator 維持 idle 假裝已同步。修法：restored path 補 cloudInitTrackerFile + schedulePush trackerFileId 缺失時主動 init 補救** | ✅ **完成（2026-05-16）** |
 | **v3.24.34** | **UX 改進 — app-version-badge 改顯示資料時間為主 + B 機偵測 A 機改動主動 toast：(1) updateVersionBadge 預設「📊 資料：N 分前同步」，有新 app 版本時切「🆕 vXXX 點此更新」醒目樣式 (2) cloudResolveAndMerge 比對 base vs remote 偵測遠端有新改動 → toast「☁️ 已同步另一台電腦的最新改動」(3) cloudUpdateSyncIndicator 內呼叫 updateVersionBadge，相對時間隨 30 秒 ticker 自動跳** | ✅ **完成（2026-05-16）** |
+| **v3.24.35** | **🚨 獨立 code review 找到 7 個 critical/high bug 全修：(C2 revert) v3.24.29 base=local 修法造成本機獨有 entity 被 _cloudMergeEntity 誤判「同意刪」消失 → revert 回 baseObj={} (C7) cloudSignOut 新增清所有 timer 防 watchdog 跨帳號污染 (H6) saveConfigOnly 補 cloudPendingChangesCount++ (H2+H3) overlay「暫時關閉」改為 5 分鐘後若仍 error 自動重新顯示 (C1) isLocalDataEmpty 補檢查 invoiceHistory (H5) pendingAfter 路徑補寫 snapshot 避免循環 (H11) cloudPushNow 在登出後設 idle 而非 error 避免 overlay 誤跳** | ✅ **完成（2026-05-16）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
