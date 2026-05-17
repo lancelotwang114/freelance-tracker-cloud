@@ -1,5 +1,42 @@
 ﻿# 版本更新歷史
 
+## v3.24.39 — 修「dropdown 看不到登出」bug + ↻📜 拉回常駐（2026-05-16）
+
+### 使用者反饋
+> 「右上角沒出現登出？你看一下是不是哪裡有問題 然後幫我把重新整理跟操作日誌按鈕放出來 不要縮起來」
+
+### 根因：v3.24.38 dropdown 被 `.top-bar` stacking context 截斷
+`.top-bar { position: sticky; z-index: 20; }` 建立 stacking context。
+dropdown menu `position: absolute; z-index: 1000;` 在 `.top-bar` 內 — 它的 z-index 1000 只在 `.top-bar` 內生效，對 `.top-bar` 外面的元素仍受限於 `.top-bar` 的 z-index 20。任何 main 內 z-index ≥ 30 的元素都會遮 dropdown，導致使用者點 pill 後看不到內容。
+
+### Fix 1：dropdown 改 position:fixed 跳脫 stacking context
+- CSS：`.account-dropdown-menu` 從 `position: absolute; top: calc(100% + 6px); right: 0; z-index: 1000;` 改為 `position: fixed; z-index: 99990;`
+- HTML：拿掉 `.account-dropdown` wrapper，dropdown menu 跟 pill 平行（仍在 .top-bar 內，但 fixed 不受影響）
+- JS：`toggleAccountDropdown(forceState, pillEl)` 接收 pill 元素，動態計算 `top` / `right`：
+  ```js
+  const rect = pill.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 6) + 'px';
+  menu.style.right = (window.innerWidth - rect.right) + 'px';
+  ```
+- closeHandler 判斷改為 `!e.target.closest('#account-dropdown-menu') && !e.target.closest('#cloud-account-pill')`（menu 不再是 pill 的子元素）
+
+### Fix 2：↻ 📜 拉回常駐（不再藏在 ⋮ overflow menu）
+- 移除 `<div class="topbar-overflow">` 包裝
+- ↻ 重新整理 + 📜 操作日誌 直接放在 🔍 跟 🌓 之間，跟 v3.24.36 之前一致
+
+### 影響範圍
+- `index.html`：top-bar 拿掉 `.account-dropdown` wrapper + 移除 ⋮ overflow menu + 加回 ↻📜 button
+- `css/style.css`：`.account-dropdown-menu` 改 fixed
+- `js/app.js`：`toggleAccountDropdown` 加 `pillEl` 參數 + 動態定位邏輯 + 修 closeHandler
+
+### 沒清掉的 dead code
+- `toggleTopbarOverflow` 函式 + `.topbar-overflow-menu` CSS 仍保留（無 UI 入口呼叫，但留著無害；之後想再用 overflow 可重啟）
+
+### self-review 8 項
+1-8 全過：position:fixed 不影響任何同步邏輯，純 UI 修補。
+
+---
+
 ## v3.24.38 — 加 sync-info chip + account pill 改 dropdown menu（2026-05-16）
 
 ### 背景

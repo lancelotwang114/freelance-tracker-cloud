@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.38';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.39';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1213,8 +1213,10 @@ function onSyncInfoChipClick() {
   }
 }
 
-// v3.24.38：toggle account-pill dropdown menu
-function toggleAccountDropdown(forceState) {
+// v3.24.38 → v3.24.39：toggle account-pill dropdown menu（fixed position 版本）
+//   修 v3.24.38 bug：menu 在 .top-bar stacking context 內，z-index:1000 被外面 z-index:30 元素遮
+//   修法：position:fixed + JS 動態計算位置（pill bounding rect），跳脫 stacking context
+function toggleAccountDropdown(forceState, pillEl) {
   const menu = document.getElementById('account-dropdown-menu');
   if (!menu) return;
 
@@ -1227,10 +1229,18 @@ function toggleAccountDropdown(forceState) {
   const willShow = (forceState !== undefined) ? forceState : menu.classList.contains('hidden');
   if (willShow) {
     renderAccountDropdownMenu();
+    // 動態計算位置：對齊 pill 右下
+    const pill = pillEl || document.getElementById('cloud-account-pill');
+    if (pill) {
+      const rect = pill.getBoundingClientRect();
+      menu.style.top = (rect.bottom + 6) + 'px';
+      menu.style.right = (window.innerWidth - rect.right) + 'px';
+      menu.style.left = 'auto';
+    }
     menu.classList.remove('hidden');
     setTimeout(() => {
       const closeHandler = (e) => {
-        if (!e.target.closest('#account-dropdown')) {
+        if (!e.target.closest('#account-dropdown-menu') && !e.target.closest('#cloud-account-pill')) {
           menu.classList.add('hidden');
           document.removeEventListener('click', closeHandler);
         }

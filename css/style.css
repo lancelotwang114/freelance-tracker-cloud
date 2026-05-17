@@ -1669,19 +1669,18 @@ input:focus, select:focus, textarea:focus {
 }
 .sync-info-chip.hidden { display: none; }
 
-/* v3.24.38：account-pill dropdown menu */
-.account-dropdown { position: relative; }
+/* v3.24.38 → v3.24.39：account-pill dropdown menu
+   改 position:fixed 跳脫 .top-bar (z-index:20, sticky) stacking context，
+   修「dropdown 展開但被遮 / 看不到登出按鈕」bug。JS 端動態計算 top/right。 */
 .account-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.18);
   min-width: 240px;
   padding: 6px;
-  z-index: 1000;
+  z-index: 99990;
 }
 .account-dropdown-menu.hidden { display: none; }
 .account-dropdown-menu .ad-header {

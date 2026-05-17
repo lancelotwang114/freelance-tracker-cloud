@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-05-16-v3.24.38">
+<meta name="app-version" content="2026-05-16-v3.24.39">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -74,29 +74,21 @@
           <button id="active-timer-toggle-btn" onclick="event.stopPropagation(); onActiveTimerToggleBtn()" class="active-timer-btn" title="暫停 / 繼續">⏸</button>
           <button onclick="event.stopPropagation(); finishActiveTimer()" class="active-timer-btn" title="結束計時並加到工時欄">✓</button>
         </div>
-        <!-- v3.24.37：top-bar 工具列瘦身 — 常駐只留 🔍 / 主題 / overflow ⋮ / sync chip / cloud pill -->
+        <!-- v3.24.39：↻ 重新整理 + 📜 操作日誌 拉回常駐（使用者明確要求不要塞進 ⋮ menu） -->
         <button id="global-search-toggle-btn" onclick="toggleGlobalSearch()" title="全域搜尋（業主 / 案件 / 備註）" class="topbar-icon-btn" aria-label="搜尋">🔍</button>
+        <button id="hard-reload-btn" onclick="hardReload()" title="重新整理（清除所有快取、Service Worker、Cookie）" class="topbar-icon-btn" aria-label="重新整理">↻</button>
+        <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" class="topbar-icon-btn" aria-label="操作日誌">📜</button>
         <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" class="topbar-icon-btn" aria-label="切換主題">🌓</button>
-        <!-- v3.24.37：冷門 icon 收進 overflow menu（操作日誌、重新整理） -->
-        <div class="topbar-overflow" id="topbar-overflow">
-          <button id="topbar-overflow-btn" onclick="toggleTopbarOverflow()" title="更多" class="topbar-icon-btn" aria-label="更多">⋮</button>
-          <div class="topbar-overflow-menu hidden" id="topbar-overflow-menu">
-            <button onclick="openActionLogModal(); toggleTopbarOverflow(false);">📜 操作日誌</button>
-            <button onclick="hardReload();">↻ 重新整理 / 清快取</button>
-          </div>
-        </div>
         <!-- v3.24.38：sync-info chip — 講「雲端資料狀態」（版本 + 時間），點擊重新檢查雲端 -->
         <div id="sync-info-chip" class="sync-info-chip hidden" onclick="onSyncInfoChipClick()" title="雲端版本（點擊重新檢查）">
           <span id="sync-info-chip-text">☁️ —</span>
         </div>
-        <!-- v3.22.9 + v3.22.10：Google 帳號 pill — v3.24.38 改成 dropdown menu（不再跳設定頁）
-             帳號資訊 / 雲端版本 / 重新檢查雲端 / 雲端同步設定 / 登出 -->
-        <div class="account-dropdown" id="account-dropdown">
-          <div id="cloud-account-pill" class="cloud-account-pill status-idle" onclick="toggleAccountDropdown()" title="尚未登入 Google Drive（點擊登入）">
-            <span class="pill-icon">＋</span><span class="pill-name">登入</span>
-          </div>
-          <div class="account-dropdown-menu hidden" id="account-dropdown-menu"></div>
+        <!-- v3.24.38：Google 帳號 pill → dropdown menu（帳號 / 雲端版本 / 重新檢查 / 設定 / 登出）
+             v3.24.39：dropdown 改 position:fixed 跳脫 .top-bar stacking context（修「dropdown 看不到」bug） -->
+        <div id="cloud-account-pill" class="cloud-account-pill status-idle" onclick="toggleAccountDropdown(undefined, this)" title="尚未登入 Google Drive（點擊登入）">
+          <span class="pill-icon">＋</span><span class="pill-name">登入</span>
         </div>
+        <div class="account-dropdown-menu hidden" id="account-dropdown-menu"></div>
       </div>
     </div>
   </header>
