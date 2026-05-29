@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.39';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-05-16-v3.24.40';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -11483,58 +11483,10 @@ function renderTodayTodo() {
   const items = [];
   const active = (state.jobs || []).filter(j => !j.cancelled);
 
-  // 1. 截止當日（含跨天案件落在今天）
-  active.forEach(j => {
-    const end = j.endDate || j.date || '';
-    if (!end) return;
-    if (end === today && !j.done) {
-      const c = getClient(j.clientId);
-      items.push({
-        priority: 1,
-        icon: '🔴',
-        text: `今天截止：${escapeHtml(j.title || '(無標題)')} · ${c?.name || '?'}`,
-        jobId: j.id,
-      });
-    }
-  });
-
-  // 2. 即將到期（明天 ~ 3 天內，但不含今天）
-  active.forEach(j => {
-    const end = j.endDate || j.date || '';
-    if (!end || j.done) return;
-    if (end > today) {
-      const endDate = new Date(end);
-      const daysLeft = Math.round((endDate - todayDate) / (1000 * 60 * 60 * 24));
-      if (daysLeft <= 3 && daysLeft > 0) {
-        const c = getClient(j.clientId);
-        items.push({
-          priority: 2,
-          icon: '🟡',
-          text: `${daysLeft} 天後截止：${escapeHtml(j.title || '(無標題)')} · ${c?.name || '?'}`,
-          jobId: j.id,
-        });
-      }
-    }
-  });
-
-  // 3. 完成已久未收款（沿用 config.unpaidRemindDays，預設 7）
-  const unpaidThreshold = +config.unpaidRemindDays || 7;
-  active.forEach(j => {
-    if (!j.done || !j.doneAt || jobIsFullyPaid(j)) return;
-    const c = getClient(j.clientId);
-    const overrideDays = c?.unpaidRemindDaysOverride;
-    const days = overrideDays != null ? overrideDays : unpaidThreshold;
-    const doneDate = new Date(j.doneAt);
-    const daysPassed = Math.round((todayDate - doneDate) / (1000 * 60 * 60 * 24));
-    if (daysPassed >= days) {
-      items.push({
-        priority: 3,
-        icon: '🟠',
-        text: `完成 ${daysPassed} 天未收款：${escapeHtml(j.title || '(無標題)')} · ${c?.name || '?'} · ${fmt(jobUnpaidAmount(j))}`,
-        jobId: j.id,
-      });
-    }
-  });
+  // v3.24.40：使用者要求只保留「月底快到」+「拖款警告」兩類，其餘砍掉避免跟 alerts 重複
+  //   砍 1. 今天截止 — alerts 「逾期未完成」+「即將到期」涵蓋
+  //   砍 2. 即將到期 — alerts 「即將到期」涵蓋（包含今天）
+  //   砍 3. 完成已久未收款 — alerts 「完成已久未收款」涵蓋
 
   // 4. 月底快到提醒（如果今天 ≥ 配置的 monthEndReminderDay）
   const monthEndDay = +config.monthEndReminderDay || 25;
@@ -11563,11 +11515,12 @@ function renderTodayTodo() {
   }
 
   // v3.24.37：沒任何重點 → 顯示空 state（不再隱藏卡，行動永遠優先顯示）
+  // v3.24.40：空 state 文字配合新範圍（月底 + 拖款）
   card.classList.remove('hidden');
   if (items.length === 0) {
     box.innerHTML = `<div class="today-todo-item" style="opacity:.65;">
       <span class="today-todo-icon">☕</span>
-      <span class="today-todo-text">今天沒有截止 / 拖款警告 / 月底提醒，享受空檔吧</span>
+      <span class="today-todo-text">今天沒有月底 / 拖款提醒，其他待辦看上方紅黃橘提醒區</span>
     </div>`;
     return;
   }
