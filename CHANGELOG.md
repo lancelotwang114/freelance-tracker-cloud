@@ -1,5 +1,39 @@
 ﻿# 版本更新歷史
 
+## v3.25.1 — 修 mergeStates 漏 invoiceHistory + 無變動跳過 push（2026-07-09）
+
+### 背景
+分析 5/11 操作日誌（版本 29→55 兩分鐘燒 26 版的自撞迴圈，v3.24.21/23 已滅火）時，發現現行 code 四個殘留問題。
+
+### 修法（js/app.js 四項）
+1. **mergeStates 漏 invoiceHistory（資料遺失路徑）**
+   - 舊：`merged = { clients, jobs, config }` — 請款歷史不進三方合併
+   - 後果：B 電腦走 merge 路徑後 push，用 B 本機 invoiceHistory 蓋掉雲端 → A 電腦的請款紀錄遺失
+   - 修：`_cloudMergeEntityList('invoice', ...)` 進 mergeStates，merged 帶 invoiceHistory（新到舊排序，配合 unshift+200 上限）
+   - 兩處衝突改寫（cloudResolveAndMerge / cloudPushNow inline）加 invoice type 映射
+   - 舊 snapshot 沒 invoiceHistory key → 兩邊 entry 都當新增保留（方向是復活不是遺失），下次同步 snapshot 補全
+2. **skipPush 是死碼**
+   - 舊比對 `JSON.stringify(merged) === JSON.stringify(remote)` 永不成立：(a) merged 少 invoiceHistory key (b) `config.lastModifiedAt` 每次 save() 都 bump
+   - 修：新增 `_cloudDataSig()`（排除 config.lastModifiedAt），兩處 skipPush 改用
+3. **cloudPushNow 無條件推送**
+   - 頂層加「state === 上次同步快照 → 跳過 push」（sig 比對），純 UI 動作觸發的 save() 不再白推一版
+   - 快照不存在（新裝置）→ 不跳過，照常 push
+4. **inline merge 路徑漏清 cloudPushTimer**
+   - v3.24.36 的 inline merge `applyTrackerData` 後沒清 timer（clean 分支 v3.24.21 就有清）→ 每次衝突解完 2 秒後多推一版
+   - 修：對齊 clean 分支，清 timer
+
+### 驗證
+- `node --check` 過
+- 瀏覽器實跑 9 條斷言全過：invoiceHistory 三邊合併保留 A+B+C、remote 改 status 生效、sig 忽略 lastModifiedAt 但抓得到真 config 變動、no-op merge sig 相等、delete-vs-edit 正確標 invoice conflict
+- 同步鐵則 8 項 self-review 全過（無新觸發點、跳過檢查在搶鎖前且無 await、跳過路徑不動 lastSyncedAt、新碼全包 try/catch fallback 照常 push）
+
+### 影響範圍
+- `js/app.js`：`mergeStates`、新增 `_cloudDataSig`、`cloudResolveAndMerge` skipPush/衝突改寫、`cloudPushNow` 頂層跳過 + inline merge 清 timer
+- 三處版號 → v3.25.1
+- **不碰** schema（無新欄位、CURRENT_SCHEMA_VERSION 不動）、不碰 auth 層
+
+---
+
 ## v3.25.0 — 登入改 authorization code flow，silent refresh 免 popup（2026-07-09）
 
 ### 使用者反饋

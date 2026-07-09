@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-09-v3.25.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-09-v3.25.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2219,12 +2219,15 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
           }
         });
     }
+    // v3.25.1：list 選擇加 invoice type（invoiceHistory 進 mergeStates 後衝突也可能是 invoice）
+    const _mergedListOf = (t) => t === 'client' ? result.merged.clients
+      : t === 'invoice' ? result.merged.invoiceHistory : result.merged.jobs;
     result.conflicts.forEach(c => {
       if (c.kind === 'field-conflict') {
         if (c.type === 'config') {
           if (result.merged.config) result.merged.config[c.field] = c.remoteValue;
         } else {
-          const list = c.type === 'client' ? result.merged.clients : result.merged.jobs;
+          const list = _mergedListOf(c.type);
           const item = list && list.find(x => x.id === c.id);
           if (item) item[c.field] = c.remoteValue;
         }
@@ -2232,7 +2235,7 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
         // remote-deleted：雲端刪、本機改 → 採雲端「已刪」決定 → 從 list 移除
         // local-deleted：本機刪、雲端改 → _cloudMergeEntity 已保留 remote → 不動
         if (c.side === 'remote-deleted') {
-          const list = c.type === 'client' ? result.merged.clients : result.merged.jobs;
+          const list = _mergedListOf(c.type);
           if (list) {
             const idx = list.findIndex(x => x.id === c.id);
             if (idx >= 0) list.splice(idx, 1);
@@ -2268,12 +2271,12 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
     }
 
     // v3.24.23：合併結果跟雲端完全一致 → 跳過 push 避免無謂版本 +1
-    // 比對 merged data vs remoteData（兩者都是 { clients, jobs, invoiceHistory, config } 結構）
+    // v3.25.1：改用 _cloudDataSig 比對 — 舊版直接 stringify 有兩個洞：
+    //   (a) merged 沒有 invoiceHistory key（mergeStates 舊 bug）→ 永不相等
+    //   (b) config.lastModifiedAt 每次 save() 都變 → 永不相等
     let skipPush = false;
     try {
-      const mergedJson = JSON.stringify(result.merged);
-      const remoteJson = JSON.stringify(remoteData);
-      if (mergedJson === remoteJson) {
+      if (_cloudDataSig(result.merged) === _cloudDataSig(remoteData)) {
         skipPush = true;
         console.log('[cloud-merge] merged === remote，跳過 push（無實際變動）');
       }
@@ -2567,6 +2570,19 @@ function cloudGetLastSyncedSnapshot() {
   } catch (_) { return null; }
 }
 
+// v3.25.1：同步比對用 signature — 排除 config.lastModifiedAt
+// （每次 save() 都 bump 它，若不排除，「merged === remote 跳過 push」永遠不成立 → 版本白白 +1）
+function _cloudDataSig(d) {
+  const cfg = { ...(d.config || {}) };
+  delete cfg.lastModifiedAt;
+  return JSON.stringify({
+    clients: d.clients || [],
+    jobs: d.jobs || [],
+    invoiceHistory: d.invoiceHistory || [],
+    config: cfg
+  });
+}
+
 // 簡單 deep equal（針對本 schema 的純物件 / 陣列 / 原始型別，沒有 Date / Map / Set）
 function _cloudDeepEqual(a, b) {
   if (a === b) return true;
@@ -2691,7 +2707,7 @@ function _cloudMergeConfig(base, local, remote) {
   return { merged, conflicts };
 }
 
-// 主入口：對 { clients, jobs, config } 三方合併
+// 主入口：對 { clients, jobs, invoiceHistory, config } 三方合併
 // 回傳：{ merged, conflicts, clean }
 function mergeStates(base, local, remote) {
   // v3.24.35：revert v3.24.29 的 `base = local` 自動降級
@@ -2710,10 +2726,15 @@ function mergeStates(base, local, remote) {
   const baseData = base || {};
   const c = _cloudMergeEntityList('client', baseData.clients, local.clients, remote.clients);
   const j = _cloudMergeEntityList('job', baseData.jobs, local.jobs, remote.jobs);
+  // v3.25.1：invoiceHistory 也進三方合併 — 原本漏掉，導致 merge 路徑 push 時
+  // 用本機 invoiceHistory 蓋掉雲端（另一台電腦的請款紀錄遺失）
+  const ih = _cloudMergeEntityList('invoice', baseData.invoiceHistory, local.invoiceHistory, remote.invoiceHistory);
+  // 維持新到舊排序（addInvoiceHistory 的 unshift + 200 筆上限邏輯依賴這個順序）
+  ih.merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const cfg = _cloudMergeConfig(baseData.config, local.config, remote.config);
-  const conflicts = [...c.conflicts, ...j.conflicts, ...cfg.conflicts];
+  const conflicts = [...c.conflicts, ...j.conflicts, ...ih.conflicts, ...cfg.conflicts];
   return {
-    merged: { clients: c.merged, jobs: j.merged, config: cfg.merged },
+    merged: { clients: c.merged, jobs: j.merged, invoiceHistory: ih.merged, config: cfg.merged },
     conflicts,
     clean: conflicts.length === 0
   };
@@ -2798,6 +2819,22 @@ async function cloudPushNow() {
     return;
   }
 
+  // v3.25.1：本機 state 跟上次同步快照一致 → 無實際變動，跳過 push
+  // （save() 常被純 UI 動作觸發但資料沒變 → 舊版每次都推，版本白白 +1）
+  // 快照不存在（新裝置 / 清 cache）→ 不跳過，照常 push 保守處理
+  try {
+    const snap = cloudGetLastSyncedSnapshot();
+    if (snap && _cloudDataSig({
+      clients: state.clients, jobs: state.jobs,
+      invoiceHistory: state.invoiceHistory, config: config
+    }) === _cloudDataSig(snap)) {
+      cloudPendingChangesCount = 0;
+      cloudSetSyncStatus('idle');
+      console.log('[cloud-push] state === 上次同步快照，跳過 push（無實際變動）');
+      return;
+    }
+  } catch (_) { /* sig 失敗 → 照常 push */ }
+
   cloudPushInProgress = true;
   cloudSetSyncStatus('syncing');  // α2-5
   try {
@@ -2859,17 +2896,20 @@ async function cloudPushNow() {
                   }
                 });
             }
+            // v3.25.1：list 選擇加 invoice type（同 cloudResolveAndMerge）
+            const _mrListOf = (t) => t === 'client' ? mr.merged.clients
+              : t === 'invoice' ? mr.merged.invoiceHistory : mr.merged.jobs;
             mr.conflicts.forEach(c => {
               if (c.kind === 'field-conflict') {
                 if (c.type === 'config') {
                   if (mr.merged.config) mr.merged.config[c.field] = c.remoteValue;
                 } else {
-                  const list = c.type === 'client' ? mr.merged.clients : mr.merged.jobs;
+                  const list = _mrListOf(c.type);
                   const item = list && list.find(x => x.id === c.id);
                   if (item) item[c.field] = c.remoteValue;
                 }
               } else if (c.kind === 'delete-vs-edit' && c.side === 'remote-deleted') {
-                const list = c.type === 'client' ? mr.merged.clients : mr.merged.jobs;
+                const list = _mrListOf(c.type);
                 if (list) {
                   const idx = list.findIndex(x => x.id === c.id);
                   if (idx >= 0) list.splice(idx, 1);
@@ -2883,12 +2923,19 @@ async function cloudPushNow() {
 
           // 套用 merged 結果到本機
           applyTrackerData(mr.merged);
+          // v3.25.1：清掉 applyTrackerData → save() → cloudSchedulePush 排的 2 秒重推
+          // （cloudResolveAndMerge clean 分支 v3.24.21 就有清，這條 inline 路徑漏了 → 每次衝突解完多推一版）
+          if (cloudPushTimer) {
+            clearTimeout(cloudPushTimer);
+            cloudPushTimer = null;
+          }
           cloudPendingChangesCount = 0;
 
           // skipPush check：merged === remote → 無需 push
+          // v3.25.1：改用 _cloudDataSig（排除 config.lastModifiedAt，涵蓋 invoiceHistory）
           let skipPush = false;
           try {
-            if (JSON.stringify(mr.merged) === JSON.stringify(result.data)) skipPush = true;
+            if (_cloudDataSig(mr.merged) === _cloudDataSig(result.data)) skipPush = true;
           } catch (_) {}
 
           if (skipPush) {
