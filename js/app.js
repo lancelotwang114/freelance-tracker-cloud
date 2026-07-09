@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-05-16-v3.24.40';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-09-v3.25.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -37,6 +37,13 @@ const APP_VERSION = '2026-05-16-v3.24.40';  // 與 index.html 的 meta、service
 //     - http://localhost:8080（本機 python -m http.server 預設）
 //     - http://127.0.0.1:5500（VS Code Live Server）
 const GOOGLE_CLIENT_ID = '571304600737-nfvsh00822f4b5p00msetkld6qq11vf2.apps.googleusercontent.com';
+
+// TOKEN_BROKER_URL（v3.25.0）
+//   Cloudflare Worker token broker（cloudflare-worker/worker.js）。
+//   authorization code flow：/exchange 用 code 換 access+refresh token、/refresh 用 refresh token 換新 access token。
+//   client_secret 只存在 Worker 的加密環境變數，前端與 repo 都沒有。
+//   目的：silent refresh 從「開 Google popup（睡醒喚醒時會被瀏覽器擋 → 每天要求重登）」改成背景 fetch，無感續約。
+const TOKEN_BROKER_URL = 'https://tracker-token-broker.james40114.workers.dev';
 
 // DRIVE_SCOPE
 //   drive.appfolder：只能存取本 app 自己建的「應用程式資料夾」，看不到使用者其他 Drive 檔案。
@@ -56,16 +63,18 @@ const CALENDAR_LIST_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const AUTH_SCOPES = `openid email profile ${DRIVE_SCOPE} ${CALENDAR_SCOPE} ${CALENDAR_LIST_SCOPE}`;
 
 // CLOUD_AUTH_KEY：access token + 過期時間 + user info 存在這個 localStorage key
-// 跟 v2 隔離（cloud- 前綴）；存的內容：{ accessToken, tokenExpiresAt, user: { name, email, picture } }
-// 不存 refresh token（GIS 隱式流不發 refresh token），1 小時後 token 自然過期再請使用者重登
+// 跟 v2 隔離（cloud- 前綴）；存的內容：{ accessToken, tokenExpiresAt, refreshToken, user: { name, email, picture } }
+// v3.25.0 起走 code flow 會多存 refreshToken（僅本機、不進雲端），續約打 Worker 不再依賴 popup
 const CLOUD_AUTH_KEY = 'cloud-freelance-tracker-auth';
 
 // ---------- 認證狀態（記憶體 + localStorage 雙層）----------
 let cloudAuthState = {
   initialized: false,    // GIS SDK 是否 init 完成
-  tokenClient: null,     // google.accounts.oauth2.TokenClient instance
+  tokenClient: null,     // google.accounts.oauth2.TokenClient instance（popup fallback 用）
+  codeClient: null,      // google.accounts.oauth2.CodeClient instance（v3.25.0 主要登入路徑）
   accessToken: null,     // 目前的 access token（過期就要重新登入）
   tokenExpiresAt: 0,     // token 過期的 ms epoch
+  refreshToken: null,    // v3.25.0：code flow 的 refresh token（有它續約免 popup）
   user: null             // {name, email, picture} 或 null
 };
 
@@ -77,6 +86,7 @@ function cloudSaveAuthState() {
     const payload = {
       accessToken: cloudAuthState.accessToken,
       tokenExpiresAt: cloudAuthState.tokenExpiresAt,
+      refreshToken: cloudAuthState.refreshToken,  // v3.25.0
       user: cloudAuthState.user,
     };
     localStorage.setItem(CLOUD_AUTH_KEY, JSON.stringify(payload));
@@ -115,6 +125,7 @@ function cloudLoadAuthState() {
   // 還原所有狀態（即使 token 已過期也載入，讓 cloudInitGoogleAuth 的 boot refresh 接手補新 token）
   cloudAuthState.accessToken = data.accessToken || null;
   cloudAuthState.tokenExpiresAt = data.tokenExpiresAt || 0;
+  cloudAuthState.refreshToken = data.refreshToken || null;  // v3.25.0（舊資料沒有 → null，走 popup fallback）
   cloudAuthState.user = data.user;
   return true;
 }
@@ -180,6 +191,21 @@ async function cloudInitGoogleAuth() {
     scope: AUTH_SCOPES,  // openid + email + profile + drive.appfolder
     callback: cloudOnTokenResponse,
   });
+  // v3.25.0：code flow client — 登入拿 authorization code，丟 Worker 換 access+refresh token
+  // initCodeClient 可能不存在（GIS SDK 舊版快取）→ null，cloudSignIn 會 fallback 到 tokenClient
+  if (google.accounts.oauth2.initCodeClient) {
+    cloudAuthState.codeClient = google.accounts.oauth2.initCodeClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: AUTH_SCOPES,
+      ux_mode: 'popup',
+      callback: cloudOnCodeResponse,
+      // 使用者關掉 popup / popup 開不起來 → 走這裡不走 callback，要把手動登入旗標清掉
+      error_callback: (err) => {
+        console.warn('[cloud-auth] code flow popup error:', err);
+        _isManualSignIn = false;
+      },
+    });
+  }
   cloudAuthState.initialized = true;
 
   // 啟用按鈕、清掉「初始化中」hint
@@ -320,13 +346,50 @@ function cloudSignIn() {
   if (_silentRefreshRetryTimer) { clearTimeout(_silentRefreshRetryTimer); _silentRefreshRetryTimer = null; }
   if (_silentRefreshLongRetryTimer) { clearTimeout(_silentRefreshLongRetryTimer); _silentRefreshLongRetryTimer = null; }
 
-  // prompt: '' = 已授權直接放行、未授權跳同意畫面（一般情境用這個）
+  // v3.25.0：優先走 code flow（拿 refresh token，之後續約免 popup）
   // v3.24.22：帶 hint 加速重登 — 指定上次的 Google 帳號，避免跳出帳號選擇器
   const hint = cloudAuthState.user && cloudAuthState.user.email;
+  if (cloudAuthState.codeClient) {
+    cloudAuthState.codeClient.requestCode();
+    return;
+  }
+  // fallback：舊 implicit flow（codeClient 不可用時）
+  // prompt: '' = 已授權直接放行、未授權跳同意畫面
   cloudAuthState.tokenClient.requestAccessToken({
     prompt: '',
     ...(hint ? { hint } : {})
   });
+}
+
+// v3.25.0：code flow callback — 拿到 authorization code → 丟 Worker /exchange 換 token
+// 換到的 payload 跟 GIS token response 同形（access_token / expires_in），直接餵給 cloudOnTokenResponse
+// 重用既有的 userinfo / 持久化 / init tracker / schedule refresh 全套流程
+async function cloudOnCodeResponse(resp) {
+  if (resp.error) {
+    // 使用者關掉 popup / 拒絕授權 → 跟手動登入失敗同樣處理
+    console.warn('[cloud-auth] code flow error:', resp);
+    _isManualSignIn = false;
+    if (resp.error !== 'popup_closed' && resp.error !== 'access_denied') {
+      alert('Google 登入失敗：' + (resp.error_description || resp.error));
+    }
+    return;
+  }
+  try {
+    const r = await fetch(TOKEN_BROKER_URL + '/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: resp.code }),
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error_description || data.error || ('HTTP ' + r.status));
+    // refresh token 只有「重新出現同意畫面」那次才會發；沒發就沿用舊的
+    if (data.refresh_token) cloudAuthState.refreshToken = data.refresh_token;
+    cloudOnTokenResponse(data);  // {access_token, expires_in, ...} 走既有完整登入流程
+  } catch (e) {
+    console.error('[cloud-auth] code exchange failed:', e);
+    _isManualSignIn = false;
+    alert('Google 登入失敗（token 交換）：' + (e?.message || e) + '\n可再試一次；若持續失敗請告訴開發者');
+  }
 }
 
 // ---------- v3.22.2 + v3.22.10：silent token refresh（無感續約 + 多重防護）----------
@@ -358,7 +421,7 @@ function _scheduleSilentRefresh() {
     clearTimeout(_silentRefreshTimer);
     _silentRefreshTimer = null;
   }
-  if (!cloudAuthState.tokenExpiresAt || !cloudAuthState.tokenClient) return;
+  if (!cloudAuthState.tokenExpiresAt || (!cloudAuthState.tokenClient && !cloudAuthState.refreshToken)) return;
   const refreshAt = cloudAuthState.tokenExpiresAt - REFRESH_BEFORE_EXPIRY_MS;
   const delay = refreshAt - Date.now();
   if (delay <= 0) {
@@ -376,7 +439,7 @@ let _silentRefreshSafetyTimer = null;
 const SILENT_REFRESH_SAFETY_TIMEOUT_MS = 30 * 1000;
 
 function _silentRefresh() {
-  if (!cloudAuthState.tokenClient) {
+  if (!cloudAuthState.tokenClient && !cloudAuthState.refreshToken) {
     console.warn('[cloud-auth] silent refresh skipped: tokenClient not ready');
     return;
   }
@@ -386,16 +449,24 @@ function _silentRefresh() {
   }
   _isSilentRefreshing = true;
   console.log('[cloud-auth] silent refresh starting…');
-  // v3.24.27：safety timer — 30 秒沒 callback 視為 GIS 卡住，強制 reset 才能再試
+  // v3.24.27：safety timer — 30 秒沒 callback 視為卡住，強制 reset 才能再試（Worker 路徑也共用）
   if (_silentRefreshSafetyTimer) clearTimeout(_silentRefreshSafetyTimer);
   _silentRefreshSafetyTimer = setTimeout(() => {
     if (_isSilentRefreshing) {
       console.warn('[cloud-auth] silent refresh stuck 30s，force reset 旗標');
       _isSilentRefreshing = false;
-      _handleSilentRefreshFailure('GIS SDK 30 秒沒回應，可能網路問題');
+      _handleSilentRefreshFailure('30 秒沒回應，可能網路問題');
     }
   }, SILENT_REFRESH_SAFETY_TIMEOUT_MS);
+
+  // v3.25.0：有 refresh token → 背景 fetch Worker 續約，完全不開 popup（睡醒也不會被瀏覽器擋）
+  if (cloudAuthState.refreshToken) {
+    _refreshViaWorker();
+    return;
+  }
+
   try {
+    // 舊路徑（無 refresh token）：GIS popup 續約
     // v3.24.22：帶 hint 加速 silent refresh（指定上次的 Google 帳號，避免多帳號切換）
     const hint = cloudAuthState.user && cloudAuthState.user.email;
     cloudAuthState.tokenClient.requestAccessToken({
@@ -409,6 +480,50 @@ function _silentRefresh() {
       _silentRefreshSafetyTimer = null;
     }
     console.warn('[cloud-auth] silent refresh threw:', e);
+    _handleSilentRefreshFailure(e?.message || String(e));
+  }
+}
+
+// v3.25.0：打 Worker /refresh 換新 access token
+// 成功 → 餵 cloudOnTokenResponse（_isSilentRefreshing 已是 true，會走 silent 分支：存檔+排程+復活push+auto pull）
+// refresh token 失效（invalid_grant，被撤銷/半年未用）→ 清掉，改走舊 popup 路徑再試一次
+// 暫時性失敗（斷網/Worker 掛/5xx）→ 走既有 retry 機制，refresh token 保留下次再用
+async function _refreshViaWorker() {
+  try {
+    const r = await fetch(TOKEN_BROKER_URL + '/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: cloudAuthState.refreshToken }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined,  // 比 30s safety timer 早斷
+    });
+    const data = await r.json();
+    if (r.ok && data.access_token) {
+      console.log('[cloud-auth] worker refresh ok');
+      cloudOnTokenResponse(data);
+      return;
+    }
+    const errCode = (data.error || '').toLowerCase();
+    if (errCode === 'invalid_grant') {
+      // refresh token 死了（使用者撤銷授權 / 半年未用）→ 丟掉，fallback 舊 popup 路徑
+      console.warn('[cloud-auth] refresh token 失效（invalid_grant），fallback popup 路徑');
+      cloudAuthState.refreshToken = null;
+      cloudSaveAuthState();
+      if (cloudAuthState.tokenClient) {
+        const hint = cloudAuthState.user && cloudAuthState.user.email;
+        cloudAuthState.tokenClient.requestAccessToken({ prompt: '', ...(hint ? { hint } : {}) });
+        return;  // flags / safety timer 交給 GIS callback 收尾
+      }
+      throw new Error('invalid_grant 且無 popup fallback');
+    }
+    throw new Error(data.error_description || data.error || ('HTTP ' + r.status));
+  } catch (e) {
+    // 暫時性失敗 → 既有 retry 機制（refresh token 保留，下次 retry 仍走 Worker）
+    _isSilentRefreshing = false;
+    if (_silentRefreshSafetyTimer) {
+      clearTimeout(_silentRefreshSafetyTimer);
+      _silentRefreshSafetyTimer = null;
+    }
+    console.warn('[cloud-auth] worker refresh failed:', e);
     _handleSilentRefreshFailure(e?.message || String(e));
   }
 }
@@ -515,7 +630,7 @@ function _handleSilentRefreshFailure(errMsg) {
   if (_silentRefreshLongRetryTimer) clearTimeout(_silentRefreshLongRetryTimer);
   _silentRefreshLongRetryTimer = setTimeout(() => {
     _silentRefreshLongRetryTimer = null;
-    if (cloudAuthState.user && cloudAuthState.tokenClient && !getValidAccessToken()) {
+    if (cloudAuthState.user && (cloudAuthState.tokenClient || cloudAuthState.refreshToken) && !getValidAccessToken()) {
       console.log('[cloud-auth] 5 分鐘長間隔 retry 觸發 silent refresh');
       _silentRefresh();
     }
@@ -726,8 +841,10 @@ function cloudSignOut() {
   const prevEmail = cloudAuthState.user && cloudAuthState.user.email;
 
   const token = cloudAuthState.accessToken;
+  const refreshToken = cloudAuthState.refreshToken;  // v3.25.0
   cloudAuthState.accessToken = null;
   cloudAuthState.tokenExpiresAt = 0;
+  cloudAuthState.refreshToken = null;
   cloudAuthState.user = null;
 
   // v3.0.0-alpha.1 commit 6：清 localStorage 防止下次重整又恢復為已登入
@@ -767,6 +884,11 @@ function cloudSignOut() {
     google.accounts.oauth2.revoke(token, () => {
       // revoke 完成（不一定要做事；revoke 失敗也沒差，token 反正會自然過期）
     });
+  }
+  // v3.25.0：refresh token 也要撤銷（它不會自然過期，登出必須主動殺掉）
+  if (refreshToken) {
+    fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(refreshToken), { method: 'POST' })
+      .catch(() => { /* 失敗沒差：本機已清掉，使用者也可到 Google 帳戶頁手動撤銷 */ });
   }
 
   // v3.0.0-alpha.1 commit 7：寫進操作日誌

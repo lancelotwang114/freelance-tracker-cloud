@@ -59,3 +59,5 @@ CLAUDE.md
 # Mascot 原始 SVG / PNG / PSD 等素材（最終版本已 inline 進 js/app.js）
 # 原檔保留本機方便日後改色 / 改表情，但不上 GitHub
 Mascot/
+# 本機開發工具設定（preview launch 等）
+.claude/

@@ -1,5 +1,41 @@
 ﻿# 版本更新歷史
 
+## v3.25.0 — 登入改 authorization code flow，silent refresh 免 popup（2026-07-09）
+
+### 使用者反饋
+> 「幾乎每天都要求重登」
+
+### 根因
+GIS implicit flow 不發 refresh token，續約靠 `requestAccessToken({prompt:''})` 開 Google popup。
+分頁常駐跨夜 → token 過期 → 早上喚醒觸發 silent refresh → **無使用者手勢的 popup 被瀏覽器擋** → 3 次 retry 全敗 → 紅 banner 要求重登。兩台電腦每天發生。
+
+### 修法：Cloudflare Worker token broker + code flow
+- 新增 `cloudflare-worker/worker.js`（部署在 `tracker-token-broker.james40114.workers.dev`）：
+  - `POST /exchange`：authorization code → access + refresh token
+  - `POST /refresh`：refresh token → 新 access token
+  - client_secret 只在 Worker 加密環境變數；CORS 鎖 github.io + localhost；不存資料不留 log
+- `app.js` auth 層：
+  - `initCodeClient`（ux_mode popup）與既有 `initTokenClient` 並存
+  - `cloudSignIn()` 優先走 code flow → `cloudOnCodeResponse` → Worker `/exchange` → 餵既有 `cloudOnTokenResponse` 全套流程
+  - `_silentRefresh()` 有 refresh token 時走 `_refreshViaWorker()`（背景 fetch，20s timeout，**不開 popup**）
+  - `invalid_grant`（token 被撤銷/半年未用）→ 清 refresh token → fallback 舊 popup 路徑
+  - 暫時性失敗（斷網/Worker 掛）→ 走既有 3 次指數退避 + 5 分長 retry，refresh token 保留
+  - auth 持久化 payload 加 `refreshToken`（僅 localStorage，不進雲端 tracker 檔）
+  - 登出：多撤銷 refresh token（`oauth2.googleapis.com/revoke`）
+- 前置作業（GCP）：OAuth consent screen 發布 production（refresh token 不受 testing 7 天限制）
+
+### 效果
+- 登入一次後續約全程無感；重登頻率：每天 → 幾乎永不（手動撤銷授權或半年不用才需要）
+- 無 refresh token（舊登入狀態）或 Worker 掛掉 → 自動 fallback 回 v3.24.x popup 行為，不會更糟
+
+### 影響範圍
+- `js/app.js`：auth 常數/state/save/load、`cloudInitGoogleAuth`、`cloudSignIn`、新增 `cloudOnCodeResponse` + `_refreshViaWorker`、`_silentRefresh`、`_scheduleSilentRefresh` guard、`cloudSignOut`
+- 新檔 `cloudflare-worker/worker.js`
+- 三處版號 → v3.25.0
+- **不碰** schema / mergeStates / push / pull 邏輯
+
+---
+
 ## v3.24.40 — 今天的重點卡只留「月底」+「拖款」兩類，砍跟 alerts 重複的 3 類（2026-05-16）
 
 ### 使用者反饋

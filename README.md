@@ -114,6 +114,7 @@
 | **v3.24.38** | **右上加 sync-info chip + account pill 改 dropdown menu：(1) 新 chip「☁️ #N · X 分前」常駐顯示雲端版本 + 同步時間，點擊重新檢查雲端；error 時改紅底「⚠️ 同步失敗·點此重試」(2) cloud-account-pill 改 dropdown menu，內含帳號 / 狀態 / 重新檢查 / 雲端設定 / 登出（confirm 後執行）(3) cloudRenderAccountPill 拿掉 sync 後綴（chip 接管）(4) 清掉設定頁「進階：手動觸發」冗餘摺疊** | ✅ **完成（2026-05-16）** |
 | **v3.24.39** | **🚨 修 v3.24.38 dropdown 看不到登出 bug + ↻📜 拉回常駐：(1) 根因 .top-bar 有 sticky + z-index:20 建立 stacking context，dropdown z-index:1000 在內部只對 .top-bar 內有效，被外面 z-index≥30 元素遮 (2) 修法 dropdown 改 position:fixed + JS 動態計算 top/right 對齊 pill，z-index 拉到 99990 (3) 拿掉 .account-dropdown wrapper、調整 closeHandler 判斷 (4) ↻ 重新整理 + 📜 操作日誌 從 ⋮ overflow menu 拉回常駐** | ✅ **完成（2026-05-16）** |
 | **v3.24.40** | **「今天的重點」卡精簡：5 類 → 2 類。砍掉 (1) 🔴 今天截止 (2) 🟡 即將到期 (3) 🟠 完成已久未收款 — 這 3 類由上方 alerts 涵蓋。保留 (4) 📅 月底快到 (5) 🐢 拖款警告。空 state 文字改成「今天沒有月底 / 拖款提醒，其他待辦看上方紅黃橘提醒區」** | ✅ **完成（2026-05-16）** |
+| **v3.25.0** | **🔐 登入改 authorization code flow + Cloudflare Worker token broker，silent refresh 免 popup：修「分頁跨夜 → 睡醒 silent refresh popup 被瀏覽器擋 → 每天要求重登」。新增 cloudflare-worker/worker.js（/exchange + /refresh，secret 只在 Worker 環境變數）；app.js 加 initCodeClient + refreshToken 持久化 + _refreshViaWorker 背景 fetch 續約；invalid_grant / Worker 掛掉自動 fallback 舊 popup 路徑。登入一次 → 續約永久無感** | ✅ **完成（2026-07-09）** |
 
 完整版本歷史看 [CHANGELOG.md](./CHANGELOG.md)。
 
