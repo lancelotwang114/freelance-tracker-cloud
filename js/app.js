@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-10-v3.25.5';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-10-v3.26.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5147,6 +5147,8 @@ function loadReminderConfigUI() {
 // ============== Utilities ==============
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function fmt(n) { return 'NT$' + (n || 0).toLocaleString(); }
+// v3.26.0（設計A）：金額 HTML 版 — NT$ 前綴縮小變灰（.cur），只能用在 innerHTML 情境
+function fmtM(n) { return '<span class="cur">NT$</span>' + (n || 0).toLocaleString(); }
 function thisMonth() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
 function getMonth(dateStr) { return dateStr ? dateStr.slice(0,7) : ''; }
 function todayStr() { const d = new Date(); return d.toISOString().slice(0,10); }
@@ -6268,24 +6270,45 @@ function computeAlerts() {
   return alerts;
 }
 
+// v3.26.0（設計C）：警示嚴重度分級 — red（逾期/異常拖款）> yl（到期/請款日）> or（待收/尾款）> pu（備份等）
+function _alertSev(type) {
+  if (type === 'overdue' || type === 'slow-pay') return 'red';
+  if (type === 'due-soon' || type.startsWith('billing-day')) return 'yl';
+  if (type === 'unpaid-long' || type === 'tail-pending' || type === 'month-end') return 'or';
+  return 'pu';
+}
+let _alertExpanded = 0;  // 展開中的 chip index（依嚴重度排序後；預設 0 = 最高級別）
+
+// v3.26.0（設計C）：五條彩色 banner 收成一張聚合卡 — chips 一行 + 單一展開明細
+// 互動：點 chip 展開該項明細；再點展開中的 chip 或「查看 →」= 前往（原 onClick）
 function renderAlerts() {
   const alerts = computeAlerts();
   const box = document.getElementById('alerts');
+  if (!box) return;
   if (!alerts.length) { box.innerHTML = ''; return; }
-  box.innerHTML = alerts.map((a, i) => `
-    <div class="alert type-${a.type}" data-idx="${i}">
-      <div class="alert-icon">${a.icon}</div>
-      <div class="alert-content">
-        <div class="alert-title">${escapeHtml(a.title)}</div>
-        <div class="alert-desc">${escapeHtml(a.desc)}</div>
-        ${a.amt ? `<div class="alert-amt">${a.amt}</div>` : ''}
-      </div>
+  const rank = { red: 0, yl: 1, or: 2, pu: 3 };
+  const sorted = alerts.map(a => ({ ...a, sev: _alertSev(a.type) }))
+    .sort((a, b) => rank[a.sev] - rank[b.sev]);
+  if (_alertExpanded >= sorted.length) _alertExpanded = 0;
+  const exp = sorted[_alertExpanded];
+  box.innerHTML = `<div class="alert-agg">
+    <div class="alert-chips">${sorted.map((a, i) =>
+      `<button class="alert-chip sev-${a.sev}${i === _alertExpanded ? ' active' : ''}" data-agg="${i}" title="${i === _alertExpanded ? '再點一下前往' : '點擊看明細'}">${a.icon} ${escapeHtml(a.title)}</button>`).join('')}</div>
+    <div class="alert-agg-detail sev-${exp.sev}">
+      <span>${escapeHtml(exp.desc)}</span>
+      <button class="btn btn-ghost btn-sm alert-agg-go" data-agg-go="${_alertExpanded}">查看 →</button>
     </div>
-  `).join('');
-  // 綁點擊事件
-  box.querySelectorAll('.alert').forEach((el, i) => {
-    el.addEventListener('click', alerts[i].onClick);
+  </div>`;
+  box.querySelectorAll('.alert-chip').forEach(el => {
+    el.addEventListener('click', () => {
+      const i = +el.dataset.agg;
+      if (i === _alertExpanded) { if (sorted[i].onClick) sorted[i].onClick(); return; }
+      _alertExpanded = i;
+      renderAlerts();
+    });
   });
+  const go = box.querySelector('[data-agg-go]');
+  if (go) go.addEventListener('click', () => { const a = sorted[+go.dataset.aggGo]; if (a && a.onClick) a.onClick(); });
 }
 
 function renderBadge() {
@@ -6537,12 +6560,12 @@ function jobRow(j, ctx) {
   if (inBulk) {
     return `<div class="row state-${status}${hl}${selCls}" data-job-id="${j.id}" onclick="${toggleFn}('${j.id}')">
       <div class="bulk-checkbox ${isSelected?'checked':''}"></div>
-      <div class="dot" style="background:${color}"></div>
+      <div class="client-chip" style="background:${color}">${escapeHtml((name || '?').charAt(0))}</div>
       <div class="info">
         <div class="title">${escapeHtml(j.title || '（無標題）')}${estimateBadge}${tagBadge}${dueBadge}${subBadge}${discountBadge}${partialBadge}${writeOffBadge}${cancelBadge}</div>
         <div class="meta">${name} · ${j.date || '無日期'}</div>
       </div>
-      <div class="amount">${fmt(jobFinalAmount(j))}</div>
+      <div class="amount">${fmtM(jobFinalAmount(j))}</div>
     </div>`;
   }
 
@@ -6562,12 +6585,12 @@ function jobRow(j, ctx) {
         <div class="check-label ${j.paid?'paid':''}">收款</div>
       </div>
     </div>
-    <div class="dot" style="background:${color}"></div>
+    <div class="client-chip" style="background:${color}" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')" title="跳到業主：${escapeHtml(name)}">${escapeHtml((name || '?').charAt(0))}</div>
     <div class="info">
       <div class="title">${escapeHtml(j.title || '（無標題）')}${estimateBadge}${tagBadge}${dueBadge}${subBadge}${discountBadge}${partialBadge}${writeOffBadge}${cancelBadge}</div>
       <div class="meta">${name} · ${j.date || '無日期'}</div>
     </div>
-    <div class="amount">${fmt(finalAmt)}</div>
+    <div class="amount">${fmtM(finalAmt)}</div>
   </div>`;
 }
 
@@ -6826,10 +6849,10 @@ function jobRowCompact(j) {
   // v3.24.12：批次模式
   if (bulkMode) {
     const isSelected = bulkSelected.has(j.id);
-    return `<div class="row-compact state-${status}${isSelected ? ' selected' : ''}" data-job-id="${j.id}"
+    return `<div class="row-compact state-${status}${isSelected ? ' selected' : ''}" data-job-id="${j.id}" style="border-left:3px solid ${color}"
                 onclick="toggleBulkSelect('${j.id}')">
       <div class="bulk-checkbox ${isSelected ? 'checked' : ''}" style="margin-right: 4px;"></div>
-      <span class="row-compact-dot" style="background:${color}"></span>
+      <span class="client-chip" style="background:${color}">${escapeHtml((name || '?').charAt(0))}</span>
       <span class="row-compact-date">${dateShort || '-'}</span>
       <span class="row-compact-title">${escapeHtml(j.title || '（無標題）')}</span>
       <span class="row-compact-client">· ${escapeHtml(name)}</span>
@@ -6838,13 +6861,13 @@ function jobRowCompact(j) {
     </div>`;
   }
 
-  return `<div class="row-compact state-${status}" data-job-id="${j.id}"
+  return `<div class="row-compact state-${status}" data-job-id="${j.id}" style="border-left:3px solid ${color}"
               onclick="editJob('${j.id}')"
               ontouchstart="onJobRowTouchStart(event, '${j.id}')"
               ontouchmove="onJobRowTouchMove(event)"
               ontouchend="onJobRowTouchEnd(event)"
               ontouchcancel="onJobRowTouchCancel()">
-    <span class="row-compact-dot" style="background:${color}" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')" title="跳到該業主"></span>
+    <span class="client-chip" style="background:${color}" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')" title="跳到業主：${escapeHtml(name)}">${escapeHtml((name || '?').charAt(0))}</span>
     <span class="row-compact-date">${dateShort || '-'}</span>
     <span class="row-compact-title">${escapeHtml(j.title || '（無標題）')}</span>
     <span class="row-compact-client">· ${escapeHtml(name)}</span>
@@ -6885,12 +6908,12 @@ function renderJobsTable(jobs) {
         <td class="t-bulk"><div class="bulk-checkbox ${isSelected ? 'checked' : ''}"></div></td>
         <td class="t-date">${j.date || '-'}</td>
         <td class="t-client">
-          <span class="row-compact-dot" style="background:${color}; vertical-align:middle;"></span>
+          <span class="client-chip" style="background:${color}; vertical-align:middle;">${escapeHtml((name || '?').charAt(0))}</span>
           ${escapeHtml(name)}
         </td>
         <td class="t-title">${escapeHtml(j.title || '（無標題）')}</td>
         <td class="t-tags">${tagsHtml}</td>
-        <td class="t-amount">${fmt(jobFinalAmount(j))}</td>
+        <td class="t-amount">${fmtM(jobFinalAmount(j))}</td>
         <td class="t-status">${statusBadge}</td>
       </tr>`;
     }
@@ -6903,12 +6926,12 @@ function renderJobsTable(jobs) {
               ontouchcancel="onJobRowTouchCancel()">
       <td class="t-date">${j.date || '-'}</td>
       <td class="t-client" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')">
-        <span class="row-compact-dot" style="background:${color}; vertical-align:middle;"></span>
+        <span class="client-chip" style="background:${color}; vertical-align:middle;">${escapeHtml((name || '?').charAt(0))}</span>
         ${escapeHtml(name)}
       </td>
       <td class="t-title">${escapeHtml(j.title || '（無標題）')}</td>
       <td class="t-tags">${tagsHtml}</td>
-      <td class="t-amount">${fmt(jobFinalAmount(j))}</td>
+      <td class="t-amount">${fmtM(jobFinalAmount(j))}</td>
       <td class="t-status">${statusBadge}</td>
       <td class="t-actions" onclick="event.stopPropagation();">
         <button onclick="toggleDone('${j.id}')" title="標完成">✓</button>
@@ -9029,7 +9052,7 @@ function renderRevSummary(data) {
   document.getElementById('rev-summary').innerHTML = `
     <div class="summary-card">
       <div class="label">帳面總收入</div>
-      <div class="value">${fmt(totalGross)}</div>
+      <div class="value">${fmtM(totalGross)}</div>
       <div class="delta" style="color: var(--muted);">給業主請款總額（折扣後）</div>
     </div>
     <div class="summary-card">
@@ -9039,12 +9062,12 @@ function renderRevSummary(data) {
     </div>
     <div class="summary-card">
       <div class="label">已收款</div>
-      <div class="value" style="color: var(--success);">${fmt(totalPaid)}</div>
+      <div class="value" style="color: var(--success);">${fmtM(totalPaid)}</div>
       <div class="delta">${total ? Math.round(totalPaid/total*100) : 0}% 已入帳</div>
     </div>
     <div class="summary-card">
       <div class="label">待收款</div>
-      <div class="value" style="color: var(--warning);">${fmt(totalUnpaid)}</div>
+      <div class="value" style="color: var(--warning);">${fmtM(totalUnpaid)}</div>
       <div class="delta" style="color: var(--muted);">${totalUnpaid ? '待請款或催收' : '全部入帳'}</div>
     </div>
     <div class="summary-card">
@@ -11877,13 +11900,13 @@ function countUpStat(elementId, target) {
   const startN = _countUpLastValues[elementId] ?? 0;
   // 偏好減動效 → 直接 set
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    el.textContent = fmt(targetN);
+    el.innerHTML = fmtM(targetN);  // v3.26.0（設計A）：NT$ 縮小
     _countUpLastValues[elementId] = targetN;
     return;
   }
   // 差距很小直接 set，避免無謂動畫（< 100 元）
   if (Math.abs(targetN - startN) < 100) {
-    el.textContent = fmt(targetN);
+    el.innerHTML = fmtM(targetN);
     _countUpLastValues[elementId] = targetN;
     return;
   }
@@ -11895,10 +11918,10 @@ function countUpStat(elementId, target) {
     // ease-out cubic 緩動
     const eased = 1 - Math.pow(1 - t, 3);
     const current = Math.round(startN + (targetN - startN) * eased);
-    el.textContent = fmt(current);
+    el.innerHTML = fmtM(current);
     if (t < 1) requestAnimationFrame(tick);
     else {
-      el.textContent = fmt(targetN);  // 確保最終值精確
+      el.innerHTML = fmtM(targetN);  // 確保最終值精確
       _countUpLastValues[elementId] = targetN;
     }
   }

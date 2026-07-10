@@ -77,6 +77,8 @@ html[data-theme="dark"] mark {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  /* v3.26.0（設計A）：全站等寬數字 — 金額/日期位數垂直對齊，對帳掃視快 */
+  font-variant-numeric: tabular-nums;
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
@@ -252,8 +254,12 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
   box-shadow: var(--shadow);
 }
 .stat .label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.stat .value { font-size: 22px; font-weight: 700; }
+/* v3.26.0（設計B）：hero 數字 22→30px，錢是主角 */
+.stat .value { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.15; }
 .stat .delta { font-size: 12px; color: var(--success); margin-top: 2px; }
+
+/* v3.26.0（設計A）：fmtM() 產出的 NT$ 前綴 — 縮小變灰，數字才是資訊 */
+.cur { font-size: 0.68em; color: var(--muted); font-weight: 500; margin-right: 1px; }
 /* v3.24.37：stat 卡左框 3px → 4px，4 種角色（warning/danger/success/info）更明顯 */
 .stat.warning { border-left: 4px solid var(--warning); }
 .stat.danger { border-left: 4px solid var(--danger); }
@@ -280,7 +286,8 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 }
 .stat-year-caption:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,.06); }
 .stat-year-caption .label { color: var(--muted); font-size: 12px; }
-.stat-year-caption .value { font-weight: 700; color: var(--text); font-size: 15px; }
+/* v3.26.0（設計B）：年度累積 15→18px */
+.stat-year-caption .value { font-weight: 700; color: var(--text); font-size: 18px; letter-spacing: -0.01em; }
 .stat-year-caption .delta { color: var(--muted); font-size: 12px; margin-left: auto; }
 /* v3.6.0：可點擊的 stat（hover 提示可互動）*/
 .stat.clickable { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
@@ -309,6 +316,64 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 .alert-title { font-weight: 600; margin-bottom: 3px; font-size: 14px; }
 .alert-desc { font-size: 12px; color: var(--muted); line-height: 1.4; }
 .alert-amt { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 14px; margin-top: 4px; }
+
+/* v3.26.0（設計C）：警示聚合卡 — chips 一行 + 單一展開明細，只有最高級別預設攤開 */
+.alert-agg {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+}
+.alert-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.alert-chip {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.alert-chip.sev-red { background: var(--danger-light); color: var(--danger); font-weight: 700; }
+.alert-chip.sev-yl  { background: var(--warning-light); color: #92400e; }
+.alert-chip.sev-or  { background: var(--orange-light); color: #9a3412; }
+.alert-chip.sev-pu  { background: #f3e8ff; color: #7e22ce; }
+.alert-chip.active { border-color: currentColor; }
+html[data-theme="dark"] .alert-chip.sev-yl { color: var(--warning); }
+html[data-theme="dark"] .alert-chip.sev-or { color: var(--orange); }
+html[data-theme="dark"] .alert-chip.sev-pu { background: #2f2440; color: #c084fc; }
+.alert-agg-detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+.alert-agg-detail .alert-agg-go { margin-left: auto; flex-shrink: 0; color: var(--primary); white-space: nowrap; }
+
+/* v3.26.0（設計D）：業主色 avatar chip（取代 9px 小圓點） */
+.client-chip {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  text-shadow: 0 1px 1px rgba(0,0,0,.25);
+}
+
+/* v3.26.0（設計A）：金額字重統一 */
+.row .amount, .row-compact-amount, .t-amount, .summary-card .value { font-weight: 650; letter-spacing: -0.01em; }
 
 /* ==================== Rows (Jobs) ==================== */
 .row {
@@ -2064,7 +2129,8 @@ input:focus, select:focus, textarea:focus {
 /* ===== 緊湊模式 ===== */
 .row-compact {
   display: grid;
-  grid-template-columns: 12px 50px 1fr auto auto auto;
+  /* v3.26.0（設計D）：第一欄 12px 小點 → 20px avatar chip */
+  grid-template-columns: 20px 50px 1fr auto auto auto;
   gap: 8px;
   align-items: center;
   padding: 6px 10px;

@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-07-10-v3.25.5">
+<meta name="app-version" content="2026-07-10-v3.26.0">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -113,8 +113,6 @@
 <main>
   <!-- Dashboard -->
   <section id="tab-dashboard">
-    <div class="alerts" id="alerts"></div>
-
     <!-- v3.6.0：第一次使用、完全無資料時的引導卡（renderDashboard 動態 toggle hidden） -->
     <div id="dash-empty-state" class="card hidden" style="text-align: center; padding: 32px 20px; background: var(--primary-light); border: 1px solid var(--primary);">
       <div style="font-size: 28px; margin-bottom: 8px;">👋</div>
@@ -128,12 +126,7 @@
       </div>
     </div>
 
-    <!-- v3.24.18：今天該做什麼 / v3.24.37：移到 stat-grid 上方 + 永遠顯示（空 state 由 renderTodayTodo 處理） -->
-    <div class="card today-todo-card" id="today-todo-card">
-      <h3 style="margin: 0 0 8px 0; font-size: 14px;">⚡ 今天的重點</h3>
-      <div id="today-todo-list"></div>
-    </div>
-
+    <!-- v3.26.0（設計C）：重排 — 錢在最上（本月 hero → 年度 → 今天的重點 → 警示聚合 → 近期案件） -->
     <!-- v3.6.0：3 張 stat 卡可點擊（v3.24.37 從 4→3：年度收益降為次行 caption，本月聚焦） -->
     <div class="stat-grid stat-grid-3">
       <div class="stat success clickable" onclick="dashStatJump('paid')" title="點擊查看本月已收款的案件">
@@ -158,6 +151,15 @@
       <span class="value" id="stat-year">NT$0</span>
       <span class="delta" id="stat-year-sub"></span>
     </div>
+
+    <!-- v3.24.18：今天該做什麼（v3.26.0 設計C：移到 hero 數字之後） -->
+    <div class="card today-todo-card" id="today-todo-card">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px;">⚡ 今天的重點</h3>
+      <div id="today-todo-list"></div>
+    </div>
+
+    <!-- v3.26.0（設計C）：警示聚合卡（renderAlerts 改 chips + 單一展開） -->
+    <div class="alerts" id="alerts"></div>
 
     <div class="card">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">

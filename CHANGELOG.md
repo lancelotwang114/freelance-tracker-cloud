@@ -1,5 +1,42 @@
 ﻿# 版本更新歷史
 
+## v3.26.0 — 設計改版 A-D：錢是主角、警示聚合、業主色 signature（2026-07-10）
+
+### 使用者核准
+> Before/After 對照（artifact）看過後「全做」。色盤/字型/emoji 不動（E 案另行預覽）。
+
+### A. 金額排版系統
+- `body { font-variant-numeric: tabular-nums }` — 全站數字等寬，對帳位數垂直對齊
+- 新 `fmtM()`：NT$ 前綴 `<span class="cur">`（0.68em、灰、細）— 數字才是資訊
+- 套用：stat 卡（countUpStat 改 innerHTML）、年度累積、jobRow、報表模式 t-amount、rev-summary
+- 金額字重統一 650 + letter-spacing -0.01em
+
+### B. 型階
+- `.stat .value` 22 → 30px、年度累積 15 → 18px — 三秒讀完本月狀態
+
+### C. 警示聚合 + Dashboard 重排
+- 順序改：本月 hero 三卡 → 年度 → 今天的重點 → 警示 → 近期案件（錢在最上）
+- `renderAlerts()` 重寫：五條彩色 banner → 一張聚合卡（chips 一行 + 單一展開明細）
+- 嚴重度分級 `_alertSev`：red（逾期/異常拖款）> yl（到期/請款日）> or（待收/尾款/月底）> pu（備份等）
+- 互動：點 chip 展開明細、再點展開中的 chip 或「查看 →」= 前往原 onClick
+- dark mode chip 配色另調
+
+### D. 業主色 signature
+- 9px 小圓點 → 20px avatar chip（業主色底 + 名字首字），案件列表/報表/dashboard 近期案件全套用
+- row-compact 左緣 3px 業主色條
+- chip 可點跳業主（原 dot 行為保留）
+
+### 驗證
+- 瀏覽器 12 條斷言全過（DOM 順序 / 聚合卡 5 chips / .cur / 30px / tabular / chip / border / quick actions 完整 / rev-summary）
+- 深淺兩主題截圖目視 OK、console 零錯誤
+
+### 影響範圍
+- `index.html`：dashboard 區塊重排；`css/style.css`：token/型階/聚合卡/chip
+- `js/app.js`：fmtM、countUpStat、renderAlerts、jobRow、jobRowCompact、renderJobsTable、rev-summary
+- **不碰** 同步 / schema / 色盤 / 字型
+
+---
+
 ## v3.25.5 — sync chip 改顯示雲端版本絕對時間，兩台逐字相同（2026-07-10）
 
 ### 使用者反饋
