@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-10-v3.25.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-10-v3.25.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -2617,13 +2617,30 @@ function cloudGetLastSyncedSnapshot() {
 
 // v3.25.1：同步比對用 signature — 排除 config.lastModifiedAt
 // （每次 save() 都 bump 它，若不排除，「merged === remote 跳過 push」永遠不成立 → 版本白白 +1）
+// v3.25.4：改 canonical 比對 — 陣列順序 / 物件 key 順序不同「不代表」資料不同。
+//   7/10 事故後兩台 jobs 陣列順序分岔（匯入順序 vs merge union 順序），
+//   舊版 JSON.stringify 對順序敏感 → 內容相同仍判「有變動」→ 每次檢查雲端都白推一版（版本 ping-pong）。
+function _cloudStableStringify(v) {
+  if (v === null || typeof v !== 'object') {
+    const s = JSON.stringify(v);
+    return s === undefined ? 'null' : s;
+  }
+  if (Array.isArray(v)) return '[' + v.map(x => _cloudStableStringify(x)).join(',') + ']';
+  return '{' + Object.keys(v).sort()
+    .filter(k => v[k] !== undefined)
+    .map(k => JSON.stringify(k) + ':' + _cloudStableStringify(v[k]))
+    .join(',') + '}';
+}
+
 function _cloudDataSig(d) {
   const cfg = { ...(d.config || {}) };
   delete cfg.lastModifiedAt;
-  return JSON.stringify({
-    clients: d.clients || [],
-    jobs: d.jobs || [],
-    invoiceHistory: d.invoiceHistory || [],
+  // 實體陣列先按 id 排序 — 兩台陣列順序不同時內容相同就該視為相同
+  const byId = (arr) => [...(arr || [])].sort((a, b) => String(a && a.id).localeCompare(String(b && b.id)));
+  return _cloudStableStringify({
+    clients: byId(d.clients),
+    jobs: byId(d.jobs),
+    invoiceHistory: byId(d.invoiceHistory),
     config: cfg
   });
 }

@@ -1,5 +1,33 @@
 ﻿# 版本更新歷史
 
+## v3.25.4 — 修「檢查雲端每按一次版本 +1」：sig 改 canonical 比對（2026-07-10）
+
+### 使用者反饋
+> 「公司 #17 家裡 #16，家裡按檢查雲端自動變 #18，永遠不會兩邊同步的感覺？版號跟資料應該只會有一份」
+
+### 根因
+7/10 匯入事故後兩台的 `jobs` 陣列**順序**分岔（A=匯入檔順序、B=merge union 順序），
+`_cloudDataSig` 用 `JSON.stringify` 對陣列順序敏感 → 內容相同仍判「有變動」→
+skipPush 永不成立 → 每次 pull+merge 都白推一版 → 版本 ping-pong（#16→#17→#18…）。
+
+### 修法
+- 新增 `_cloudStableStringify`：物件 key 排序 + undefined 欄位忽略的 deterministic 序列化
+- `_cloudDataSig`：clients / jobs / invoiceHistory **先按 id 排序**再 canonical 序列化
+- 語意：「兩台陣列順序不同但內容相同」= 無變動 → noop 對齊，不推
+- 仍然敏感的：任何欄位值變動、entity 增刪、**有序陣列**（tags、payments 順序）
+
+### 驗證
+瀏覽器 8 條斷言全過：順序無關判等、真變動/增刪仍偵測、巢狀有序陣列仍敏感、
+undefined 忽略、null 保留、mergeStates 端到端 noop、500 筆 sig 1.4ms。
+
+### 影響範圍
+- `js/app.js`：`_cloudDataSig` + 新 `_cloudStableStringify`（cloudPushNow 頂層 skip、
+  cloudResolveAndMerge / inline merge 的 skipPush 三處自動受惠）
+- 預期行為：家 #16 按檢查雲端 → 拉 #17 → 內容相同 → 對齊成 #17 **不推 #18**；
+  兩台版本從此收斂，只有真編輯才 +1
+
+---
+
 ## v3.25.3 — R25 log 三件套 + R24 calendar 診斷 + 熱路徑小修（2026-07-10）
 
 ### R25 log 分流 / 降噪 / 使用統計
