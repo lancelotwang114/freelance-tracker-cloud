@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-10-v3.25.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-10-v3.25.5';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1178,6 +1178,16 @@ function cloudFormatRelativeTime(iso) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// v3.25.5：chip 用短絕對時間（MM/DD HH:mm）— 顯示「雲端這版資料的時間」，
+// 兩台同步到同版本時逐字相同，比相對時間好核對（使用者要求兩邊看到一模一樣）
+function cloudFormatChipTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 // v3.22.3：把 ISO 時間轉成完整中文時間（給 hover title 顯示）
 function cloudFormatFullTime(iso) {
   if (!iso) return '';
@@ -1351,8 +1361,9 @@ function renderSyncInfoChip() {
     chip.title = '尚未同步過，等下次推送 / 拉取';
     return;
   }
-  textEl.innerHTML = `☁️ #${ver} · ${escapeHtml(relTime)}`;
-  chip.title = `已取得雲端最新資料\n雲端版本：#${ver}\n上次同步：${fullTime}（${relTime}）\n（點擊重新檢查雲端）`;
+  // v3.25.5：改顯示雲端版本的絕對時間 — 兩台同版本時 chip 逐字相同，好核對
+  textEl.innerHTML = `☁️ #${ver} · ${escapeHtml(cloudFormatChipTime(syncedAt))}`;
+  chip.title = `已取得雲端最新資料\n雲端版本：#${ver}（${fullTime}，${relTime}）\n兩台電腦 #號相同 = 資料同一份\n（點擊重新檢查雲端）`;
 }
 
 // v3.24.38：點 sync chip — error 時觸發 cloudRetryPush，其他時觸發 cloudPullNow
