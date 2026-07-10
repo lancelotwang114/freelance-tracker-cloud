@@ -111,8 +111,8 @@
 - **R21. 375px tab 列橫向捲動無提示（P3）**：7 tab 只見 4 個，加漸層遮罩或箭頭。
 - **R22. 雙歡迎 UI 同屏重疊（P3）**：中央 welcome card + 底部 onboarding sheet 擇一。
 - **R23. row「⧉ 複製為新案件」** ✅ v3.25.2（duplicateJobFromRow：modal 複製模式 + 標題全選，流水案件 3 動作）
-- **R24. calendar-sync 每輪 PATCH ~530 事件（P2）**：`_calendarEventDiffers` 幾乎永遠 true（疑 Google 回傳 normalize 後與本機 build 字串不等）。先 log 第一個 differs 欄位定位再修。
-- **R25. log 三件套（已核准待做）**：(a) `cat: user|sys` 分流 (b) sys 成功事件（push/pull/merge-clean）改每日聚合 counter，500 額度留給 error/conflict/auth (c) user 事件加 `via` 欄位（row/modal/fab/duplicate）+ 唯讀行為（switchTab/篩選/搜尋/匯出）進獨立 counter key，設定頁 top10 + 匯出 JSON。
+- **R24. calendar-sync 每輪 PATCH ~530 事件（P2）**：🔍 v3.25.3 已埋診斷（diffFields 統計進 calendar-sync log）— **下次真實同步後看日誌內 diffFields 就知道兇手欄位，再修比對邏輯**。
+- **R25. log 三件套** ✅ v3.25.3（cat 分流 + push/pull 每日聚合降噪 + via 欄位 + tab/act usage counter + 📊 匯出統計）。註：counter top10 顯示 UI 未做，匯出 JSON 已可分析。
 - **R26. 離線不鎖編輯** ✅ v3.25.2
 - **R27. 編輯 modal 開啟不彈全屏鎖** ✅ v3.25.2
 - **R28. 401 自動續約 + 錯誤文案分流** ✅ v3.25.2（重登 = 最後手段，見 CLAUDE.md 新鐵則）

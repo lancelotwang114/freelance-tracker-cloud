@@ -3098,9 +3098,13 @@ body.view-board #jobs-group-control {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  /* v3.25.3（R6）：auto-fit 在 ~760px 寬排成 5+1 孤兒 → 固定 3 欄（6 卡 = 3×2、5 卡 = 3+2） */
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-bottom: 12px;
+}
+@media (max-width: 560px) {
+  .summary-grid { grid-template-columns: repeat(2, 1fr); }
 }
 .summary-card {
   background: var(--bg);

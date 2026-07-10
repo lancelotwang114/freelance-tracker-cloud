@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-10-v3.25.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-10-v3.25.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -4063,24 +4063,27 @@ function _calendarBuildEventResource(target) {
 }
 
 // 比對既有事件跟目標事件，回傳是否需要更新
+// v3.25.3（R24 診斷）：回傳「第一個不同的欄位名」（truthy）或 false —
+// 操作 log 顯示每輪 sync updated ~530（幾乎全量），代表某欄位比對永遠不相等，
+// cloudSyncCalendar 會把欄位統計掛進 calendar-sync log，下次真實同步即可定位根因。
 function _calendarEventDiffers(existing, target) {
-  if ((existing.summary || '') !== target.summary) return true;
-  if ((existing.description || '') !== target.description) return true;
-  if ((existing.colorId || '') !== (target.colorId || '')) return true;
+  if ((existing.summary || '') !== target.summary) return 'summary';
+  if ((existing.description || '') !== target.description) return 'description';
+  if ((existing.colorId || '') !== (target.colorId || '')) return 'colorId';
   // start：v3.24.11 後可能從 date 改成 dateTime（或反之），任一邊不一致就要更新
-  if ((target.start.date || null) !== (existing.start?.date || null)) return true;
-  if ((target.start.dateTime || null) !== (existing.start?.dateTime || null)) return true;
+  if ((target.start.date || null) !== (existing.start?.date || null)) return 'start.date';
+  if ((target.start.dateTime || null) !== (existing.start?.dateTime || null)) return 'start.dateTime';
   // end
-  if ((target.end.date || null) !== (existing.end?.date || null)) return true;
-  if ((target.end.dateTime || null) !== (existing.end?.dateTime || null)) return true;
+  if ((target.end.date || null) !== (existing.end?.date || null)) return 'end.date';
+  if ((target.end.dateTime || null) !== (existing.end?.dateTime || null)) return 'end.dateTime';
   // v3.24.11：reminders 也要比，否則舊事件（沒帶 reminders）不會被升級成有 overrides 的版本
   const exMins = (existing.reminders?.overrides || []).map(o => `${o.method}:${o.minutes}`).sort().join(',');
   const tgMins = (target.reminders?.overrides || []).map(o => `${o.method}:${o.minutes}`).sort().join(',');
-  if (exMins !== tgMins) return true;
+  if (exMins !== tgMins) return 'reminders.overrides';
   // useDefault：舊事件 undefined（吃預設） vs 新事件 false → 視為不同
   const exDefault = existing.reminders?.useDefault;
   const tgDefault = target.reminders?.useDefault;
-  if ((exDefault === undefined ? true : !!exDefault) !== !!tgDefault) return true;
+  if ((exDefault === undefined ? true : !!exDefault) !== !!tgDefault) return 'reminders.useDefault';
   return false;
 }
 
@@ -4113,10 +4116,17 @@ async function cloudSyncCalendar() {
     const toCreate = [];
     const toUpdate = [];
     const toDelete = [];
+    const diffFieldCounts = {};  // v3.25.3（R24 診斷）：統計是哪個欄位造成 update
     for (const t of target) {
       const ex = existingMap.get(t.ftKey);
       if (!ex) toCreate.push(t);
-      else if (_calendarEventDiffers(ex, t)) toUpdate.push({ ex, t });
+      else {
+        const df = _calendarEventDiffers(ex, t);
+        if (df) {
+          toUpdate.push({ ex, t });
+          diffFieldCounts[df] = (diffFieldCounts[df] || 0) + 1;
+        }
+      }
     }
     for (const [key, ev] of existingMap) {
       if (!targetKeys.has(key)) toDelete.push(ev);
@@ -4157,7 +4167,8 @@ async function cloudSyncCalendar() {
     toastDismiss();
     toast(`✓ Calendar 同步完成（新增 ${added} / 更新 ${updated} / 刪除 ${deleted}）`, 4000);
     if (typeof logAction === 'function') {
-      logAction('calendar-sync', result);
+      // v3.25.3（R24 診斷）：updated > 0 時掛欄位統計，定位「每輪全量 PATCH」根因
+      logAction('calendar-sync', updated > 0 ? { ...result, diffFields: diffFieldCounts } : result);
     }
     cloudRenderCalendarStatus();
   } catch (e) {
@@ -4525,10 +4536,51 @@ function saveActionLog() {
   try { localStorage.setItem(ACTION_LOG_KEY, JSON.stringify(actionLog)); } catch (_) {}
 }
 
+// v3.25.3（R25）：log 分流 + 降噪 + 使用統計
+// - cat: 'user'（使用者意圖）/ 'sys'（同步/系統機器事件），日誌 viewer 可篩選
+// - cloud-push / cloud-pull 成功屬高頻噪音 → 不佔 500 筆額度，改進每日聚合 counter
+// - user 事件同時累積 lifetime counter（突破 500 筆上限，做 usage-driven 優化依據）
+const SYS_LOG_PREFIXES = ['cloud-', 'calendar-', 'sync-'];
+const AGGREGATED_SYS_TYPES = new Set(['cloud-push', 'cloud-pull']);
+const SYS_COUNTER_KEY = 'cloud-ftSysCounters_v1';     // { '2026-07-10': { 'cloud-push': 14 } }，留 30 天
+const USAGE_COUNTER_KEY = 'cloud-ftUsageCount_v1';    // { 'tab:jobs': 123, 'act:job-create': 45 }，lifetime
+
+function _logCat(type) {
+  return SYS_LOG_PREFIXES.some(p => type.startsWith(p)) ? 'sys' : 'user';
+}
+
+function bumpUsage(key) {
+  try {
+    const u = JSON.parse(localStorage.getItem(USAGE_COUNTER_KEY) || '{}');
+    u[key] = (u[key] || 0) + 1;
+    localStorage.setItem(USAGE_COUNTER_KEY, JSON.stringify(u));
+  } catch (_) {}
+}
+
+function _bumpSysCounter(type) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SYS_COUNTER_KEY) || '{}');
+    const day = new Date().toISOString().slice(0, 10);
+    all[day] = all[day] || {};
+    all[day][type] = (all[day][type] || 0) + 1;
+    const days = Object.keys(all).sort();
+    while (days.length > 30) delete all[days.shift()];
+    localStorage.setItem(SYS_COUNTER_KEY, JSON.stringify(all));
+  } catch (_) {}
+}
+
 function logAction(type, details) {
+  // 高頻成功事件 → 聚合 counter，不進 event list（error / conflict / signin 等仍逐筆留）
+  if (AGGREGATED_SYS_TYPES.has(type)) {
+    _bumpSysCounter(type);
+    return;
+  }
+  const cat = _logCat(type);
+  if (cat === 'user') bumpUsage('act:' + type);
   actionLog.push({
     ts: Date.now(),
     type: type,
+    cat: cat,
     details: details || {}
   });
   saveActionLog();
@@ -5576,6 +5628,8 @@ let currentTab = 'dashboard';
 
 function switchTab(tab) {
   currentTab = tab;
+  // v3.25.3（R25）：唯讀行為進 usage counter（logAction 只記 mutation，補熱區盲點）
+  if (typeof bumpUsage === 'function') bumpUsage('tab:' + tab);
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   ['dashboard','jobs','calendar','revenue','clients','invoice','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.toggle('hidden', t !== tab);
@@ -11712,7 +11766,9 @@ function renderTodayTodo() {
       priority: 4,
       icon: '📅',
       text: `月底快到了！可以開始整理本月可請款的案件了`,
-      action: () => switchTab('invoice'),
+      // v3.25.3（R8）：原本 action 是 function 但 render 從未綁上（onclick 三元式兩分支都回空字串）
+      // → 改存 onclick 字串，render 直接綁
+      actionClick: "switchTab('invoice')",
     });
   }
 
@@ -11744,8 +11800,8 @@ function renderTodayTodo() {
   // 按 priority 排序
   items.sort((a, b) => a.priority - b.priority);
   box.innerHTML = items.map(it => {
-    const onClick = it.jobId ? `editJob('${it.jobId}')` : (it.action ? '' : '');
-    const cursorStyle = (it.jobId || it.action) ? 'cursor: pointer;' : '';
+    const onClick = it.jobId ? `editJob('${it.jobId}')` : (it.actionClick || '');
+    const cursorStyle = (it.jobId || it.actionClick) ? 'cursor: pointer;' : '';
     const handler = onClick ? `onclick="${onClick}"` : '';
     return `<div class="today-todo-item" ${handler} style="${cursorStyle}">
       <span class="today-todo-icon">${it.icon}</span>
@@ -11844,7 +11900,7 @@ function toggleDone(id) {
   save();
   // v2.9.5: 寫日誌
   const c = getClient(j.clientId);
-  logAction(j.done ? 'job-done' : 'job-undo-done', { jobId: id, title: j.title, amount: j.amount, clientId: j.clientId, clientName: c?.name });
+  logAction(j.done ? 'job-done' : 'job-undo-done', { jobId: id, title: j.title, amount: j.amount, clientId: j.clientId, clientName: c?.name, via: 'quick' });
   updateJobRow(id);
   renderAlerts(); renderBadge();
   // v3.24.18：標完成 → 對應 row 觸發綠光暈微動效
@@ -11929,7 +11985,7 @@ function confirmPaidDate() {
   if (ids.length === 1) {
     const j = state.jobs.find(x => x.id === ids[0]);
     const c = getClient(j?.clientId);
-    logAction('job-paid', { jobId: ids[0], title: j?.title, amount: j?.amount, clientId: j?.clientId, clientName: c?.name, date: dateStr });
+    logAction('job-paid', { jobId: ids[0], title: j?.title, amount: j?.amount, clientId: j?.clientId, clientName: c?.name, date: dateStr, via: 'quick' });
   } else if (n > 0) {
     const total = ids.reduce((s, id) => {
       const j = state.jobs.find(x => x.id === id);
@@ -12012,6 +12068,7 @@ function openJobModal() {
   // v3.24.7：恢復扣稅 toggle，新案件預設關
   if (document.getElementById('job-tax-applied')) document.getElementById('job-tax-applied').checked = false;
   updateJobAmountSummary();
+  _jobCreateVia = 'fab';  // v3.25.3（R25）：一般新增路徑（duplicateJob 會改成 'duplicate'）
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
   document.getElementById('job-export-estimate-btn')?.classList.add('hidden');
   document.getElementById('job-confirm-estimate-btn')?.classList.add('hidden');
@@ -12395,6 +12452,9 @@ function editJob(id) {
   document.getElementById('job-modal').classList.add('open');
 }
 
+// v3.25.3（R25）：job-create 的來源路徑（fab=一般新增 / duplicate=複製），存進 log 的 via 欄位
+let _jobCreateVia = 'fab';
+
 // v3.25.2（R23）：列表 row 一鍵複製 — 開 modal 進複製模式，標題全選（打字即蓋掉改人名）
 // 使用場景：「案例修圖-{人名}」這類同業主同類型流水案件，3 動作完成：改名 → 改金額 → Enter
 function duplicateJobFromRow(jobId) {
@@ -12411,6 +12471,7 @@ function duplicateJob() {
   if (!editingJobId) return;
   // 切到「新增」模式但保留現有欄位
   editingJobId = null;
+  _jobCreateVia = 'duplicate';  // v3.25.3（R25）
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   set('job-modal-title', el => { el.textContent = '新增案件（複製自現有案件）'; });
   set('job-delete-btn', el => el.classList.add('hidden'));
@@ -12543,7 +12604,7 @@ function saveJob() {
     const newJob = { id: uid(), ...payload };
     recomputePaidStatus(newJob);
     state.jobs.push(newJob);
-    logAction('job-create', { jobId: newJob.id, title: payload.title, amount: payload.amount, clientId: payload.clientId, clientName: c?.name });
+    logAction('job-create', { jobId: newJob.id, title: payload.title, amount: payload.amount, clientId: payload.clientId, clientName: c?.name, via: _jobCreateVia });
     // v3.23.0：觸發 mascot
     if (typeof mascotSay === 'function') mascotSay('job-create');
   }
@@ -13999,13 +14060,40 @@ async function fetchDeviceLocation() {
 // v3.0.0：showSnapshotList（v2 sheet snapshot 列表）已移除；v3 用 cloudListSnapshots（在 ☁️ Drive Sync Layer）
 
 // 預覽特定 snapshot 內容
+// v3.25.3（R25）：匯出使用統計 — {usage counter, sys 每日聚合, 近期事件}，丟給 AI 做 usage-driven 優化分析
+function exportUsageStats() {
+  let usage = {}, sysCounters = {};
+  try { usage = JSON.parse(localStorage.getItem(USAGE_COUNTER_KEY) || '{}'); } catch (_) {}
+  try { sysCounters = JSON.parse(localStorage.getItem(SYS_COUNTER_KEY) || '{}'); } catch (_) {}
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    usage,           // lifetime counter：tab 切換 + user 事件
+    sysCounters,     // 30 天內每日 push/pull 次數
+    recentEvents: actionLog  // 近 500 筆事件（含 cat / via）
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ft-usage-stats-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast('✓ 已匯出使用統計 JSON');
+}
+
 // ============== 操作日誌 UI（v2.9.5）==============
 function openActionLogModal() {
   // 填類型 select
   const typeSel = document.getElementById('log-filter-type');
   if (typeSel) {
     const usedTypes = [...new Set(actionLog.map(l => l.type))].sort();
+    // v3.25.3（R25）：加 user / sys 分流選項
     typeSel.innerHTML = '<option value="all">全部類型</option>' +
+      '<option value="cat:user">👤 只看操作</option>' +
+      '<option value="cat:sys">⚙️ 只看系統</option>' +
       usedTypes.map(t => `<option value="${t}">${(ACTION_LABELS[t]?.icon || '')} ${ACTION_LABELS[t]?.label || t}</option>`).join('');
   }
   // 填業主 select（只列 log 中出現過的）
@@ -14070,7 +14158,9 @@ function renderActionLog() {
   }
 
   let list = [...actionLog].reverse();  // 最新在前
-  if (ft !== 'all') list = list.filter(l => l.type === ft);
+  // v3.25.3（R25）：cat:user / cat:sys 分流篩選（舊資料沒 cat 欄位 → 用 _logCat 現算）
+  if (ft.startsWith('cat:')) list = list.filter(l => (l.cat || _logCat(l.type)) === ft.slice(4));
+  else if (ft !== 'all') list = list.filter(l => l.type === ft);
   if (fc !== 'all') list = list.filter(l => l.details?.clientId === fc);
   if (fd === 'today') list = list.filter(l => l.ts >= cutoff);
   else if (fd === 'yesterday') {

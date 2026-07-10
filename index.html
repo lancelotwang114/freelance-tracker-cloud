@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-07-10-v3.25.2">
+<meta name="app-version" content="2026-07-10-v3.25.3">
 <meta name="theme-color" content="#3b82f6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -1386,7 +1386,8 @@
         <option value="week">最近 7 天</option>
         <option value="month">最近 30 天</option>
       </select>
-      <button class="btn btn-ghost btn-sm" onclick="clearActionLog()" style="margin-left: auto;">🗑️ 清空</button>
+      <button class="btn btn-ghost btn-sm" onclick="exportUsageStats()" style="margin-left: auto;" title="匯出使用統計 JSON（tab 熱區 + 操作次數 + 近期事件）">📊 匯出統計</button>
+      <button class="btn btn-ghost btn-sm" onclick="clearActionLog()">🗑️ 清空</button>
     </div>
     <div id="action-log-list" style="max-height: 60vh; overflow-y: auto; font-size: 13px;"></div>
     <div class="modal-actions">

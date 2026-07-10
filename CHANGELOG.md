@@ -1,5 +1,31 @@
 ﻿# 版本更新歷史
 
+## v3.25.3 — R25 log 三件套 + R24 calendar 診斷 + 熱路徑小修（2026-07-10）
+
+### R25 log 分流 / 降噪 / 使用統計
+- `logAction` 加 `cat: user|sys`（依 type prefix 自動分類），日誌 viewer 類型篩選加「👤 只看操作 / ⚙️ 只看系統」
+- **降噪**：`cloud-push` / `cloud-pull` 成功不再逐筆佔 500 額度 → 進 `cloud-ftSysCounters_v1` 每日聚合（留 30 天）；error / conflict / signin / snapshot 照舊逐筆
+- **via 欄位**：`job-done` / `job-paid`（quick action 路徑）標 `via:'quick'`；`job-create` 標 `via:'fab'|'duplicate'` — 以後 log 自己會回答「複製功能有沒有人用」
+- **usage counter**（`cloud-ftUsageCount_v1`，lifetime、獨立 key、屬分析數據非業務資料）：
+  - `tab:{name}` — switchTab 計數，補「唯讀行為不在 log」的熱區盲點
+  - `act:{type}` — 每個 user 事件 lifetime 計數，突破 500 筆上限
+- 日誌 modal 加「📊 匯出統計」→ `{usage, sysCounters, recentEvents}` JSON，丟 AI 做 usage-driven 分析
+
+### R24 calendar-sync 全量 PATCH 診斷儀表
+- `_calendarEventDiffers` 改回傳「第一個不同的欄位名」；`cloudSyncCalendar` 統計 `diffFields` 掛進 calendar-sync log
+- 背景：操作 log 顯示每輪 updated ~530（全量），下次真實同步的 log 會直接指出兇手欄位
+
+### 熱路徑小修（使用者自述熱區：總覽/新增案件/請款單/月收益）
+- **R8**：總覽「月底快到」卡點擊死碼修復（原 onclick 三元式兩分支都空）→ 點了跳請款單分頁
+- **R6**：收益 summary 卡 5+1 孤兒排版 → 固定 3 欄（6 卡 = 3×2），≤560px 2 欄
+
+### 影響範圍
+- `js/app.js`：logAction 區塊、openActionLogModal / renderActionLog、switchTab、toggleDone / togglePaid / saveJob 的 log 呼叫、_jobCreateVia、exportUsageStats、_calendarEventDiffers、cloudSyncCalendar、renderTodayTodo
+- `index.html`：日誌 modal 加匯出鈕；`css/style.css`：summary-grid
+- **不碰** mergeStates / push / pull 核心、不碰 schema（counter 是分析數據，走獨立 key 合規）
+
+---
+
 ## v3.25.2 — 不打斷使用者：離線不鎖編輯、401 自動續約、row 一鍵複製（2026-07-10）
 
 ### 使用者反饋
