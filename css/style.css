@@ -2038,20 +2038,27 @@ input:focus, select:focus, textarea:focus {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 4px;
-  width: 24px;
-  height: 24px;
+  /* v3.25.2（R16）：24px → min 28px（舊版實測被擠到 8-11px 寬，批次對帳誤點率高） */
+  min-width: 28px;
+  min-height: 28px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 .row-quick-actions button:hover {
   background: var(--primary);
   color: #fff;
   border-color: var(--primary);
+}
+/* v3.25.2（R16）：觸控裝置沒有 hover → quick actions 常駐 + 44px 熱區 */
+@media (hover: none) {
+  .row-quick-actions { opacity: 1; }
+  .row-quick-actions button { min-width: 40px; min-height: 40px; }
 }
 
 /* ===== 緊湊模式 ===== */

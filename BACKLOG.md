@@ -98,7 +98,26 @@
 - **R13. 使用頻率統計（usage-driven 優化依據）**：利用**既有** `logAction` / `actionLog`（`cloud-ftActionLog_v1`，上限 500 筆）彙總各 action type 次數 → 找最常用功能當優化目標。
   - 短期（零開發）：從正式站匯出操作日誌 JSON → 給 AI 彙總分析
   - 長期（小）：logAction 內加 `{type: count}` 累積 counter（獨立本機 key，屬分析數據非業務資料，合規），設定頁顯示 top 10 + 匯出按鈕，突破 500 筆上限
-- **R14. 行事曆拖曳改日期**（= 舊 #11，使用者問「是否需要」）：建議「可做但排快捷鍵後面」——兩台都是桌面 Chrome 適合拖曳，但同樣操作快捷鍵/inline edit 覆蓋面更廣；手機無用。
+- **R14. 行事曆拖曳改日期** ✅ 已完成（2026-07-10 核實：`job-cal-drag` 在 app.js:7231 早已實作，且 5 月操作 log 有實際使用 2 次）
+
+**2026-07-10 UI/UX/UAT 實測追加（demo 資料 + 流程實跑）**
+
+- **R15. 首次體驗撞牆（P1）**：未登入 + 載範例資料 → save() → sync error → 「同步中斷，編輯已暫停」全屏鎖。sync-error overlay 該只在「曾登入過（有 trackerFileId）」時出現；純本機/範例模式降級可關 banner。R26 修掉離線鎖後此項剩「未登入」情境。
+- **R16. quick action 熱區過小** ✅ v3.25.2（min 28px + 觸控常駐 44px）
+- **R17. Modal dirty 保護 + focus（P2）**：「取消」直接丟棄未儲存輸入無確認；開 modal focus 不進去。做 dirty-check confirm（復用到更新流程）+ 開啟 focus 第一欄。
+- **R18. 驗證錯誤是底部 toast（P2）**：「請輸入案件名稱」離欄位遠、不 focus、不標紅 → inline error + focus。
+- **R19. 無 :focus-visible 樣式（P3）**：快捷鍵系統上線前必補。
+- **R20. Toast 無 aria-live；101/103 input 無 label 關聯（P3）**：modal 表單優先。
+- **R21. 375px tab 列橫向捲動無提示（P3）**：7 tab 只見 4 個，加漸層遮罩或箭頭。
+- **R22. 雙歡迎 UI 同屏重疊（P3）**：中央 welcome card + 底部 onboarding sheet 擇一。
+- **R23. row「⧉ 複製為新案件」** ✅ v3.25.2（duplicateJobFromRow：modal 複製模式 + 標題全選，流水案件 3 動作）
+- **R24. calendar-sync 每輪 PATCH ~530 事件（P2）**：`_calendarEventDiffers` 幾乎永遠 true（疑 Google 回傳 normalize 後與本機 build 字串不等）。先 log 第一個 differs 欄位定位再修。
+- **R25. log 三件套（已核准待做）**：(a) `cat: user|sys` 分流 (b) sys 成功事件（push/pull/merge-clean）改每日聚合 counter，500 額度留給 error/conflict/auth (c) user 事件加 `via` 欄位（row/modal/fab/duplicate）+ 唯讀行為（switchTab/篩選/搜尋/匯出）進獨立 counter key，設定頁 top10 + 匯出 JSON。
+- **R26. 離線不鎖編輯** ✅ v3.25.2
+- **R27. 編輯 modal 開啟不彈全屏鎖** ✅ v3.25.2
+- **R28. 401 自動續約 + 錯誤文案分流** ✅ v3.25.2（重登 = 最後手段，見 CLAUDE.md 新鐵則）
+
+**熱路徑備忘（使用者自述：總覽/新增案件/看請款單/月收益）**：R8（月底卡點擊死碼→接 switchTab('invoice')）、R6（收益 stat 卡 5+1 孤兒排版）、新增案件已有 ⧉ 複製；快捷鍵系統（#2）做時 N=新增案件 優先。
 
 ---
 

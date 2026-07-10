@@ -1,5 +1,40 @@
 ﻿# 版本更新歷史
 
+## v3.25.2 — 不打斷使用者：離線不鎖編輯、401 自動續約、row 一鍵複製（2026-07-10）
+
+### 使用者反饋
+> 「不要一直要求使用者重新登入 以及編輯中 或是各種操作」＋ 複製功能要簡易直覺
+
+### 同步打斷點三連修（R26/R27/R28）
+1. **R26 離線不鎖編輯**：`offline` 事件原本直接進 error → 20 秒後全屏「編輯已暫停」鎖。
+   改：`showSyncErrorOverlay()` 開頭 `!navigator.onLine` → 不鎖（單機離線改動存 localStorage，
+   上線自動推 + mergeStates 兜底）；`online` listener 補「上線後 20 秒仍 error 才重新評估鎖定」。
+2. **R27 編輯中不彈全屏鎖**：guard 觸發時若 `_isAnyModalOpen()` → 延後 15 秒再評估（`_syncGuardDeferTimer`，
+   cloudSignOut 一併清理），紅 banner 仍在。打字打到一半不再被蓋臉。
+3. **R28 假重登要求**：
+   - `driveFetch` 401 → 強制過期本機 token → `ensureValidToken()`（silent refresh）→ 自動重試一次，
+     救不回才丟 DriveAuthError。「請重新登入」變成最後手段。
+   - `_handleSilentRefreshFailure` 文案分流：斷網/timeout → 「📶 網路不穩，改動已存本機」；
+     只有真 auth 問題才顯示「請重新登入」。
+   - `ensureValidToken` / 積極 retry 的資格判斷加 `refreshToken`（code flow 下 tokenClient 未 ready 也能續約）。
+
+### R16+R23 案件列 quick action
+- 熱區 24px（實測被擠到 8-11px）→ min 28×28；觸控裝置 hover 不存在 → 常駐顯示 + 44px 熱區
+- row / 報表模式加「⧉ 複製為新案件」：`duplicateJobFromRow()` = 開 modal 複製模式 + 標題全選，
+  流水案件（案例修圖-人名）3 動作完成：改名 → 改金額 → Enter
+
+### CLAUDE.md 鐵則
+- 新增「🚨 不打斷使用者鐵則（v3.25.x refresh token 時代起）」：重登 = 最後手段、
+  網路問題不偽裝 auth 問題、離線不鎖編輯、modal 開啟不彈全屏鎖、更新提示永遠被動
+
+### 影響範圍
+- `js/app.js`：driveFetch、_handleSilentRefreshFailure、showSyncErrorOverlay、online listener、
+  ensureValidToken、aggressive retry、row 模板 ×2、duplicateJobFromRow
+- `css/style.css`：.row-quick-actions 尺寸 + touch 常駐
+- **不碰** mergeStates / push / pull 核心、不碰 schema
+
+---
+
 ## v3.25.1 — 修 mergeStates 漏 invoiceHistory + 無變動跳過 push（2026-07-09）
 
 ### 背景
