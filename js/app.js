@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-11-v3.27.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-11-v3.27.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1957,9 +1957,17 @@ async function cloudHydrateBankbookImages() {
 // metadata wrapper 結構（schemaVersion / version / lastModifiedAt / lastModifiedBy / data）
 // 後續 commit 會在這個 layer 加：debounce 雙寫、三方合併、衝突 modal、snapshot
 
-// localStorage cloud meta：{ trackerFileId, trackerCreatedAt, lastSyncedAt, lastSyncedVersion }
+// localStorage cloud meta：{ trackerFileId, trackerCreatedAt, lastSyncedAt, lastSyncedVersion,
+//                            lastSyncedBaselineId, baselineFresh }（v3.27.2 R29 加後兩者）
 // 跟 CLOUD_AUTH_KEY 分開：auth 跟 sync 兩件事獨立持久化（auth 過期不該清掉 fileId）
 const CLOUD_META_KEY = 'cloud-freelance-tracker-meta';
+
+// v3.27.2（R29）：產生新的同步基準 id — 匯入 / 清空這類「整份取代」操作時呼叫。
+// 另一台 merge 時看到 baselineId 變了 → 不做 union（union 會把舊資料救回來），改整份採用新基準。
+// 背景：7/10 事故 — A 匯入四月檔推上雲，B 帶示範資料 merge 把示範案件 union 回來變混合體。
+function _newBaselineId() {
+  return 'bl_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
 const TRACKER_FILENAME = 'tracker.json';
 
 function cloudGetMeta() {
@@ -1987,6 +1995,7 @@ function buildTrackerWrapper(prevVersion = 0) {
     lastModifiedAt: new Date().toISOString(),
     lastModifiedBy: deviceLabel,
     createdAt: meta.trackerCreatedAt || new Date().toISOString(),
+    baselineId: meta.lastSyncedBaselineId || null,  // v3.27.2（R29）：同步基準 id（舊版 app 會忽略，向下相容）
     data: {
       clients: state.clients || [],
       jobs: state.jobs || [],
@@ -2019,7 +2028,8 @@ function unwrapTracker(jsonText) {
       version: parsed.version || 1,
       lastModifiedAt: parsed.lastModifiedAt || null,
       lastModifiedBy: parsed.lastModifiedBy || null,
-      createdAt: parsed.createdAt || null
+      createdAt: parsed.createdAt || null,
+      baselineId: parsed.baselineId || null  // v3.27.2（R29）
     }
   };
 }
@@ -2160,6 +2170,7 @@ async function cloudInitTrackerFile() {
       // v3.24.21：用 Drive 的 modifiedTime（list 回傳值，雲端權威時間）而非 wrapper 內 lastModifiedAt
       lastSyncedAt: trackerFile.modifiedTime || result.meta.lastModifiedAt,
       lastSyncedVersion: result.meta.version,
+      lastSyncedBaselineId: result.meta.baselineId || null,  // v3.27.2（R29）
     });
     // α2-4a：剛 pull 下來的內容就是「上次成功同步的快照」
     cloudSaveLastSyncedSnapshot(result.data);
@@ -2228,6 +2239,73 @@ let cloudConflictState = null;  // { mergedTentative, conflicts, choices, fileId
 // v3.24.31：使用者明確要求「衝突一律採雲端，不要再跳選本機/雲端的 modal」
 //           合併出衝突 → 直接 remote-wins 改寫 merged，走 clean 分支推上去
 async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCreatedAt }) {
+  // ===== v3.27.2（R29）：同步基準線檢查（在任何 merge 之前） =====
+  // 「匯入 / 清空」是整份取代的意圖 — mergeStates 的 union 行為會把舊資料救回來（7/10 事故），
+  // 所以基準切換時不合併：fresh 端整份覆蓋雲端、另一端整份採用雲端（先備份本機）。
+  const _metaBl = cloudGetMeta();
+  const remoteBaseline = remoteMeta.baselineId || null;
+  const localBaseline = _metaBl.lastSyncedBaselineId || null;
+
+  // 分支 1：本機剛做過匯入/清空（baselineFresh）還沒推上雲 → 本機為準，直接整份覆蓋
+  if (_metaBl.baselineFresh) {
+    console.warn('[cloud-merge] 本機 baseline fresh（剛匯入/清空）→ 跳過合併，以本機整份覆蓋雲端');
+    if (cloudPushInProgress) { cloudPushPendingAfter = true; return; }
+    cloudPushInProgress = true;
+    try {
+      const wrapper = buildTrackerWrapper(remoteMeta.version);
+      const updated = await driveUpdateFile(fileId, wrapper);
+      cloudSaveMeta({
+        trackerFileId: fileId,
+        trackerCreatedAt: trackerCreatedAt || _metaBl.trackerCreatedAt,
+        lastSyncedAt: (updated && updated.modifiedTime) || wrapper.lastModifiedAt,
+        lastSyncedVersion: wrapper.version,
+        baselineFresh: false
+      });
+      cloudSaveLastSyncedSnapshot(wrapper.data);
+      if (typeof logAction === 'function') logAction('cloud-baseline-push', { fileId, version: wrapper.version, baselineId: wrapper.baselineId });
+      if (typeof toast === 'function') toast('✓ 已以本機（匯入後）資料為準更新雲端', 4000);
+    } catch (e) {
+      console.error('[cloud-merge] baseline push failed:', e);
+    } finally {
+      cloudPushInProgress = false;
+      if (cloudPushPendingAfter) {
+        cloudPushPendingAfter = false;
+        setTimeout(() => { cloudPushNow().catch(() => {}); }, 0);
+      }
+    }
+    return;
+  }
+
+  // 分支 2：雲端的 baseline 變了（另一台做過匯入/清空）→ 備份本機後整份採用，不 union
+  if (remoteBaseline && remoteBaseline !== localBaseline) {
+    console.warn(`[cloud-merge] 雲端基準已切換（${localBaseline || '無'} → ${remoteBaseline}）→ 備份本機後整份採用雲端`);
+    if (typeof cloudCreateSnapshot === 'function') {
+      const tsLabel = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+      cloudCreateSnapshot('manual', `基準切換備份_${tsLabel}`)
+        .then(c => console.log('[cloud-merge] ✓ 基準切換前本機備份:', c.id))
+        .catch(e => {
+          console.error('[cloud-merge] 基準切換備份失敗:', e);
+          if (typeof toast === 'function') toast('⚠️ 切換前備份失敗，本機資料可能被覆蓋！', 10000);
+        });
+    }
+    applyTrackerData(remoteData);
+    if (cloudPushTimer) { clearTimeout(cloudPushTimer); cloudPushTimer = null; }
+    cloudPendingChangesCount = 0;
+    cloudSaveLastSyncedSnapshot(remoteData);
+    cloudSaveMeta({
+      trackerFileId: fileId,
+      trackerCreatedAt: trackerCreatedAt || _metaBl.trackerCreatedAt,
+      lastSyncedAt: remoteMeta.lastModifiedAt,
+      lastSyncedVersion: remoteMeta.version,
+      lastSyncedBaselineId: remoteBaseline,
+      baselineFresh: false
+    });
+    if (typeof logAction === 'function') logAction('cloud-baseline-adopt', { fileId, version: remoteMeta.version, baselineId: remoteBaseline });
+    if (typeof toast === 'function') toast('☁️ 另一台電腦做過整份匯入/清空 → 已採用該版本（本機已備份快照）', 6000);
+    return;
+  }
+  // ===== 基準線檢查結束，以下照舊三方合併 =====
+
   const base = cloudGetLastSyncedSnapshot();
   const local = {
     clients: state.clients,
@@ -2367,6 +2445,7 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
         trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
         lastSyncedAt: remoteMeta.lastModifiedAt,
         lastSyncedVersion: remoteMeta.version,
+        lastSyncedBaselineId: remoteMeta.baselineId || null,  // v3.27.2（R29）
       });
       cloudSaveLastSyncedSnapshot(remoteData);  // base 也更新成 remote
       if (typeof logAction === 'function') {
@@ -2430,6 +2509,7 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
     trackerCreatedAt: trackerCreatedAt || cloudGetMeta().trackerCreatedAt,
     lastSyncedAt: remoteMeta.lastModifiedAt,
     lastSyncedVersion: remoteMeta.version,
+    lastSyncedBaselineId: remoteMeta.baselineId || null,  // v3.27.2（R29）
   });
   if (typeof toast === 'function') toast('☁️ 已對齊雲端版本', 3000);
 }
@@ -2964,7 +3044,35 @@ async function cloudPushNow() {
         //       因為 caller 已搶 cloudPushInProgress 鎖，不該再呼叫會自己搶鎖的函式
         const remoteText = await driveDownloadFile(meta.trackerFileId);
         const result = unwrapTracker(remoteText);
-        if (result.ok) {
+        // v3.27.2（R29）：基準線檢查（同 cloudResolveAndMerge 兩分支的 inline 版）
+        const _mBl = cloudGetMeta();
+        const _rBl = result.ok ? (result.meta.baselineId || null) : null;
+        if (result.ok && _mBl.baselineFresh) {
+          // 本機剛匯入/清空 → 不合併，直接往下以本機 wrapper 覆蓋雲端（version 用剛拉到的）
+          console.warn('[cloud-push] baseline fresh → 跳過 inline merge，本機整份覆蓋雲端');
+          meta.lastSyncedVersion = result.meta.version;
+        } else if (result.ok && _rBl && _rBl !== (_mBl.lastSyncedBaselineId || null)) {
+          // 雲端基準已切換（另一台匯入/清空）→ 備份本機 → 整份採用，不推
+          console.warn('[cloud-push] 雲端基準已切換 → 備份本機後採用雲端，不推');
+          if (typeof cloudCreateSnapshot === 'function') {
+            const tsL = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+            cloudCreateSnapshot('manual', `基準切換備份_${tsL}`).catch(e => console.error('[cloud-push] 基準切換備份失敗:', e));
+          }
+          applyTrackerData(result.data);
+          if (cloudPushTimer) { clearTimeout(cloudPushTimer); cloudPushTimer = null; }
+          cloudPendingChangesCount = 0;
+          cloudSaveLastSyncedSnapshot(result.data);
+          cloudSaveMeta({
+            lastSyncedAt: result.meta.lastModifiedAt,
+            lastSyncedVersion: result.meta.version,
+            lastSyncedBaselineId: _rBl,
+            baselineFresh: false
+          });
+          if (typeof logAction === 'function') logAction('cloud-baseline-adopt', { fileId: meta.trackerFileId, version: result.meta.version, baselineId: _rBl });
+          cloudSetSyncStatus('idle');
+          if (typeof toast === 'function') toast('☁️ 另一台電腦做過整份匯入/清空 → 已採用該版本（本機已備份）', 6000);
+          return;
+        } else if (result.ok) {
           // 跑 mergeStates（純函式）
           const base = cloudGetLastSyncedSnapshot();
           const local = {
@@ -3039,6 +3147,7 @@ async function cloudPushNow() {
               trackerCreatedAt: meta.trackerCreatedAt || result.meta.createdAt,
               lastSyncedAt: result.meta.lastModifiedAt,
               lastSyncedVersion: result.meta.version,
+              lastSyncedBaselineId: result.meta.baselineId || null,  // v3.27.2（R29）
             });
             cloudSaveLastSyncedSnapshot(result.data);
             cloudPushFailRetries = 0;
@@ -3068,6 +3177,7 @@ async function cloudPushNow() {
       // v3.24.21：用 Drive 回傳的 modifiedTime（精確到伺服器寫入時間），而非 wrapper.lastModifiedAt（本機 build 時間，會早 100-500ms）
       lastSyncedAt: (updated && updated.modifiedTime) || wrapper.lastModifiedAt,
       lastSyncedVersion: wrapper.version,
+      baselineFresh: false,  // v3.27.2（R29）：本機的新基準已上雲
     });
     cloudSaveLastSyncedSnapshot(wrapper.data);  // α2-4a：本機剛 push 的就是新的「上次成功同步」
     if (typeof logAction === 'function') {
@@ -4524,7 +4634,8 @@ async function cloudPullNow(silent) {
       cloudSaveLastSyncedSnapshot(result.data);
       cloudSaveMeta({
         lastSyncedAt: result.meta.lastModifiedAt,
-        lastSyncedVersion: result.meta.version
+        lastSyncedVersion: result.meta.version,
+        lastSyncedBaselineId: result.meta.baselineId || null  // v3.27.2（R29）
       });
       cloudSetSyncStatus('idle');
     }
@@ -13581,6 +13692,11 @@ function importData(e) {
         cloudMigrateBankbookImages().catch(e => console.warn('[bankbook-migrate] failed after import:', e));
       }
 
+      // v3.27.2（R29）：匯入 = 整份取代 → 換新同步基準，另一台會整份採用而不是 union 舊資料回來
+      if (typeof cloudSaveMeta === 'function') {
+        cloudSaveMeta({ lastSyncedBaselineId: _newBaselineId(), baselineFresh: true });
+      }
+
       // 9. 操作日誌
       logAction('data-import', {
         sourceVersion: d.schemaVersion || '?',
@@ -13925,6 +14041,10 @@ function clearAll(skipPrompt) {
   const beforeC = state.clients.length;
   const beforeJ = state.jobs.length;
   state.clients = []; state.jobs = [];
+  // v3.27.2（R29）：清空 = 整份取代 → 換新同步基準
+  if (typeof cloudSaveMeta === 'function') {
+    cloudSaveMeta({ lastSyncedBaselineId: _newBaselineId(), baselineFresh: true });
+  }
   logAction('data-clear', { clearedClients: beforeC, clearedJobs: beforeJ });
   save(); renderAll(); toast('已清空全部資料');
 }

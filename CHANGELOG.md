@@ -1,5 +1,34 @@
 ﻿# 版本更新歷史
 
+## v3.27.2 — R29 匯入建新基準：整份取代不再被 merge 救回（2026-07-11）
+
+### 背景（7/10 事故根治）
+A 匯入四月設定檔（整份取代意圖）推上雲；B 帶著示範資料 merge — mergeStates 的 union
+行為把示範案件「救」回來 → 雲端變混合體。修法：讓「整份取代」有自己的語意。
+
+### 機制
+- wrapper 加 `baselineId`（同步基準 id）；meta 加 `lastSyncedBaselineId` + `baselineFresh`
+- **匯入 / 清空** → `_newBaselineId()` 換新基準 + 標 `baselineFresh`
+- merge 前先檢查（cloudResolveAndMerge + cloudPushNow inline 兩處）：
+  1. **本機 fresh**（剛匯入/清空還沒推）→ 跳過合併，本機整份覆蓋雲端（`cloud-baseline-push`）
+  2. **雲端 baseline 變了**（另一台整份取代過）→ **先備份本機快照** → 整份採用雲端，
+     不 union（`cloud-baseline-adopt` + toast 說明）
+  3. baseline 相同或雙方皆無 → 照舊三方合併
+- 所有「採用 remote」站點（init pull / pullNow no-base / 兩處 skipPush / fallback）記錄 remote baselineId
+- push 成功清 `baselineFresh`；flag 存 meta — 匯入後斷網重開仍記得「本機為準」
+
+### 相容性
+- 舊版 app 收到含 baselineId 的 wrapper → 忽略欄位照舊 union（不會壞，退化為現狀）
+- 雲端檔沒有 baselineId（舊版推的）→ 走正常合併
+- **不動 CURRENT_SCHEMA_VERSION**（baselineId 是 wrapper metadata，不是 data schema）
+
+### 驗證
+- 瀏覽器 9 條斷言全過：adopt 整份採用非 union、fresh 整份覆蓋、wrapper 帶 id、
+  flag 清除、同 baseline noop、null baseline 相容
+- 同步鐵則 8 項 self-review 全過（fresh push 搶鎖+pendingAfter、finally 清理、兩台場景）
+
+---
+
 ## v3.27.1 — 批次1 體驗小修：R15/R17/R18/R22 + R3（2026-07-11）
 
 ### R17 Modal dirty-check + focus 管理
