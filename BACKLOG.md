@@ -108,7 +108,7 @@
 - **R18. 驗證錯誤 inline** ✅ v3.27.1（標紅 + focus + 輸入解除）
 - **R19. 無 :focus-visible 樣式（P3）**：快捷鍵系統上線前必補。
 - **R20. Toast 無 aria-live；101/103 input 無 label 關聯（P3）**：modal 表單優先。
-- **R21. 375px tab 列橫向捲動無提示（P3）**：7 tab 只見 4 個，加漸層遮罩或箭頭。
+- **R21. tab 列捲動提示** ✅ v3.27.3（≤640px 右緣 mask 漸隱）。
 - **R22. 雙歡迎 UI 同屏重疊** ✅ v3.27.1（onboarding 開著時隱藏歡迎卡）。
 - **R23. row「⧉ 複製為新案件」** ✅ v3.25.2（duplicateJobFromRow：modal 複製模式 + 標題全選，流水案件 3 動作）
 - **R24. calendar-sync 每輪 PATCH ~530 事件（P2）**：🔍 v3.25.3 已埋診斷（diffFields 統計進 calendar-sync log）— **下次真實同步後看日誌內 diffFields 就知道兇手欄位，再修比對邏輯**。
