@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-10-v3.26.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-10-v3.27.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6388,15 +6388,21 @@ function renderDashboard() {
   const dashBulkBtn = document.getElementById('dash-bulk-btn');
   if (dashBulkBtn) dashBulkBtn.textContent = dashBulkMode ? '✕ 退出批次' : '☑️ 批次操作';
 
-  // 月度圖：最近 6 個「日曆月份」（v2.10.14：改成由近到遠，當月在最上面）
-  // v3.22.5：paid 用 jobFinalAmount（fully paid 案件的實收）、pending 用 jobUnpaidAmount（partial paid 也精確）
-  const byMonth = {};
+  // 月度圖：最近 6 個「日曆月份」
+  // v3.27.0（設計F）：長條改業主色堆疊 —「誰餵飽這個月」一眼看出；已收/待收數字留在文字行
+  const byMonth = {};        // mm -> { paid, pending }（文字行用）
+  const byMonthClient = {};  // mm -> { clientId: amt }（堆疊用，口徑 = 已收 + 完成待收）
   active.forEach(j => {
     if (!j.date) return;
     const mm = getMonth(j.date);
-    if (!byMonth[mm]) byMonth[mm] = { paid: 0, pending: 0 };
+    if (!byMonth[mm]) { byMonth[mm] = { paid: 0, pending: 0 }; byMonthClient[mm] = {}; }
     if (j.paid) byMonth[mm].paid += jobFinalAmount(j);
     else if (j.done) byMonth[mm].pending += jobUnpaidAmount(j);
+    const val = j.paid ? jobFinalAmount(j) : (j.done ? jobUnpaidAmount(j) : 0);
+    if (val) {
+      const cid = j.clientId || '_none';
+      byMonthClient[mm][cid] = (byMonthClient[mm][cid] || 0) + val;
+    }
   });
   const months = [];
   const nowRef = new Date();
@@ -6406,27 +6412,39 @@ function renderDashboard() {
     dd.setMonth(dd.getMonth() - i);
     const mmKey = dd.getFullYear() + '-' + String(dd.getMonth()+1).padStart(2,'0');
     months.push(mmKey);
-    if (!byMonth[mmKey]) byMonth[mmKey] = { paid: 0, pending: 0 };
+    if (!byMonth[mmKey]) { byMonth[mmKey] = { paid: 0, pending: 0 }; byMonthClient[mmKey] = {}; }
   }
   const max = Math.max(...months.map(mm => byMonth[mm].paid + byMonth[mm].pending), 1);
+  // 業主 legend：6 個月合計 top 5
+  const _cliTotals = {};
+  months.forEach(mm => Object.entries(byMonthClient[mm] || {}).forEach(([cid, amt]) => {
+    _cliTotals[cid] = (_cliTotals[cid] || 0) + amt;
+  }));
+  const legendHtml = Object.entries(_cliTotals).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([cid]) => {
+    const c = getClient(cid);
+    return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;"><span style="width:8px;height:8px;border-radius:2px;background:${c ? c.color : '#999'};display:inline-block"></span>${escapeHtml(c ? c.name : '未指定')}</span>`;
+  }).join('');
   document.getElementById('month-chart').innerHTML = months.length
     ? months.map(mm => {
         const d = byMonth[mm];
-        const paidPct = (d.paid/max*100).toFixed(1);
-        const pendingPct = (d.pending/max*100).toFixed(1);
+        const segs = Object.entries(byMonthClient[mm] || {}).map(([cid, amt]) => {
+          const c = getClient(cid);
+          return { name: c ? c.name : '未指定', color: c ? c.color : '#999', amt };
+        }).sort((a, b) => b.amt - a.amt);
+        const segHtml = segs.map(s =>
+          `<div style="background:${s.color};width:${(s.amt/max*100).toFixed(1)}%;height:100%;" title="${escapeHtml(s.name)} ${fmt(s.amt)}"></div>`).join('');
         return `<div style="margin: 10px 0;">
           <div style="display:flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 4px;">
             <span>${mm}</span>
-            <span style="font-variant-numeric: tabular-nums; color: var(--text);">
+            <span style="color: var(--text);">
               ${fmt(d.paid)}${d.pending ? ` <span style="color: var(--warning);">+待收 ${fmt(d.pending)}</span>` : ''}
             </span>
           </div>
-          <div style="background: var(--bg); border-radius: 6px; height: 10px; overflow: hidden; display: flex;">
-            <div style="background: var(--success); width: ${paidPct}%; height: 100%;"></div>
-            <div style="background: var(--warning); width: ${pendingPct}%; height: 100%;"></div>
+          <div style="background: var(--bg); border-radius: 6px; height: 12px; overflow: hidden; display: flex;">
+            ${segHtml}
           </div>
         </div>`;
-      }).join('')
+      }).join('') + (legendHtml ? `<div style="font-size: 11px; color: var(--muted); margin-top: 6px;">${legendHtml}</div>` : '')
     : '<div class="empty"><div style="font-size: 13px;">尚無統計資料</div></div>';
 
   // 年度對比
@@ -9097,8 +9115,14 @@ function drawRevChart(data) {
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
+  // v3.27.0（E1/F）：顏色從 CSS 變數取 — 跟主題（含 dark）一致，不再 hardcode Tailwind 色
+  const _css = getComputedStyle(document.documentElement);
+  const cPrimary = _css.getPropertyValue('--primary').trim() || '#0f766e';
+  const cSuccess = _css.getPropertyValue('--success').trim() || '#0d9464';
+  const cWarning = _css.getPropertyValue('--warning').trim() || '#b45309';
+
   if (!data.length) {
-    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#8a8f98" font-size="13">沒有資料</text>`;
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" style="fill:var(--muted)" font-size="13">沒有資料</text>`;
     return;
   }
 
@@ -9126,8 +9150,8 @@ function drawRevChart(data) {
   for (let i = 0; i <= gridCount; i++) {
     const y = margin.top + chartH - (i/gridCount) * chartH;
     const val = Math.round(niceMax * i / gridCount);
-    parts.push(`<line x1="${margin.left}" y1="${y}" x2="${W-margin.right}" y2="${y}" stroke="#e4e6eb" stroke-width="1"/>`);
-    parts.push(`<text x="${margin.left-6}" y="${y+4}" text-anchor="end" fill="#8a8f98" font-size="10">${fmtShort(val)}</text>`);
+    parts.push(`<line x1="${margin.left}" y1="${y}" x2="${W-margin.right}" y2="${y}" style="stroke:var(--border)" stroke-width="1"/>`);
+    parts.push(`<text x="${margin.left-6}" y="${y+4}" text-anchor="end" style="fill:var(--muted)" font-size="10">${fmtShort(val)}</text>`);
   }
 
   // 柱 + 趨勢線點
@@ -9143,13 +9167,13 @@ function drawRevChart(data) {
     if (d.paid > 0) {
       const h = d.paid / niceMax * chartH;
       yCursor -= h;
-      parts.push(`<rect x="${bx}" y="${yCursor}" width="${barW}" height="${h}" fill="#10b981" rx="2"><title>${d.label}　已收 ${fmt(d.paid)}</title></rect>`);
+      parts.push(`<rect x="${bx}" y="${yCursor}" width="${barW}" height="${h}" fill="${cSuccess}" rx="2"><title>${d.label}　已收 ${fmt(d.paid)}</title></rect>`);
     }
     // 待收 (中)
     if (d.unpaid > 0) {
       const h = d.unpaid / niceMax * chartH;
       yCursor -= h;
-      parts.push(`<rect x="${bx}" y="${yCursor}" width="${barW}" height="${h}" fill="#f59e0b" rx="2"><title>${d.label}　待收 ${fmt(d.unpaid)}</title></rect>`);
+      parts.push(`<rect x="${bx}" y="${yCursor}" width="${barW}" height="${h}" fill="${cWarning}" rx="2"><title>${d.label}　待收 ${fmt(d.unpaid)}</title></rect>`);
     }
     // 進行中 (頂，透明)
     if (d.pending > 0) {
@@ -9166,7 +9190,7 @@ function drawRevChart(data) {
     // 數量多時隔項顯示，避免擠在一起
     const showLabel = displayData.length > 12 ? (i % 2 === 0) : true;
     if (showLabel) {
-      parts.push(`<text x="${cx}" y="${H-margin.bottom+16}" text-anchor="middle" fill="#8a8f98" font-size="10">${d.label}</text>`);
+      parts.push(`<text x="${cx}" y="${H-margin.bottom+16}" text-anchor="middle" style="fill:var(--muted)" font-size="10">${d.label}</text>`);
     }
   });
 
@@ -9191,18 +9215,78 @@ function drawRevChart(data) {
     parts.push(`<text x="${peak.x + dx}" y="${peak.y - 6}" text-anchor="${anchor}" fill="#a855f7" font-size="10" font-weight="600">累計 ${fmtShort(peak.value)}</text>`);
   }
 
-  // 當期趨勢線（藍色實線，顯示在上層）
+  // 當期趨勢線（primary 實線，顯示在上層）
   if (linePoints.length > 1) {
+    // v3.27.0（F）：漸層面積墊在趨勢線下
+    const baseY = margin.top + chartH;
+    parts.push(`<defs><linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${cPrimary}" stop-opacity="0.20"/><stop offset="1" stop-color="${cPrimary}" stop-opacity="0"/></linearGradient></defs>`);
+    parts.push(`<path d="M ${linePoints.map(p => `${p.x} ${p.y}`).join(' L ')} L ${linePoints[linePoints.length-1].x} ${baseY} L ${linePoints[0].x} ${baseY} Z" fill="url(#revGrad)"/>`);
     const d = 'M ' + linePoints.map(p => `${p.x} ${p.y}`).join(' L ');
-    parts.push(`<path d="${d}" stroke="#2563eb" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
+    parts.push(`<path d="${d}" stroke="${cPrimary}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
     linePoints.forEach(p => {
       if (p.total > 0) {
-        parts.push(`<circle cx="${p.x}" cy="${p.y}" r="3" fill="#2563eb"/>`);
+        parts.push(`<circle cx="${p.x}" cy="${p.y}" r="3" fill="${cPrimary}"/>`);
       }
     });
   }
 
+  // v3.27.0（F）：hover 十字線 + 透明感應區（tooltip 由 _revChartBindHover 處理）
+  parts.push(`<line id="rev-xhair" x1="0" x2="0" y1="${margin.top}" y2="${margin.top + chartH}" style="stroke:var(--muted)" stroke-dasharray="3,3" opacity="0"/>`);
+  parts.push(`<rect x="${margin.left}" y="${margin.top}" width="${chartW}" height="${chartH}" fill="transparent" style="cursor:crosshair"/>`);
+
   svg.innerHTML = parts.join('');
+  _revChartBindHover(svg, displayData, W, margin, barGroupW);
+}
+
+// v3.27.0（F）：某期間（YYYY-MM 或 YYYY）的業主收入構成 — 口徑同柱狀圖（已收 + 完成待收）
+function _periodClientBreakdown(label) {
+  const isYear = /^\d{4}$/.test(String(label));
+  const rows = {};
+  activeJobs().forEach(j => {
+    if (!j.date) return;
+    const key = isYear ? j.date.slice(0, 4) : getMonth(j.date);
+    if (key !== String(label)) return;
+    const val = j.paid ? jobFinalAmount(j) : (j.done ? jobUnpaidAmount(j) : 0);
+    if (!val) return;
+    const c = getClient(j.clientId);
+    const id = c ? c.id : '_none';
+    if (!rows[id]) rows[id] = { name: c ? c.name : '未指定', color: c ? c.color : '#999', amt: 0 };
+    rows[id].amt += val;
+  });
+  return Object.values(rows).sort((a, b) => b.amt - a.amt);
+}
+
+// v3.27.0（F）：收益圖 hover — 十字線跟隨 + tooltip 顯示該期間業主構成（top 4 + 其他）
+function _revChartBindHover(svg, data, W, margin, barGroupW) {
+  const wrap = svg.parentElement;
+  if (!wrap) return;
+  if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+  let tip = wrap.querySelector('.rev-tip');
+  if (!tip) { tip = document.createElement('div'); tip.className = 'rev-tip'; wrap.appendChild(tip); }
+  const hide = () => { tip.style.display = 'none'; const l = svg.querySelector('#rev-xhair'); if (l) l.setAttribute('opacity', '0'); };
+  hide();
+  svg.onmousemove = (e) => {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const xSvg = (e.clientX - rect.left) / rect.width * W;
+    const i = Math.max(0, Math.min(data.length - 1, Math.floor((xSvg - margin.left) / barGroupW)));
+    const d = data[i];
+    if (!d) { hide(); return; }
+    const cx = margin.left + i * barGroupW + barGroupW / 2;
+    const l = svg.querySelector('#rev-xhair');
+    if (l) { l.setAttribute('x1', cx); l.setAttribute('x2', cx); l.setAttribute('opacity', '0.6'); }
+    const bd = _periodClientBreakdown(d.label);
+    const top = bd.slice(0, 4);
+    const rest = bd.slice(4).reduce((s, r) => s + r.amt, 0);
+    tip.innerHTML = `<b>${escapeHtml(String(d.label))}</b>　已收 ${fmt(d.paid)}${d.unpaid ? ` · 待收 ${fmt(d.unpaid)}` : ''}` +
+      (top.length ? '<hr>' + top.map(r => `<span class="sq" style="background:${r.color}"></span>${escapeHtml(r.name)} ${fmt(r.amt)}`).join('<br>') +
+        (rest ? `<br><span class="sq" style="background:#999"></span>其他 ${fmt(rest)}` : '') : '');
+    tip.style.display = 'block';
+    const px = (cx / W) * rect.width;
+    tip.style.left = (px > rect.width * 0.6 ? Math.max(0, px - tip.offsetWidth - 12) : px + 12) + 'px';
+    tip.style.top = '8px';
+  };
+  svg.onmouseleave = hide;
 }
 
 function niceScale(max) {
@@ -13828,7 +13912,7 @@ function applyTheme() {
   document.documentElement.setAttribute('data-theme', theme);
   // 更新 theme-color meta（手機網址列顏色跟著變）
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'dark' ? '#0f1115' : '#3b82f6');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#1c1a15' : '#0f766e');  // v3.27.0（E1）
 }
 
 function setTheme(mode) {

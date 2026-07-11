@@ -1,5 +1,36 @@
 ﻿# 版本更新歷史
 
+## v3.27.0 — 設計 E1 帳本色盤 + F 圖表升級（2026-07-10）
+
+### 使用者選擇
+> Before/After 對照頁看過 E 兩案後選「E1 其他依你提案」（= E1 + F）。
+
+### E1 帳本色盤（light + dark 全套）
+- Light：暖紙底 `#f4f2ec`、卡 `#fdfcf9`、墨綠 primary `#0f766e`、金額金 `--warning: #b45309`、
+  暖灰 muted/border、danger/orange/success 全數調暖
+- Dark：暖黑 `#1c1a15`（不是冷灰）、茶青 primary `#35b5a8`、金 `#e0a458`，同一個「帳本」世界
+- dark input bg、theme-color meta（靜態 + setTheme 動態）同步換
+- 業主色盤（COLORS）與圖表 series 色不動 — 那是資料色
+
+### F 圖表升級
+- **收益圖（drawRevChart）**：
+  - 顏色改讀 CSS 變數（primary/success/warning），跟主題含 dark 一致，不再 hardcode Tailwind 色
+  - 趨勢線下加漸層面積（primary 20%→0）
+  - hover 十字線 + tooltip：該期間 已收/待收 + **業主構成 top 4 + 其他**（業主色方塊），
+    新 `_periodClientBreakdown()` + `_revChartBindHover()`，右側自動翻邊
+- **Dashboard 月度趨勢**：雙色（已收/待收）長條 → **業主色堆疊**（誰餵飽這個月一眼看出），
+  segment title tooltip + 6 個月 top 5 業主 legend；已收/待收數字保留在文字行
+
+### 驗證
+12 條斷言全過（E1 tokens 亮暗、堆疊 segs、漸層/十字線/tooltip 顯示與隱藏、trend=primary）+ 雙主題截圖目視。
+
+### 影響範圍
+- `css/style.css`：:root + dark 兩個 token 區塊、.rev-tip
+- `js/app.js`：drawRevChart、_periodClientBreakdown、_revChartBindHover、renderDashboard 月度圖、setTheme meta
+- **不碰** 同步 / schema / 業主色資料
+
+---
+
 ## v3.26.0 — 設計改版 A-D：錢是主角、警示聚合、業主色 signature（2026-07-10）
 
 ### 使用者核准

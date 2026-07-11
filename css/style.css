@@ -15,47 +15,48 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* v3.27.0（設計E1 帳本案）：墨綠 primary × 暖紙底 × 金額金 — 取代 Tailwind 預設藍 */
 :root {
-  --bg: #f5f6f8;
-  --card: #ffffff;
-  --text: #1a1a1a;
-  --muted: #8a8f98;
-  --border: #e4e6eb;
-  --primary: #2563eb;
-  --primary-dark: #1d4ed8;
-  --primary-light: #dbeafe;
-  --success: #10b981;
-  --success-light: #d1fae5;
-  --warning: #f59e0b;
-  --warning-light: #fef3c7;
-  --danger: #ef4444;
-  --danger-light: #fee2e2;
-  --orange: #f97316;
-  --orange-light: #ffedd5;
-  --gold: #eab308;
-  --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  --bg: #f4f2ec;
+  --card: #fdfcf9;
+  --text: #1f1d18;
+  --muted: #8b8677;
+  --border: #e3dfd4;
+  --primary: #0f766e;
+  --primary-dark: #115e59;
+  --primary-light: #ddede7;
+  --success: #0d9464;
+  --success-light: #d9ecdf;
+  --warning: #b45309;
+  --warning-light: #f7ecd8;
+  --danger: #dc2626;
+  --danger-light: #fbe3e0;
+  --orange: #ea7317;
+  --orange-light: #fbe8d5;
+  --gold: #b8860b;
+  --shadow: 0 1px 3px rgba(70,60,30,0.05), 0 1px 2px rgba(70,60,30,0.07);
 }
 
 /* ==================== 暗色模式（v2.2）==================== */
 html[data-theme="dark"] {
-  /* v3.17.0：純黑改深灰，跟 macOS / iOS 暗色一致，避免 OLED 對比過強眼睛累 */
-  --bg: #1a1d23;          /* 原 #0f1115 → 提亮成深灰 */
-  --card: #232730;        /* 原 #1a1d23 → 微提亮跟 bg 拉開層次 */
-  --text: #e7e9ec;
-  --muted: #9aa0a8;       /* 原 #8b929e → 微提亮提高可讀性 */
-  --border: #353a45;      /* 原 #2a2f38 → 微提亮邊界更清楚 */
-  --primary: #5b8def;
-  --primary-dark: #4a7ce0;
-  --primary-light: #1e293b;
-  --success: #34d399;
-  --success-light: #0a3a2e;     /* 原 #064e3b → 微調更柔和 */
-  --warning: #fbbf24;
-  --warning-light: #3a2f0d;     /* 原 #422006 → 微調 */
+  /* v3.27.0（設計E1）：暖黑對應 — 跟亮色同一個「帳本」世界，不是冷灰 */
+  --bg: #1c1a15;
+  --card: #262319;
+  --text: #eae7dd;
+  --muted: #a49d8c;
+  --border: #3b372c;
+  --primary: #35b5a8;
+  --primary-dark: #2a978c;
+  --primary-light: #143b35;
+  --success: #3fca94;
+  --success-light: #0c352a;
+  --warning: #e0a458;
+  --warning-light: #3a2f14;
   --danger: #f87171;
-  --danger-light: #3d1320;      /* 原 #4c0519 → 微調 */
+  --danger-light: #3d1815;
   --orange: #fb923c;
-  --orange-light: #3d1f0a;
-  --gold: #facc15;
+  --orange-light: #3d2410;
+  --gold: #d4a63f;
   --shadow: 0 1px 3px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.7);
 }
 html[data-theme="dark"] input[type="text"],
@@ -65,7 +66,7 @@ html[data-theme="dark"] input[type="month"],
 html[data-theme="dark"] input[type="search"],
 html[data-theme="dark"] textarea,
 html[data-theme="dark"] select {
-  background: #15181d;
+  background: #171510;
   color: var(--text);
   border-color: var(--border);
   color-scheme: dark;
@@ -374,6 +375,24 @@ html[data-theme="dark"] .alert-chip.sev-pu { background: #2f2440; color: #c084fc
 
 /* v3.26.0（設計A）：金額字重統一 */
 .row .amount, .row-compact-amount, .t-amount, .summary-card .value { font-weight: 650; letter-spacing: -0.01em; }
+
+/* v3.27.0（設計F）：收益圖 hover tooltip（業主構成） */
+.rev-tip {
+  position: absolute;
+  display: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  pointer-events: none;
+  z-index: 20;
+  white-space: nowrap;
+}
+.rev-tip hr { border: 0; border-top: 1px dashed var(--border); margin: 5px 0; }
+.rev-tip .sq { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
 /* ==================== Rows (Jobs) ==================== */
 .row {
