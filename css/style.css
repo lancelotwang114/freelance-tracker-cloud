@@ -123,6 +123,13 @@ nav.tabs {
   display: flex;
   overflow-x: auto;
 }
+/* v3.27.3（R21）：窄螢幕 tab 列會橫向捲動 — 右緣漸隱提示「還有更多」 */
+@media (max-width: 640px) {
+  nav.tabs {
+    -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent);
+    mask-image: linear-gradient(90deg, #000 90%, transparent);
+  }
+}
 
 .global-search-bar {
   position: relative;
@@ -230,7 +237,30 @@ nav.tabs button .badge {
   line-height: 1;
 }
 
-main { padding: 16px; max-width: 900px; margin: 0 auto; }
+/* v3.27.3（R2）：padding-bottom 96px — FAB（56px + 邊距）不再蓋住列表最後一筆 / 下拉選單 */
+main { padding: 16px 16px 96px; max-width: 900px; margin: 0 auto; }
+
+/* v3.27.3（R7）：請款單「⚙ 顯示設定」收摺區 */
+.inv-settings { margin-top: 10px; }
+.inv-settings summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 8px;
+  background: var(--bg);
+  border-radius: 8px;
+  user-select: none;
+  list-style: none;
+}
+.inv-settings summary::-webkit-details-marker { display: none; }
+.inv-settings summary::before { content: '▸ '; }
+.inv-settings[open] summary::before { content: '▾ '; }
+.inv-settings[open] summary { border-radius: 8px 8px 0 0; }
+.inv-settings .inv-settings-body {
+  background: var(--bg);
+  border-radius: 0 0 8px 8px;
+  padding: 4px 10px 10px;
+}
 
 /* ==================== Cards & Stats ==================== */
 .card {

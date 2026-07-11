@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-07-11-v3.27.2">
+<meta name="app-version" content="2026-07-11-v3.27.3">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -578,26 +578,7 @@
         </div>
       </div>
 
-      <!-- v3.2.0-ui：請款單顯示 toggle（個人 + 發票）— 搬出 modal、外層快速控制 -->
-      <div style="display: flex; gap: 14px; margin-top: 8px; font-size: 13px; flex-wrap: wrap; align-items: center;">
-        <span style="color: var(--muted); font-size: 12px;">請款單顯示：</span>
-        <label class="checkbox-row" style="margin: 0;">
-          <input type="checkbox" id="inv-show-personal" onchange="onInvShowPersonalChange()">
-          <span>👤 底部個人資訊</span>
-        </label>
-        <label class="checkbox-row" style="margin: 0;">
-          <input type="checkbox" id="inv-show-personal-top" onchange="onInvShowPersonalChange()">
-          <span>👤 頂端精簡個人資訊</span>
-        </label>
-        <!-- v3.2.0-ui：發票功能暫時隱藏（保留 input + JS 邏輯，未來 user 升級成行號 / 公司再解 hidden） -->
-        <label class="checkbox-row hidden" style="margin: 0;">
-          <input type="checkbox" id="inv-show-invoice" onchange="onInvShowPersonalChange()">
-          <span>🧾 發票資訊（公司 / 行號才需要）</span>
-        </label>
-        <span style="color: var(--muted); font-size: 11px;">（套用到目前選的收款帳號，自動儲存）</span>
-      </div>
-
-      <!-- 顯示狀態 preset + 詳細 checkbox（preset 按鈕現在會以底色標示「目前模式」） -->
+      <!-- 顯示狀態 preset（高頻：月底請款↔對帳切換，留在主行；細項收進下方 ⚙） -->
       <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
         <span style="color: var(--muted); font-size: 12px;">顯示狀態：</span>
         <button class="btn btn-outline btn-sm" type="button" data-preset="pending" onclick="applyInvoicePreset('pending')" title="只顯示已完成待收 + 部分收款">📋 請款</button>
@@ -606,15 +587,39 @@
         <button class="btn btn-outline btn-sm" type="button" data-preset="all" onclick="applyInvoicePreset('all')" title="所有狀態">📦 全部</button>
         <span id="inv-status-hint" style="font-size: 12px; color: var(--muted); margin-left: 4px;"></span>
       </div>
-      <div style="margin-top: 6px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">
-        <div style="display: flex; flex-wrap: wrap; gap: 10px 14px; font-size: 13px;">
-          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-done-unpaid" onchange="onInvoiceStatusChange()"><span>$ 已完成待收款</span></label>
-          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-partial" onchange="onInvoiceStatusChange()"><span>🔶 部分收款</span></label>
-          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-paid" onchange="onInvoiceStatusChange()"><span>✓ 已完成已收款</span></label>
-          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-pending" onchange="onInvoiceStatusChange()"><span>🔄 進行中</span></label>
-          <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-cancelled" onchange="onInvoiceStatusChange()"><span>🚫 已取消</span></label>
+
+      <!-- v3.27.3（R7）：低頻控制收進 ⚙ 顯示設定（個資 toggle + 狀態細項），控制區 6 行 → 3 行 -->
+      <details class="inv-settings" id="inv-settings">
+        <summary>⚙ 顯示設定（個人資訊 / 狀態細項）</summary>
+        <div class="inv-settings-body">
+          <!-- v3.2.0-ui：請款單顯示 toggle（個人 + 發票） -->
+          <div style="display: flex; gap: 14px; margin-top: 8px; font-size: 13px; flex-wrap: wrap; align-items: center;">
+            <span style="color: var(--muted); font-size: 12px;">請款單顯示：</span>
+            <label class="checkbox-row" style="margin: 0;">
+              <input type="checkbox" id="inv-show-personal" onchange="onInvShowPersonalChange()">
+              <span>👤 底部個人資訊</span>
+            </label>
+            <label class="checkbox-row" style="margin: 0;">
+              <input type="checkbox" id="inv-show-personal-top" onchange="onInvShowPersonalChange()">
+              <span>👤 頂端精簡個人資訊</span>
+            </label>
+            <!-- v3.2.0-ui：發票功能暫時隱藏（保留 input + JS 邏輯，未來 user 升級成行號 / 公司再解 hidden） -->
+            <label class="checkbox-row hidden" style="margin: 0;">
+              <input type="checkbox" id="inv-show-invoice" onchange="onInvShowPersonalChange()">
+              <span>🧾 發票資訊（公司 / 行號才需要）</span>
+            </label>
+            <span style="color: var(--muted); font-size: 11px;">（套用到目前選的收款帳號，自動儲存）</span>
+          </div>
+          <!-- 狀態細項 checkbox -->
+          <div style="display: flex; flex-wrap: wrap; gap: 10px 14px; font-size: 13px; margin-top: 8px;">
+            <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-done-unpaid" onchange="onInvoiceStatusChange()"><span>$ 已完成待收款</span></label>
+            <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-partial" onchange="onInvoiceStatusChange()"><span>🔶 部分收款</span></label>
+            <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-paid" onchange="onInvoiceStatusChange()"><span>✓ 已完成已收款</span></label>
+            <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-pending" onchange="onInvoiceStatusChange()"><span>🔄 進行中</span></label>
+            <label class="checkbox-row" style="margin: 0;"><input type="checkbox" id="invst-cancelled" onchange="onInvoiceStatusChange()"><span>🚫 已取消</span></label>
+          </div>
         </div>
-      </div>
+      </details>
 
       <div style="display:flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;">
         <button class="btn btn-primary" onclick="exportInvoicePDF()">📄 下載 PDF</button>
