@@ -94,7 +94,7 @@
 **明確不做**：emoji icon 全換 SVG、換色盤/字型/版型（設計工具 generic 建議，不適用既有 app）。
 
 **2026-07-09 使用者反饋追加**
-- **R12. 勞報案件標記**（取代已否決的 #1 報稅幫手）：案件加 boolean 欄位（例 `laborReported`「勞報單已申報」）+ 篩選 chip + 收益/報表依標記分組。接案通常對方自動申報勞報，只需要「分得開」不需要試算。⚠️ schema change → 照 CLAUDE.md 鐵則：migration + CURRENT_SCHEMA_VERSION bump + 5 點檢查。
+- **R12. 勞報案件標記** ✅ v3.28.1（laborReported + modal checkbox + 三態篩選 chip + row 標記；schema v19；收益分組暫緩 — 要統計時再加）。
 - **R13. 使用頻率統計（usage-driven 優化依據）**：利用**既有** `logAction` / `actionLog`（`cloud-ftActionLog_v1`，上限 500 筆）彙總各 action type 次數 → 找最常用功能當優化目標。
   - 短期（零開發）：從正式站匯出操作日誌 JSON → 給 AI 彙總分析
   - 長期（小）：logAction 內加 `{type: count}` 累積 counter（獨立本機 key，屬分析數據非業務資料，合規），設定頁顯示 top 10 + 匯出按鈕，突破 500 筆上限

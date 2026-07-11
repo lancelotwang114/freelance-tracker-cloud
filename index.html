@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-07-11-v3.28.0">
+<meta name="app-version" content="2026-07-11-v3.28.1">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -1221,6 +1221,12 @@
       <label class="checkbox-row" style="margin-top: 10px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">
         <input type="checkbox" id="job-tax-applied" onchange="updateJobAmountSummary()">
         <span>📨 此案件含 5% 稅（自吸收，<b>請款單給業主看的金額不變</b>，只在對帳時扣）</span>
+      </label>
+
+      <!-- v3.28.1（R12）：勞報標記 — 對方公司自動申報，這裡只做分類用 -->
+      <label class="checkbox-row" style="margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 8px;">
+        <input type="checkbox" id="job-labor-reported">
+        <span>🧾 勞報案件（對方申報勞務報酬單，這裡只標記方便報稅季分類）</span>
       </label>
 
       <!-- v3.24.0：派發給外包 -->

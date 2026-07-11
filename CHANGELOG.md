@@ -1,5 +1,29 @@
 ﻿# 版本更新歷史
 
+## v3.28.1 — R12 勞報標記（schema v19）（2026-07-11）
+
+### 使用者定案
+> 「對方會自動報，我只要標記就好」— 不做試算，只要報稅季分得開。
+
+### 內容
+- **job.laborReported**（boolean，預設 false）：案件 modal 加「🧾 勞報案件」checkbox
+  （在扣稅 toggle 下方，對方申報、此欄純分類）
+- **案件分頁三態篩選 chip**：`🧾 勞報` 點擊循環 全部 → 只看勞報 → 非勞報
+- **row 標記**：緊湊列/報表列標題尾 🧾、完整列 tag-badge「🧾 勞報」
+- 收益分組先不做（標記 + 篩選已可分得開；要統計時再加）
+
+### Schema（照鐵則 5 點）
+- `CURRENT_SCHEMA_VERSION` 18 → **19**；migration 18 補 `laborReported: false`
+- 欄位在 `state.jobs[]` → `buildTrackerWrapper` 自動裝載雲端；saveJob payload 收集；
+  modal 開啟帶值 / 新增重設；無本機獨佔 key
+- 雲端拉下自動跑 migration — 兩台其中一台先升級也安全
+
+### 驗證
+10 條斷言全過（migration 補值、modal 帶值×2、saveJob 收集、wrapper 裝載、
+三態篩選各自命中、row 標記、新增預設不勾）。
+
+---
+
 ## v3.28.0 — 鍵盤快捷鍵系統 + R19 focus-visible（2026-07-11）
 
 ### 快捷鍵（BACKLOG #2，使用者 2026-07-09 核准）

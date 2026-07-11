@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-11-v3.28.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-11-v3.28.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -4914,7 +4914,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 18;  // v3.24.7：恢復 case.taxApplied（per-case toggle，全部預設 false）
+const CURRENT_SCHEMA_VERSION = 19;  // v3.28.1（R12）：case.laborReported 勞報標記（預設 false）
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -5089,6 +5089,13 @@ const SCHEMA_MIGRATIONS = {
     state.jobs = (state.jobs || []).map(j => ({
       ...j,
       taxApplied: !!j.taxApplied  // 沒這欄位的補 false
+    }));
+  },
+  // v18 → v19：case.laborReported 勞報標記（v3.28.1 R12）— 對方申報，本欄只做分類，預設 false
+  18: function(state) {
+    state.jobs = (state.jobs || []).map(j => ({
+      ...j,
+      laborReported: !!j.laborReported
     }));
   }
 };
@@ -6705,6 +6712,8 @@ function jobRow(j, ctx) {
     ? `<span class="tag-badge" style="background: var(--warning-light); color: var(--warning);">已收 ${fmt(paidTotal).replace('NT$','').trim()}/${fmt(finalAmt).replace('NT$','').trim()}</span>`
     : '';
   const writeOffBadge = (+j.writeOff > 0) ? `<span class="tag-badge" style="background: var(--muted); color: white;">呆帳 ${fmt(j.writeOff).replace('NT$','').trim()}</span>` : '';
+  // v3.28.1（R12）：勞報標記 badge
+  const laborBadge = j.laborReported ? '<span class="tag-badge" title="勞報案件（對方申報）">🧾 勞報</span>' : '';
   const hl = highlightJobIds.has(j.id) ? ' highlight' : '';
   const isSelected = selectedSet.has(j.id);
   const selCls = isSelected ? ' selected' : '';
@@ -6715,7 +6724,7 @@ function jobRow(j, ctx) {
       <div class="bulk-checkbox ${isSelected?'checked':''}"></div>
       <div class="client-chip" style="background:${color}">${escapeHtml((name || '?').charAt(0))}</div>
       <div class="info">
-        <div class="title">${escapeHtml(j.title || '（無標題）')}${estimateBadge}${tagBadge}${dueBadge}${subBadge}${discountBadge}${partialBadge}${writeOffBadge}${cancelBadge}</div>
+        <div class="title">${escapeHtml(j.title || '（無標題）')}${estimateBadge}${tagBadge}${laborBadge}${dueBadge}${subBadge}${discountBadge}${partialBadge}${writeOffBadge}${cancelBadge}</div>
         <div class="meta">${name} · ${j.date || '無日期'}</div>
       </div>
       <div class="amount">${fmtM(jobFinalAmount(j))}</div>
@@ -6740,7 +6749,7 @@ function jobRow(j, ctx) {
     </div>
     <div class="client-chip" style="background:${color}" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')" title="跳到業主：${escapeHtml(name)}">${escapeHtml((name || '?').charAt(0))}</div>
     <div class="info">
-      <div class="title">${escapeHtml(j.title || '（無標題）')}${estimateBadge}${tagBadge}${dueBadge}${subBadge}${discountBadge}${partialBadge}${writeOffBadge}${cancelBadge}</div>
+      <div class="title">${escapeHtml(j.title || '（無標題）')}${estimateBadge}${tagBadge}${laborBadge}${dueBadge}${subBadge}${discountBadge}${partialBadge}${writeOffBadge}${cancelBadge}</div>
       <div class="meta">${name} · ${j.date || '無日期'}</div>
     </div>
     <div class="amount">${fmtM(finalAmt)}</div>
@@ -6806,6 +6815,8 @@ function renderJobs() {
       '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px;">' +
         '<span class="filter-bar-label">狀態</span>' +
         statusOptions.map(s => `<button class="chip ${state.filters.status===s.v?'active':''}" onclick="setFilter('status','${s.v}')">${s.label}</button>`).join('') +
+        // v3.28.1（R12）：勞報三態篩選 chip（全部 → 只看勞報 → 非勞報）
+        `<button class="chip ${state.filters.labor === 'only' || state.filters.labor === 'non' ? 'active' : ''}" onclick="cycleLaborFilter()" title="勞報標記篩選：點擊循環 全部 → 只看勞報 → 非勞報">🧾 ${state.filters.labor === 'only' ? '只看勞報' : state.filters.labor === 'non' ? '非勞報' : '勞報'}</button>` +
       '</div>' +
       '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px;">' +
         '<span class="filter-bar-label">業主</span>' +
@@ -6864,6 +6875,9 @@ function renderJobs() {
       return t.includes(ft) || j.tag === ft;
     });
   }
+  // v3.28.1（R12）：勞報標記三態篩選（undefined/'all' = 不過濾）
+  if (state.filters.labor === 'only') jobs = jobs.filter(j => !!j.laborReported);
+  else if (state.filters.labor === 'non') jobs = jobs.filter(j => !j.laborReported);
   jobs.sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
   const container = document.getElementById('jobs-list');
@@ -7022,7 +7036,7 @@ function jobRowCompact(j) {
               ontouchcancel="onJobRowTouchCancel()">
     <span class="client-chip" style="background:${color}" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')" title="跳到業主：${escapeHtml(name)}">${escapeHtml((name || '?').charAt(0))}</span>
     <span class="row-compact-date">${dateShort || '-'}</span>
-    <span class="row-compact-title">${escapeHtml(j.title || '（無標題）')}</span>
+    <span class="row-compact-title">${escapeHtml(j.title || '（無標題）')}${j.laborReported ? ' 🧾' : ''}</span>
     <span class="row-compact-client">· ${escapeHtml(name)}</span>
     <span class="row-compact-amount">${fmt(jobFinalAmount(j)).replace('NT$', '').trim()}</span>
     <span class="row-compact-status">${statusIcon}</span>
@@ -7082,7 +7096,7 @@ function renderJobsTable(jobs) {
         <span class="client-chip" style="background:${color}; vertical-align:middle;">${escapeHtml((name || '?').charAt(0))}</span>
         ${escapeHtml(name)}
       </td>
-      <td class="t-title">${escapeHtml(j.title || '（無標題）')}</td>
+      <td class="t-title">${escapeHtml(j.title || '（無標題）')}${j.laborReported ? ' 🧾' : ''}</td>
       <td class="t-tags">${tagsHtml}</td>
       <td class="t-amount">${fmtM(jobFinalAmount(j))}</td>
       <td class="t-status">${statusBadge}</td>
@@ -11997,6 +12011,12 @@ function setFilter(key, value) {
   render();
 }
 
+// v3.28.1（R12）：勞報篩選三態循環（全部 → 只看勞報 → 非勞報 → 全部）
+function cycleLaborFilter() {
+  const cur = state.filters.labor || 'all';
+  setFilter('labor', cur === 'all' ? 'only' : (cur === 'only' ? 'non' : 'all'));
+}
+
 // v2.3：只更新單一案件 row（避免 462 筆全重畫）
 function updateJobRow(id) {
   const j = state.jobs.find(x => x.id === id);
@@ -12337,6 +12357,7 @@ function openJobModal() {
   if (document.getElementById('job-outsource-details')) document.getElementById('job-outsource-details').open = false;
   // v3.24.7：恢復扣稅 toggle，新案件預設關
   if (document.getElementById('job-tax-applied')) document.getElementById('job-tax-applied').checked = false;
+  if (document.getElementById('job-labor-reported')) document.getElementById('job-labor-reported').checked = false;  // v3.28.1（R12）
   updateJobAmountSummary();
   _jobCreateVia = 'fab';  // v3.25.3（R25）：一般新增路徑（duplicateJob 會改成 'duplicate'）
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
@@ -12709,6 +12730,7 @@ function editJob(id) {
   }
   // v3.24.7：恢復扣稅 toggle，編輯時還原案件值
   if (document.getElementById('job-tax-applied')) document.getElementById('job-tax-applied').checked = !!j.taxApplied;
+  if (document.getElementById('job-labor-reported')) document.getElementById('job-labor-reported').checked = !!j.laborReported;  // v3.28.1（R12）
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.remove('hidden');
   // 估價單模式：顯示「轉正」與「估價單 PDF」按鈕
@@ -12866,7 +12888,9 @@ function saveJob() {
     outsourceTo: (document.getElementById('job-outsource-to')?.value || '').trim(),
     outsourceCost: +document.getElementById('job-outsource-cost')?.value || 0,
     // v3.24.7：恢復 case-level taxApplied（per case 自己決定）
-    taxApplied: !!document.getElementById('job-tax-applied')?.checked
+    taxApplied: !!document.getElementById('job-tax-applied')?.checked,
+    // v3.28.1（R12）：勞報標記
+    laborReported: !!document.getElementById('job-labor-reported')?.checked
   };
   // v3.27.1（R18）：驗證錯誤 inline — 欄位標紅 + focus，不再只丟底部 toast
   if (!payload.title) { _markFieldError('job-title', '請輸入案件名稱'); return; }
