@@ -106,7 +106,7 @@
 - **R16. quick action 熱區過小** ✅ v3.25.2（min 28px + 觸控常駐 44px）
 - **R17. Modal dirty 保護 + focus** ✅ v3.27.1（dirty confirm + 更新入口擋 dirty + focus 第一欄）
 - **R18. 驗證錯誤 inline** ✅ v3.27.1（標紅 + focus + 輸入解除）
-- **R19. 無 :focus-visible 樣式（P3）**：快捷鍵系統上線前必補。
+- **R19. :focus-visible** ✅ v3.28.0（隨快捷鍵系統一起出）。
 - **R20. Toast 無 aria-live；101/103 input 無 label 關聯（P3）**：modal 表單優先。
 - **R21. tab 列捲動提示** ✅ v3.27.3（≤640px 右緣 mask 漸隱）。
 - **R22. 雙歡迎 UI 同屏重疊** ✅ v3.27.1（onboarding 開著時隱藏歡迎卡）。

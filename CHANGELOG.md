@@ -1,5 +1,35 @@
 ﻿# 版本更新歷史
 
+## v3.28.0 — 鍵盤快捷鍵系統 + R19 focus-visible（2026-07-11）
+
+### 快捷鍵（BACKLOG #2，使用者 2026-07-09 核准）
+| 鍵 | 動作 |
+|---|---|
+| `1`–`7` | 切分頁（總覽/案件/行事曆/收益/業主/請款單/設定） |
+| `N` / `Shift+N` | 新增案件 / 新增業主 |
+| `/` | 全域搜尋 |
+| `J` / `K` | 案件分頁上下移動選取（`.kb-focus` 高亮） |
+| `Enter` / `Space` / `$` / `C` | 開啟 / 標完成 / 標收款 / 複製選取案件 |
+| `Ctrl+Z` | 復原（接既有 performUndo） |
+| `Esc` | 關搜尋 → 關 modal（job modal 走 dirty-check） |
+| `?` | 速查表 modal |
+
+### 防呆規則
+- 焦點在**可見的**輸入元件 → 不攔（Esc 例外）；modal 開著只有 Esc 作用
+- 不搶瀏覽器 Ctrl/Cmd 組合鍵（Ctrl+Z 例外）
+- 修過程發現的 bug：Esc 關 modal 後 focus 殘留在隱藏 input → 快捷鍵全滅。
+  `_kbTyping()` 加 `offsetParent !== null`（不可見輸入元件不算打字中）
+- Space/$ 操作後 50ms 重掛游標高亮（updateJobRow 重繪會掉 class）
+- kb:new-job / kb:search / kb:done / kb:paid 進 usage counter — 之後統計看得到採用率
+
+### R19 鍵盤可視焦點
+- 全站 `:focus-visible` outline（primary 2px）+ `.kb-focus` 列表選取樣式（outline + primary-light 底）
+
+### 驗證
+瀏覽器 14 條斷言全過（切頁/導航/Enter/typing 不攔/Esc 鏈/help/搜尋/Space 標完成/CSS）。
+
+---
+
 ## v3.27.3 — 批次3 版面收尾：R7 請款控制收摺 / R2 FAB / R21 tab 提示（2026-07-11）
 
 ### R7 請款單控制區 6 行 → 3 行

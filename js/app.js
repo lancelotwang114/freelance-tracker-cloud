@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-11-v3.27.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-11-v3.28.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -15026,6 +15026,111 @@ function onboardingChoose(choice) {
 function showOnboardingAgain() {
   document.getElementById('onboarding-modal').classList.add('open');
 }
+
+// ============== v3.28.0：鍵盤快捷鍵系統（BACKLOG #2，使用者核准）==============
+// 規則：焦點在輸入元件時不攔（Esc 例外）；modal 開著時只有 Esc 作用；
+//       單鍵為主，不搶瀏覽器 Ctrl/Cmd 組合（Ctrl+Z undo 例外）
+const KB_TABS = ['dashboard', 'jobs', 'calendar', 'revenue', 'clients', 'invoice', 'settings'];
+let _kbRowIdx = -1;   // jobs 列表鍵盤游標（-1 = 未啟用）
+
+function _kbTyping() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = (el.tagName || '').toLowerCase();
+  if (tag !== 'input' && tag !== 'textarea' && tag !== 'select' && !el.isContentEditable) return false;
+  // modal 關閉後 focus 常殘留在隱藏的 input 上 — 不可見的輸入元件不算「正在打字」
+  return el.offsetParent !== null;
+}
+function _kbAnyModalOpen() {
+  return !!document.querySelector('.modal-bg.open, .modal.open');
+}
+function _kbCloseTopModal() {
+  // 有 dirty-check 的 modal 走專屬 close，其餘 generic 關閉
+  const jm = document.getElementById('job-modal');
+  if (jm && jm.classList.contains('open')) { closeJobModal(); return; }
+  const cm = document.getElementById('client-modal');
+  if (cm && cm.classList.contains('open') && typeof closeClientModal === 'function') { closeClientModal(); return; }
+  const opens = document.querySelectorAll('.modal-bg.open, .modal.open');
+  if (opens.length) opens[opens.length - 1].classList.remove('open');
+}
+function _kbJobRows() { return [...document.querySelectorAll('#jobs-list .row-compact, #jobs-list .row, #jobs-list tr[data-job-id]')]; }
+function _kbMoveRow(delta) {
+  const rows = _kbJobRows();
+  if (!rows.length) return;
+  rows.forEach(r => r.classList.remove('kb-focus'));
+  _kbRowIdx = Math.max(0, Math.min(rows.length - 1, (_kbRowIdx < 0 ? -1 : _kbRowIdx) + delta));
+  const row = rows[_kbRowIdx];
+  if (row) { row.classList.add('kb-focus'); row.scrollIntoView({ block: 'nearest' }); }
+}
+function _kbCurrentJobId() {
+  const row = _kbJobRows()[_kbRowIdx];
+  return row ? row.dataset.jobId : null;
+}
+
+function _kbShowHelp() {
+  let m = document.getElementById('kb-help-modal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'kb-help-modal';
+    m.className = 'modal-bg';
+    m.innerHTML = `<div class="modal" style="max-width: 440px;">
+      <h2>⌨️ 鍵盤快捷鍵</h2>
+      <table class="kb-help-table">
+        <tr><td><kbd>1</kbd>–<kbd>7</kbd></td><td>切換分頁（總覽/案件/行事曆/收益/業主/請款單/設定）</td></tr>
+        <tr><td><kbd>N</kbd></td><td>新增案件</td></tr>
+        <tr><td><kbd>Shift</kbd>+<kbd>N</kbd></td><td>新增業主</td></tr>
+        <tr><td><kbd>/</kbd></td><td>全域搜尋</td></tr>
+        <tr><td><kbd>J</kbd> / <kbd>K</kbd></td><td>案件分頁：下 / 上移動選取</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>開啟選取的案件</td></tr>
+        <tr><td><kbd>Space</kbd></td><td>選取案件標完成</td></tr>
+        <tr><td><kbd>$</kbd></td><td>選取案件標收款</td></tr>
+        <tr><td><kbd>C</kbd></td><td>複製選取案件為新案件</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>復原上一步</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>關閉 modal / 搜尋</td></tr>
+        <tr><td><kbd>?</kbd></td><td>這張速查表</td></tr>
+      </table>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="document.getElementById('kb-help-modal').classList.remove('open')">關閉</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+  }
+  m.classList.toggle('open');
+}
+
+document.addEventListener('keydown', (e) => {
+  // Esc：先關搜尋 → 再關 modal（永遠有效，且 closeJobModal 內建 dirty-check）
+  if (e.key === 'Escape') {
+    const sb = document.getElementById('global-search-bar');
+    if (sb && !sb.classList.contains('hidden')) { toggleGlobalSearch(false); return; }
+    if (_kbAnyModalOpen()) { _kbCloseTopModal(); }
+    return;
+  }
+  if (_kbTyping() || _kbAnyModalOpen()) return;
+
+  // Ctrl/Cmd+Z → undo（輸入框外才攔）
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    if (typeof performUndo === 'function') { e.preventDefault(); performUndo(); }
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;  // 不搶其他瀏覽器組合鍵
+
+  const k = e.key;
+  if (/^[1-7]$/.test(k)) { switchTab(KB_TABS[+k - 1]); return; }
+  const curId = () => (currentTab === 'jobs' ? _kbCurrentJobId() : null);
+  switch (k) {
+    case 'n': e.preventDefault(); openJobModal(); if (typeof bumpUsage === 'function') bumpUsage('kb:new-job'); break;
+    case 'N': e.preventDefault(); if (typeof openClientModal === 'function') openClientModal(); break;
+    case '/': e.preventDefault(); toggleGlobalSearch(true); if (typeof bumpUsage === 'function') bumpUsage('kb:search'); break;
+    case '?': e.preventDefault(); _kbShowHelp(); break;
+    case 'j': if (currentTab === 'jobs') { e.preventDefault(); _kbMoveRow(1); } break;
+    case 'k': if (currentTab === 'jobs') { e.preventDefault(); _kbMoveRow(-1); } break;
+    case 'Enter': { const id = curId(); if (id) { e.preventDefault(); editJob(id); } break; }
+    case ' ': { const id = curId(); if (id) { e.preventDefault(); toggleDone(id); setTimeout(() => _kbMoveRow(0), 50); if (typeof bumpUsage === 'function') bumpUsage('kb:done'); } break; }
+    case '$': { const id = curId(); if (id) { e.preventDefault(); togglePaid(id); setTimeout(() => _kbMoveRow(0), 50); if (typeof bumpUsage === 'function') bumpUsage('kb:paid'); } break; }
+    case 'c': { const id = curId(); if (id) { e.preventDefault(); duplicateJobFromRow(id); } break; }
+  }
+});
 
 // ============== 自動儲存（設定頁的 input 失焦自動存）==============
 function setupAutoSave() {
