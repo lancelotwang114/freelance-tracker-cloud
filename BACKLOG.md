@@ -102,14 +102,14 @@
 
 **2026-07-10 UI/UX/UAT 實測追加（demo 資料 + 流程實跑）**
 
-- **R15. 首次體驗撞牆（P1）**：未登入 + 載範例資料 → save() → sync error → 「同步中斷，編輯已暫停」全屏鎖。sync-error overlay 該只在「曾登入過（有 trackerFileId）」時出現；純本機/範例模式降級可關 banner。R26 修掉離線鎖後此項剩「未登入」情境。
+- **R15. 首次體驗撞牆** ✅ v3.27.1（無 trackerFileId 永不鎖屏；R3 一併做掉 — banner 降黃 + ✕ 可關 + 登入重置）
 - **R16. quick action 熱區過小** ✅ v3.25.2（min 28px + 觸控常駐 44px）
-- **R17. Modal dirty 保護 + focus（P2）**：「取消」直接丟棄未儲存輸入無確認；開 modal focus 不進去。做 dirty-check confirm（復用到更新流程）+ 開啟 focus 第一欄。
-- **R18. 驗證錯誤是底部 toast（P2）**：「請輸入案件名稱」離欄位遠、不 focus、不標紅 → inline error + focus。
+- **R17. Modal dirty 保護 + focus** ✅ v3.27.1（dirty confirm + 更新入口擋 dirty + focus 第一欄）
+- **R18. 驗證錯誤 inline** ✅ v3.27.1（標紅 + focus + 輸入解除）
 - **R19. 無 :focus-visible 樣式（P3）**：快捷鍵系統上線前必補。
 - **R20. Toast 無 aria-live；101/103 input 無 label 關聯（P3）**：modal 表單優先。
 - **R21. 375px tab 列橫向捲動無提示（P3）**：7 tab 只見 4 個，加漸層遮罩或箭頭。
-- **R22. 雙歡迎 UI 同屏重疊（P3）**：中央 welcome card + 底部 onboarding sheet 擇一。
+- **R22. 雙歡迎 UI 同屏重疊** ✅ v3.27.1（onboarding 開著時隱藏歡迎卡）。
 - **R23. row「⧉ 複製為新案件」** ✅ v3.25.2（duplicateJobFromRow：modal 複製模式 + 標題全選，流水案件 3 動作）
 - **R24. calendar-sync 每輪 PATCH ~530 事件（P2）**：🔍 v3.25.3 已埋診斷（diffFields 統計進 calendar-sync log）— **下次真實同步後看日誌內 diffFields 就知道兇手欄位，再修比對邏輯**。
 - **R25. log 三件套** ✅ v3.25.3（cat 分流 + push/pull 每日聚合降噪 + via 欄位 + tab/act usage counter + 📊 匯出統計）。註：counter top10 顯示 UI 未做，匯出 JSON 已可分析。

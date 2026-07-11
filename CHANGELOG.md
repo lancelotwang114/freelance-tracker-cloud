@@ -1,5 +1,33 @@
 ﻿# 版本更新歷史
 
+## v3.27.1 — 批次1 體驗小修：R15/R17/R18/R22 + R3（2026-07-11）
+
+### R17 Modal dirty-check + focus 管理
+- `_jobFormSig()` 表單簽章：開 modal（新增/編輯）記快照，「取消」時有未儲存變更 → confirm「放棄編輯？」
+- 儲存成功路徑 `closeJobModal(true)` 跳過檢查；`duplicateJob` 切換後重設基準（複製完直接關不吵）
+- 開 modal focus 第一欄（案件名稱）
+- **更新流程 A 案**：`showUpdateConfirmModal` 偵測編輯中有未儲存變更 → 擋下並提示先儲存
+  （備份備的是 state，表單輸入只在 DOM — 不擋的話 reload 直接蒸發）
+
+### R18 驗證錯誤 inline
+- `_markFieldError()`：欄位標紅（.input-error）+ focus + 輸入即解除；標題/金額/外包金額三處驗證套用
+
+### R15 首次體驗不再撞牆
+- `showSyncErrorOverlay` 加最前置檢查：從未連過雲端（無 trackerFileId）→ **永不鎖屏**
+- 理由：鎖屏防的是兩地衝突，沒有雲端檔就沒有另一台；試用者載範例資料不再被「編輯已暫停」擋臉
+
+### R3「未登入」banner 降級
+- 紅 → 黃（`.banner-local`，紅色留給真同步失敗）
+- 加 ✕ 可關（`ftLocalBannerDismissed_v1`，UI 偏好獨立 key 合規）；登入成功自動清除記憶（登出後提示會回來）
+
+### R22 雙歡迎 UI 擇一
+- onboarding modal 開著時隱藏 dashboard 歡迎卡；關閉後（仍空資料）歡迎卡接手
+
+### 驗證
+瀏覽器 14 條斷言全過（dirty 確認/拒絕不關/更新入口擋 dirty/inline 錯誤+自動解除/無雲端不鎖/banner 黃+可關+登入重置/雙歡迎互斥）。
+
+---
+
 ## v3.27.0 — 設計 E1 帳本色盤 + F 圖表升級（2026-07-10）
 
 ### 使用者選擇

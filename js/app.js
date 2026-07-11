@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-10-v3.27.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-11-v3.27.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1039,6 +1039,13 @@ function showSyncErrorOverlay() {
     console.log('[sync-guard] 離線中，不鎖編輯（上線後再評估）');
     return;
   }
+  // v3.27.1（R15）：從未連過雲端（無 trackerFileId）→ 純本機使用/試用情境，不鎖編輯
+  //   鎖屏目的是防兩地衝突；沒有雲端檔就沒有「另一台」可衝突，鎖了只是把試用者擋在門外
+  const _gm = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
+  if (!_gm.trackerFileId) {
+    console.log('[sync-guard] 未曾連雲端（無 trackerFileId），不鎖編輯');
+    return;
+  }
   // v3.25.2（R27）：編輯 modal 開著 → 不搶畫面（紅 banner 仍在提示），15 秒後或關 modal 再評估
   if (typeof _isAnyModalOpen === 'function' && _isAnyModalOpen()) {
     if (_syncGuardDeferTimer) return;
@@ -1135,7 +1142,11 @@ function cloudUpdateSyncBanner() {
     show = true;
     mode = 'not-signed-in';
     message = '⚠️ 未登入 Google，資料只存在本機（其他電腦看不到最新版）';
+    // v3.27.1（R3/R15）：純本機使用者可關閉此提示（UI 偏好，獨立 key 合規）
+    try { if (localStorage.getItem('ftLocalBannerDismissed_v1') === '1') show = false; } catch (_) {}
   }
+  // 登入成功 → 清掉關閉記憶（之後若登出，提示要能回來）
+  if (signedIn) { try { localStorage.removeItem('ftLocalBannerDismissed_v1'); } catch (_) {} }
 
   if (!show) {
     if (banner) banner.remove();
@@ -1155,12 +1166,23 @@ function cloudUpdateSyncBanner() {
   const btnHtml = mode === 'sync-fail'
     ? `<button class="sync-banner-btn" onclick="cloudRetryPush()">立刻重試</button>
        <button class="sync-banner-btn sync-banner-btn-outline" onclick="cloudSignIn()">重新登入</button>`
-    : `<button class="sync-banner-btn" onclick="cloudSignIn()">立刻登入</button>`;
+    : `<button class="sync-banner-btn" onclick="cloudSignIn()">立刻登入</button>
+       <button class="sync-banner-btn sync-banner-btn-outline" onclick="dismissLocalBanner()" title="關閉提示（登入後會自動重置）">✕</button>`;
+
+  // v3.27.1（R3）：純本機提示降級為黃色（紅色留給真同步失敗）
+  banner.classList.toggle('banner-local', mode === 'not-signed-in');
 
   banner.innerHTML = `
     <span class="sync-banner-msg">${message}</span>
     <span class="sync-banner-actions">${btnHtml}</span>
   `;
+}
+
+// v3.27.1（R3/R15）：關閉「未登入」黃 banner 並記住（登入成功時自動清除記憶）
+function dismissLocalBanner() {
+  try { localStorage.setItem('ftLocalBannerDismissed_v1', '1'); } catch (_) {}
+  cloudUpdateSyncBanner();
+  toast('已關閉提示。想同步兩台電腦時，點右上角登入 Google', 4000);
 }
 
 // v3.22.3：把 ISO 時間轉成中文相對時間（剛剛 / 30 秒前 / 5 分前 / 2 小時前 / 3 天前 / 5/1）
@@ -6326,7 +6348,9 @@ function renderBadge() {
 function renderDashboard() {
   // v3.6.0：完全無資料時顯示 empty state 引導卡，4 張 stat 數字仍是 $0 但有 CTA
   const isEmpty = (state.clients.length === 0) && (state.jobs.length === 0);
-  document.getElementById('dash-empty-state')?.classList.toggle('hidden', !isEmpty);
+  // v3.27.1（R22）：onboarding modal 開著時不重複顯示歡迎卡（雙歡迎 UI 疊屏）
+  const onboardingOpen = document.getElementById('onboarding-modal')?.classList.contains('open');
+  document.getElementById('dash-empty-state')?.classList.toggle('hidden', !isEmpty || !!onboardingOpen);
   // v3.24.18：渲染「今天的重點」清單（沒任何重點時自動 hide）
   if (typeof renderTodayTodo === 'function') renderTodayTodo();
 
@@ -12216,6 +12240,9 @@ function openJobModal() {
   updateJobHourlyHint();
   setJobDetailsOpenState(null);  // v3.6.4：新增模式 details 全收摺
   document.getElementById('job-modal').classList.add('open');
+  // v3.27.1（R17）：記錄初始表單狀態（dirty-check 基準）+ focus 第一欄
+  _jobFormSnapshot = _jobFormSig();
+  document.getElementById('job-title')?.focus();
 }
 
 // ============== v3.6.4：估價單 toggle 改放標題列 ==============
@@ -12585,6 +12612,9 @@ function editJob(id) {
   updateJobHourlyHint();
   setJobDetailsOpenState(j);  // v3.6.4：依案件資料決定 details 展開（折扣/子任務/收款有資料才展開）
   document.getElementById('job-modal').classList.add('open');
+  // v3.27.1（R17）：記錄初始表單狀態（dirty-check 基準）+ focus 第一欄
+  _jobFormSnapshot = _jobFormSig();
+  document.getElementById('job-title')?.focus();
 }
 
 // v3.25.3（R25）：job-create 的來源路徑（fab=一般新增 / duplicate=複製），存進 log 的 via 欄位
@@ -12622,6 +12652,8 @@ function duplicateJob() {
   // 案件名稱加上「(複製)」字樣，方便辨識
   const title = document.getElementById('job-title');
   if (title && title.value && !title.value.includes('(複製)')) title.value = title.value + ' (複製)';
+  // v3.27.1（R17）：複製切換後重設 dirty 基準 — 複製後沒再改動就取消，不用吵確認
+  _jobFormSnapshot = _jobFormSig();
   toast('✓ 已複製欄位，按儲存即可建立新案件');
 }
 
@@ -12639,7 +12671,37 @@ function onJobPaidChange() {
   if (!checked) dateEl.value = '';
 }
 
-function closeJobModal() {
+// v3.27.1（R17）：job modal 表單簽章 — dirty-check 用（值 + checkbox 狀態串接）
+let _jobFormSnapshot = null;
+function _jobFormSig() {
+  const m = document.getElementById('job-modal');
+  if (!m) return '';
+  return [...m.querySelectorAll('input, select, textarea')].map(el =>
+    (el.type === 'checkbox' || el.type === 'radio') ? (el.checked ? '1' : '0') : (el.value || '')
+  ).join('');
+}
+function _jobModalIsDirty() {
+  return document.getElementById('job-modal')?.classList.contains('open')
+    && _jobFormSnapshot !== null && _jobFormSig() !== _jobFormSnapshot;
+}
+
+// v3.27.1（R18）：驗證錯誤 inline — 欄位標紅 + focus；輸入後自動解除
+function _markFieldError(id, msg) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.classList.add('input-error');
+    el.focus();
+    el.addEventListener('input', () => el.classList.remove('input-error'), { once: true });
+  }
+  toast(msg);
+}
+
+function closeJobModal(force) {
+  // v3.27.1（R17）：有未儲存的變更 → 確認才關（儲存成功路徑傳 force=true 跳過）
+  if (!force && _jobModalIsDirty()) {
+    if (!confirm('有未儲存的變更，確定放棄編輯？')) return;
+  }
+  _jobFormSnapshot = null;
   stopJobTimerOnClose();  // v2.6: 停止計時器
   document.getElementById('job-modal').classList.remove('open');
   document.getElementById('job-date').value = '';
@@ -12695,10 +12757,11 @@ function saveJob() {
     // v3.24.7：恢復 case-level taxApplied（per case 自己決定）
     taxApplied: !!document.getElementById('job-tax-applied')?.checked
   };
-  if (!payload.title) { toast('請輸入案件名稱'); return; }
+  // v3.27.1（R18）：驗證錯誤 inline — 欄位標紅 + focus，不再只丟底部 toast
+  if (!payload.title) { _markFieldError('job-title', '請輸入案件名稱'); return; }
   // v3.24.0：擋負金額（0 仍允許 — 估價 / 諮詢用）
-  if (payload.amount < 0) { toast('案件金額不能是負數'); return; }
-  if (payload.outsourceCost < 0) { toast('外包金額不能是負數'); return; }
+  if (payload.amount < 0) { _markFieldError('job-amount', '案件金額不能是負數'); return; }
+  if (payload.outsourceCost < 0) { _markFieldError('job-outsource-cost', '外包金額不能是負數'); return; }
 
   const c = getClient(payload.clientId);
   if (editingJobId) {
@@ -12743,7 +12806,7 @@ function saveJob() {
     // v3.23.0：觸發 mascot
     if (typeof mascotSay === 'function') mascotSay('job-create');
   }
-  save(); closeJobModal(); render(); toast('已儲存');
+  save(); closeJobModal(true); render(); toast('已儲存');
 }
 
 function deleteJob() {
@@ -14551,6 +14614,12 @@ async function pollAppVersion() {
 //       → 完成備份才呼叫 hardReload() 更新
 
 function showUpdateConfirmModal() {
+  // v3.27.1（R17 / 更新流程 A 案）：編輯中有未儲存變更 → 先擋，避免 reload 把表單輸入蒸發
+  // （備份備的是 state，編輯中的欄位還在 DOM、不在 state — 備了也救不到）
+  if (typeof _jobModalIsDirty === 'function' && _jobModalIsDirty()) {
+    toast('⚠️ 有編輯中的案件尚未儲存 — 請先儲存或關閉，再進行更新', 6000);
+    return;
+  }
   const modal = document.getElementById('update-confirm-modal');
   if (!modal) {
     // modal 還沒載入（極罕見）→ fallback 給原本流程
@@ -14816,6 +14885,9 @@ function onboardingChoose(choice) {
   document.getElementById('onboarding-modal').classList.remove('open');
   config.onboardingDone = true;
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+
+  // v3.27.1（R22）：關閉 onboarding 後重繪 dashboard，讓歡迎卡（若仍空資料）接手顯示
+  if (typeof renderDashboard === 'function') setTimeout(renderDashboard, 0);
 
   if (choice === 'import-settings') {
     document.getElementById('settings-import-file').click();

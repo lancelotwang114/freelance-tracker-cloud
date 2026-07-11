@@ -376,6 +376,15 @@ html[data-theme="dark"] .alert-chip.sev-pu { background: #2f2440; color: #c084fc
 /* v3.26.0（設計A）：金額字重統一 */
 .row .amount, .row-compact-amount, .t-amount, .summary-card .value { font-weight: 650; letter-spacing: -0.01em; }
 
+/* v3.27.1（R18）：inline 驗證錯誤 — 欄位標紅 */
+.input-error {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 2px var(--danger-light) !important;
+}
+
+/* v3.27.1（R3）：「未登入」banner 降級黃色（紅色留給真同步失敗） */
+.sync-error-banner.banner-local { background: var(--warning); }
+
 /* v3.27.0（設計F）：收益圖 hover tooltip（業主構成） */
 .rev-tip {
   position: absolute;
