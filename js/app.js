@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-11-v3.28.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-12-v3.28.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -4873,7 +4873,11 @@ let config = {
   },
 
   // 初次使用引導
-  onboardingDone: false
+  onboardingDone: false,
+
+  // v3.28.3（#12）：標籤顏色 { tagName: '#hex' }。業務資料 → 進 config（buildTrackerWrapper 裝載雲端）。
+  // 舊版相容：pull 是 config 整份取代、save 是整份 stringify，未知 key 會原樣帶回，不會被舊版丟失。
+  tagColors: {}
 };
 
 // 行事曆當前月份
@@ -5468,7 +5472,16 @@ function onJobRowTouchStart(e, jobId) {
     rowEl: e.currentTarget,
     startX: t.clientX,
     startY: t.clientY,
-    locked: null  // 'horizontal' / 'vertical'
+    locked: null,  // 'horizontal' / 'vertical'
+    lpFired: false,
+    // v3.28.3（#10 收尾）：長按 500ms → 進批次模式並選取該筆（批次中不重複觸發）
+    lpTimer: bulkMode ? null : setTimeout(() => {
+      if (!_swipeState || _swipeState.locked) return;
+      _swipeState.lpFired = true;
+      if (navigator.vibrate) navigator.vibrate(30);
+      if (!bulkMode) toggleBulkMode();
+      toggleBulkSelect(jobId);
+    }, 500)
   };
 }
 
@@ -5481,6 +5494,8 @@ function onJobRowTouchMove(e) {
   if (!_swipeState.locked) {
     if (Math.abs(dx) > SWIPE_LOCK_PX || Math.abs(dy) > SWIPE_LOCK_PX) {
       _swipeState.locked = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+      // 手指有移動 → 不是長按
+      clearTimeout(_swipeState.lpTimer);
     }
   }
   if (_swipeState.locked !== 'horizontal') return;
@@ -5496,6 +5511,13 @@ function onJobRowTouchMove(e) {
 
 function onJobRowTouchEnd(e) {
   if (!_swipeState) return;
+  clearTimeout(_swipeState.lpTimer);
+  // 長按已觸發 → 吃掉這次 touch（preventDefault 取消後續合成 click，避免又 toggle 掉選取）
+  if (_swipeState.lpFired) {
+    e.preventDefault();
+    _swipeState = null;
+    return;
+  }
   const rowEl = _swipeState.rowEl;
   const jobId = _swipeState.jobId;
   // 取最終位移
@@ -5518,6 +5540,7 @@ function onJobRowTouchEnd(e) {
 
 function onJobRowTouchCancel() {
   if (!_swipeState) return;
+  clearTimeout(_swipeState.lpTimer);
   _swipeState.rowEl.style.transform = '';
   _swipeState.rowEl.classList.remove('swipe-left', 'swipe-right');
   _swipeState = null;
@@ -5763,6 +5786,47 @@ function _verifyJobNet() {
   });
   console.log(`\n=== _verifyJobNet: ${pass} pass, ${fail} fail ===`);
   return { pass, fail };
+}
+
+// v3.28.3（#12）：標籤顏色 — 有設色的 tag chip 加左緣色條（沿用業主 chip 的視覺語言，深淺色主題都安全）
+function tagColor(t) {
+  return (config.tagColors || {})[t] || '';
+}
+// isActive 時不覆蓋 active 樣式的邊框
+function tagChipStyle(t, isActive) {
+  const c = tagColor(t);
+  return (c && !isActive) ? `style="border-left: 3px solid ${c};"` : '';
+}
+function setTagColor(t, v) {
+  config.tagColors = config.tagColors || {};
+  config.tagColors[t] = v;
+  saveConfigOnly();
+  render();
+}
+function clearTagColor(t) {
+  if (config.tagColors) delete config.tagColors[t];
+  saveConfigOnly();
+  renderTagColorSettings();
+  render();
+}
+// 設定頁「標籤顏色」列表：案件 tags + 業主 tags 聯集
+function renderTagColorSettings() {
+  const box = document.getElementById('tag-color-list');
+  if (!box) return;
+  const all = [...new Set([
+    ...getUsedTags(),
+    ...state.clients.flatMap(c => c.tags || [])
+  ])].sort();
+  box.innerHTML = all.length
+    ? all.map(t => {
+        const c = tagColor(t);
+        return `<div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">
+          <input type="color" value="${c || '#94a3b8'}" onchange="setTagColor('${escapeHtml(t)}', this.value)" style="width: 34px; height: 26px; padding: 1px; cursor: pointer;">
+          <span class="tag-badge" ${tagChipStyle(t, false)}>${escapeHtml(t)}</span>
+          ${c ? `<button class="btn btn-ghost btn-sm" onclick="clearTagColor('${escapeHtml(t)}')" title="清除顏色">✕</button>` : '<span style="font-size: 11px; color: var(--muted);">未設色</span>'}
+        </div>`;
+      }).join('')
+    : '<div style="font-size: 12px; color: var(--muted);">還沒有任何標籤（案件或業主加標籤後這裡就會出現）</div>';
 }
 
 // 已用過的標籤清單（補全用）
@@ -6624,8 +6688,6 @@ function renderYearComparison() {
   }
 
   const thisYearAmt = byYear[thisYear] || 0;
-  const years = Object.keys(byYear).sort().reverse();
-  const maxAmt = Math.max(...Object.values(byYear), 1);
 
   let html = '';
 
@@ -6652,24 +6714,8 @@ function renderYearComparison() {
     </div>`;
   }
 
-  // 各年度橫條比較
-  html += '<div style="margin-top: 6px;">';
-  html += years.map(y => {
-    const amt = byYear[y];
-    const pct = amt / maxAmt * 100;
-    const isThisYear = +y === thisYear;
-    const barColor = isThisYear ? 'var(--primary)' : 'var(--success)';
-    return `<div class="year-compare-row">
-      <div class="year-compare-label">
-        ${y} 年${isThisYear ? '<span style="color: var(--primary); font-size: 11px; margin-left: 2px;">（至今）</span>' : ''}
-      </div>
-      <div class="year-compare-bar-box">
-        <div class="year-compare-bar" style="width: ${pct}%; background: ${barColor};"></div>
-      </div>
-      <div class="year-compare-amt">${fmt(amt)}</div>
-    </div>`;
-  }).join('');
-  html += '</div>';
+  // v3.28.2（#7）：各年度橫條砍掉 — 與收益分頁年度模式重複，完整對比走 cta 去收益分頁
+  if (!html) html = '<div class="empty" style="padding: 20px;"><div style="font-size: 13px;">尚無已收款資料</div></div>';
 
   box.innerHTML = html;
 }
@@ -6697,7 +6743,7 @@ function jobRow(j, ctx) {
   }
   // v3.14.0：multi-tag badges（向下相容單字串 tag）
   const allTags = Array.isArray(j.tags) && j.tags.length ? j.tags : (j.tag ? [j.tag] : []);
-  const tagBadge = allTags.length ? allTags.map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join('') : '';
+  const tagBadge = allTags.length ? allTags.map(t => `<span class="tag-badge" ${tagChipStyle(t, false)}>${escapeHtml(t)}</span>`).join('') : '';
   // v2.6: 估價單與子任務 badge
   const estimateBadge = j.isEstimate ? '<span class="due-badge urgent" style="background: var(--warning); color: white;">📄 估價</span>' : '';
   const subDone = (j.subtasks || []).filter(s => s.done).length;
@@ -6757,6 +6803,29 @@ function jobRow(j, ctx) {
 }
 
 // ============== Jobs Tab ==============
+// v3.28.2（R1）：手機篩選牆收合 — 業主/類型 chips 超過上限只顯示前 N + 更多▾
+// 展開狀態只存 session 內（模組變數），每次進來預設收合
+const FILTER_CHIP_MAX = 6;
+let _filterRowExpanded = { client: false, tag: false };
+function toggleFilterRowExpand(key) {
+  _filterRowExpanded[key] = !_filterRowExpanded[key];
+  renderJobs();
+}
+// chipHtmlList：各 chip 的 HTML；activeIdx：目前篩選中的 chip index（-1 = 無）
+function collapseChipRow(chipHtmlList, activeIdx, key) {
+  const n = chipHtmlList.length;
+  if (n <= FILTER_CHIP_MAX) return chipHtmlList.join('');
+  if (_filterRowExpanded[key]) {
+    return chipHtmlList.join('') +
+      `<button class="chip" onclick="toggleFilterRowExpand('${key}')">收合 ▴</button>`;
+  }
+  // active chip 必入前 N（不能把目前篩選狀態藏進摺疊區）
+  const shown = chipHtmlList.slice(0, FILTER_CHIP_MAX);
+  if (activeIdx >= FILTER_CHIP_MAX) shown[FILTER_CHIP_MAX - 1] = chipHtmlList[activeIdx];
+  return shown.join('') +
+    `<button class="chip" onclick="toggleFilterRowExpand('${key}')">更多 ▾ (${n - FILTER_CHIP_MAX})</button>`;
+}
+
 function renderJobs() {
   const fb = document.getElementById('job-filter');
   // 年/月階層式篩選：列出最近 5 年，點開後展開該年的月份
@@ -6821,13 +6890,20 @@ function renderJobs() {
       '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px;">' +
         '<span class="filter-bar-label">業主</span>' +
         `<button class="chip ${state.filters.clientId==='all'?'active':''}" onclick="setFilter('clientId','all')">全部</button>` +
-        state.clients.map(c => `<button class="chip ${state.filters.clientId===c.id?'active':''}" onclick="setFilter('clientId','${c.id}')" style="${state.filters.clientId===c.id?'':'border-left: 3px solid '+c.color+';'}">${escapeHtml(c.name)}</button>`).join('') +
+        // v3.28.2（R1）：> N 顆收合成 更多▾
+        collapseChipRow(
+          state.clients.map(c => `<button class="chip ${state.filters.clientId===c.id?'active':''}" onclick="setFilter('clientId','${c.id}')" style="${state.filters.clientId===c.id?'':'border-left: 3px solid '+c.color+';'}">${escapeHtml(c.name)}</button>`),
+          state.clients.findIndex(c => c.id === state.filters.clientId),
+          'client') +
       '</div>' +
       (usedTags.length
         ? '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px;">' +
           '<span class="filter-bar-label">類型</span>' +
           `<button class="chip ${state.filters.tag==='all'?'active':''}" onclick="setFilter('tag','all')">全部</button>` +
-          usedTags.map(t => `<button class="chip ${state.filters.tag===t?'active':''}" onclick="setFilter('tag','${escapeHtml(t)}')">${escapeHtml(t)}</button>`).join('') +
+          collapseChipRow(
+            usedTags.map(t => `<button class="chip ${state.filters.tag===t?'active':''}" onclick="setFilter('tag','${escapeHtml(t)}')" ${tagChipStyle(t, state.filters.tag===t)}>${escapeHtml(t)}</button>`),
+            usedTags.indexOf(state.filters.tag),
+            'tag') +
           '</div>'
         : '') +
     '</div>';
@@ -7066,7 +7142,7 @@ function renderJobsTable(jobs) {
                         (status === 'prepaid' ? '<span class="t-badge t-paid">✓ 待做</span>' :
                         '<span class="t-badge t-pending">🔄 進行中</span>'))));
     const tags = (Array.isArray(j.tags) && j.tags.length ? j.tags : (j.tag ? [j.tag] : []));
-    const tagsHtml = tags.length ? tags.map(t => `<span class="t-tag">${escapeHtml(t)}</span>`).join('') : '<span class="t-empty">—</span>';
+    const tagsHtml = tags.length ? tags.map(t => `<span class="t-tag" ${tagChipStyle(t, false)}>${escapeHtml(t)}</span>`).join('') : '<span class="t-empty">—</span>';
 
     // v3.24.12：批次模式 → 整 row click toggle、第一格放 checkbox、不顯示快速 action
     if (inBulk) {
@@ -7156,7 +7232,7 @@ function jobRowCard(j) {
       </div>
       <div class="job-card-tile-title">${escapeHtml(j.title || '（無標題）')}</div>
       <div class="job-card-tile-client">${escapeHtml(name)}</div>
-      ${tags.length ? `<div class="job-card-tile-tags">${tags.map(t => `<span class="tag-chip-mini">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+      ${tags.length ? `<div class="job-card-tile-tags">${tags.map(t => `<span class="tag-chip-mini" ${tagChipStyle(t, false)}>${escapeHtml(t)}</span>`).join('')}</div>` : ''}
       <div class="job-card-tile-bottom">
         <span class="job-card-tile-amount">${fmt(jobFinalAmount(j))}</span>
       </div>
@@ -7175,7 +7251,7 @@ function jobRowCard(j) {
     </div>
     <div class="job-card-tile-title">${escapeHtml(j.title || '（無標題）')}</div>
     <div class="job-card-tile-client">${escapeHtml(name)}</div>
-    ${tags.length ? `<div class="job-card-tile-tags">${tags.map(t => `<span class="tag-chip-mini">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+    ${tags.length ? `<div class="job-card-tile-tags">${tags.map(t => `<span class="tag-chip-mini" ${tagChipStyle(t, false)}>${escapeHtml(t)}</span>`).join('')}</div>` : ''}
     <div class="job-card-tile-bottom">
       <span class="job-card-tile-amount">${fmt(jobFinalAmount(j))}</span>
       <span class="row-quick-actions">
@@ -7470,11 +7546,11 @@ function cellHtml(y, m, d, isOther) {
   const isToday = ds === todayStr();
   const dow = dateNorm.getDay();
   const dowCls = dow===0?'sun':(dow===6?'sat':'');
-  // 該天案件：startDate == ds，或 startDate <= ds <= endDate（跨天）
+  // 該天案件：startDate == ds，或跨天案件的迄日（v3.28.2 R5：中間日不再重複出 pill）
   const jobs = state.jobs.filter(j => {
     if (j.cancelled) return false;
     if (j.date === ds) return true;
-    if (j.endDate && j.date && j.date <= ds && ds <= j.endDate) return true;
+    if (j.endDate && j.date && j.endDate !== j.date && ds === j.endDate) return true;
     return false;
   });
   const maxShow = 3;
@@ -7924,9 +8000,28 @@ function applyMonthRangeFromInputs() {
   render();
 }
 
+// v3.28.3（#12）：業主標籤篩選（純 UI 篩選狀態，session 內有效，不進 state）
+let clientTagFilter = 'all';
+function setClientTagFilter(t) {
+  clientTagFilter = t;
+  renderClients();
+}
+
 function renderClients() {
   const container = document.getElementById('clients-list');
   if (!state.clients.length) { container.innerHTML = emptyState('還沒有業主', '點右下角 + 新增第一個業主'); return; }
+
+  // 標籤篩選 chips（有業主帶標籤才顯示；標籤消失時自動重置）
+  const tagFilterBox = document.getElementById('client-tag-filter');
+  if (tagFilterBox) {
+    const clientTags = [...new Set(state.clients.flatMap(c => c.tags || []))].sort();
+    if (clientTagFilter !== 'all' && !clientTags.includes(clientTagFilter)) clientTagFilter = 'all';
+    tagFilterBox.innerHTML = clientTags.length
+      ? '<span class="filter-bar-label">標籤</span>' +
+        `<button class="chip ${clientTagFilter==='all'?'active':''}" onclick="setClientTagFilter('all')">全部</button>` +
+        clientTags.map(t => `<button class="chip ${clientTagFilter===t?'active':''}" onclick="setClientTagFilter('${escapeHtml(t)}')" ${tagChipStyle(t, clientTagFilter===t)}>${escapeHtml(t)}</button>`).join('')
+      : '';
+  }
 
   // 搜尋詞
   const searchEl = document.getElementById('client-search');
@@ -7946,6 +8041,9 @@ function renderClients() {
 
   // 搜尋過濾
   if (q) list = list.filter(x => x.client.name.toLowerCase().includes(q) || (x.client.note||'').toLowerCase().includes(q));
+
+  // v3.28.3（#12）：標籤過濾
+  if (clientTagFilter !== 'all') list = list.filter(x => (x.client.tags || []).includes(clientTagFilter));
 
   // 排序
   if (sortMode === 'name') list.sort((a,b) => a.client.name.localeCompare(b.client.name, 'zh-TW'));
@@ -7970,7 +8068,7 @@ function renderClients() {
     const introducer = c.commissionTo ? state.clients.find(x => x.id === c.commissionTo) : null;
     // v3.14.0：tags badges
     const tagsHtml = (c.tags || []).length
-      ? '<span class="client-tag-badges">' + c.tags.map(t => `<span class="tag-chip-mini">${escapeHtml(t)}</span>`).join('') + '</span>'
+      ? '<span class="client-tag-badges">' + c.tags.map(t => `<span class="tag-chip-mini" ${tagChipStyle(t, false)}>${escapeHtml(t)}</span>`).join('') + '</span>'
       : '';
     const commissionInfo = (c.commissionRate > 0 && introducer)
       ? `<span class="commission-info">介紹人 ${escapeHtml(introducer.name)} · 抽成 ${c.commissionRate}%</span>`
@@ -9462,10 +9560,12 @@ function renderTagPie() {
   if (!box) return;
 
   const tagAmounts = {};
+  const tagCounts = {};  // v3.28.3（#12）：各 tag 筆數（legend 顯示「哪個 tag 最多」）
   activeJobs().forEach(j => {
     if (!jobIsFullyPaid(j) && jobPaidTotal(j) === 0) return;
     const tag = j.tag || '未分類';
     tagAmounts[tag] = (tagAmounts[tag] || 0) + jobNetAmount(j);
+    tagCounts[tag] = (tagCounts[tag] || 0) + 1;
   });
 
   const entries = Object.entries(tagAmounts).filter(([_,v]) => v > 0).sort((a,b) => b[1] - a[1]);
@@ -9501,7 +9601,7 @@ function renderTagPie() {
   const legend = entries.map(([tag, amt], i) => `
     <div class="pie-legend-item">
       <div class="pie-legend-dot" style="background: ${colors[i % colors.length]};"></div>
-      <span class="pie-legend-name">${escapeHtml(tag)}</span>
+      <span class="pie-legend-name">${escapeHtml(tag)}<span style="color: var(--muted); font-size: 11px;">（${tagCounts[tag] || 0} 筆）</span></span>
       <span class="pie-legend-amt">${fmt(amt)}</span>
       <span class="pie-legend-pct">${(amt/total*100).toFixed(0)}%</span>
     </div>
@@ -9967,11 +10067,17 @@ function getAllUsedTags() {
   return [...set].sort();
 }
 
+// v3.28.3（#12）：業主標籤預設模板 — 進 datalist 建議，不強制建立
+const CLIENT_TAG_PRESETS = ['VIP', '大客戶', '長期', '潛在', '拖款戶'];
+
 function refreshAllTagSuggestions() {
   const tags = getAllUsedTags();
   ['tag-suggestions', 'all-tag-suggestions'].forEach(id => {
     const dl = document.getElementById(id);
-    if (dl) dl.innerHTML = tags.map(t => `<option value="${escapeHtml(t)}">`).join('');
+    if (!dl) return;
+    // 業主標籤 datalist 額外帶預設模板
+    const list = id === 'all-tag-suggestions' ? [...new Set([...CLIENT_TAG_PRESETS, ...tags])] : tags;
+    dl.innerHTML = list.map(t => `<option value="${escapeHtml(t)}">`).join('');
   });
 }
 
@@ -14426,6 +14532,34 @@ function exportUsageStats() {
   toast('✓ 已匯出使用統計 JSON');
 }
 
+// v3.28.2（R13）：usage counter top 10 顯示（counter 自 v3.25.3 一直在收集，這裡只做顯示）
+function _usageKeyLabel(k) {
+  if (k.startsWith('tab:')) {
+    const names = { dashboard:'總覽', jobs:'案件', calendar:'行事曆', revenue:'收益', clients:'業主', invoice:'請款單', settings:'設定' };
+    return '🗂️ 分頁：' + (names[k.slice(4)] || k.slice(4));
+  }
+  if (k.startsWith('act:')) {
+    const t = k.slice(4);
+    return (ACTION_LABELS[t]?.icon || '👤') + ' ' + (ACTION_LABELS[t]?.label || t);
+  }
+  if (k.startsWith('kb:')) return '⌨️ 快捷鍵：' + k.slice(3);
+  return k;
+}
+function renderUsageTop10() {
+  const box = document.getElementById('usage-top10');
+  if (!box) return;
+  let usage = {};
+  try { usage = JSON.parse(localStorage.getItem(USAGE_COUNTER_KEY) || '{}'); } catch (_) {}
+  const top = Object.entries(usage).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  box.innerHTML = top.length
+    ? top.map(([k, n], i) =>
+        `<div style="display: flex; justify-content: space-between; gap: 8px; padding: 2px 0;">
+          <span>${i + 1}. ${escapeHtml(_usageKeyLabel(k))}</span>
+          <span style="color: var(--muted); font-variant-numeric: tabular-nums;">${n}</span>
+        </div>`).join('')
+    : '<div style="color: var(--muted);">尚無統計資料</div>';
+}
+
 // ============== 操作日誌 UI（v2.9.5）==============
 function openActionLogModal() {
   // 填類型 select
@@ -14450,6 +14584,7 @@ function openActionLogModal() {
     clientSel.innerHTML = opts.join('');
   }
   document.getElementById('action-log-count').textContent = actionLog.length;
+  renderUsageTop10();  // v3.28.2（R13）
   renderActionLog();
   document.getElementById('action-log-modal').classList.add('open');
 }

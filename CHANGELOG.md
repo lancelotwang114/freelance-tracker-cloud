@@ -1,5 +1,67 @@
 ﻿# 版本更新歷史
 
+## v3.28.3 — #10 長按進批次 + #12 標籤系統升級（2026-07-12）
+
+### #10 手機滑動快速 action 收尾
+- 左右滑（標完成/標收款）v3.20.0 早已完成 — BACKLOG stale，本次只補最後一塊
+- **長按案件 row 500ms → 進批次模式並選取該筆**（震動回饋 navigator.vibrate 30ms）
+- 防呆：手指有移動（方向鎖定）即取消長按；長按觸發後 preventDefault 吃掉合成 click（避免又 toggle 掉選取）；批次模式中不重複觸發
+
+### #12 標籤系統升級（4 子項）
+- **標籤統計**：收益→分析「案件類型分佈」既有（金額+佔比），legend 補「N 筆」筆數
+- **業主分頁標籤篩選**：業主列表上方 tag chips（全部 + 各標籤），純 session UI 篩選不進 state；標籤消失自動重置
+- **標籤顏色**：`config.tagColors { tag: '#hex' }`，設定→🎨 顯示偏好→「🏷️ 標籤顏色」原生 color picker 設色/清除。
+  套用左緣色條（沿用業主 chip 視覺語言）：案件列 tag-badge / 報表視圖 t-tag / 看板 tile / 類型篩選 chips / 業主列表與篩選 chips。
+  緊湊列不套（一行密度設計本來就不顯示 tags）
+- **預設標籤模板**：業主標籤 datalist 帶 VIP / 大客戶 / 長期 / 潛在 / 拖款戶（建議不強制；案件 datalist 不帶）
+
+### 資料鐵則核實（tagColors 是業務資料）
+- 進 `config` → `buildTrackerWrapper().data.config` 自動裝載雲端 ✅（斷言驗證）
+- setTagColor / clearTagColor 都走 `saveConfigOnly()`（含 cloudSchedulePush）✅
+- 舊版相容：pull 是 config 整份取代（app.js `config = data.config`）、save 整份 stringify → 未知 key 舊版原樣帶回不丟失；mergeStates 對 config 是 per-key 三方合併，tagColors 衝突語意與 goals/userInfo 一致
+- 無 schema version 變更（config key 預設讀取，非 state migration）
+
+### 驗證
+瀏覽器斷言 19 條全過：tagColors 預設/寫入/localStorage/wrapper 裝載/設定頁列表/清除、4 個套色點（tag-badge/t-tag/篩選 chips/業主 chips）、業主篩選 chips+過濾+重置、datalist 模板（業主有/案件無）、pie 筆數、長按進批次+選取+bulk bar、移動取消長按。fresh reload console 零錯誤。
+（合成 TouchEvent 模擬長按；實機觸控建議部署後手機補一次目視確認）
+
+---
+
+## v3.28.2 — UI/UX 批次4：R1 篩選牆收合 / R5 跨天 pill / R13 top10 / R20 a11y / #7 砍重複卡（2026-07-12）
+
+> 全 UI 層改動，無 schema 變更（停 v19）、不碰同步機制。
+
+### R1 手機篩選牆收合（P1）
+- 案件分頁 業主/類型 chips > 6 顆 → 只顯示前 6 + `更多 ▾ (N)`，點擊展開/收合
+- **active 中的 chip 必入前 6**（目前篩選狀態不會藏進摺疊區 — 摺疊時把 active 換到第 6 位）
+- 展開狀態只存 session 模組變數（每次進來預設收合）；月份/狀態/勞報列不動
+- 實測 375px：篩選牆 317px，第一筆案件 y=717 首屏可見
+
+### R5 行事曆跨天案件 pill 只顯示起訖日
+- `cellHtml` 篩選改為：起日（`j.date === ds`）+ 迄日（`ds === j.endDate`），中間日不再每天重複出 pill
+- 迄日沿用既有 `spans` class（不可拖），起日照常可拖曳改日期
+
+### R13 usage counter top 10 顯示 UI
+- 操作日誌 modal 加「📊 常用功能 top 10（累計）」collapsed details（緊鄰既有 📊 匯出統計）
+- 讀既有 `cloud-ftUsageCount_v1` counter，key 轉譯（分頁/操作/快捷鍵）+ 次數遞減排序，純顯示無新存儲
+
+### R20 無障礙補強
+- `#toast` 加 `aria-live="polite"`（讀屏可聽到操作回饋）
+- 32 個裸 `<label>` 補 `for` 關聯緊鄰的 input/select/textarea（job/client modal、請款、設定全域掃過；剩 3 個非緊鄰複合列不動）
+
+### #7 Dashboard 年度卡瘦身
+- 「📊 年度收入對比」各年度橫條砍掉（與收益分頁年度模式重複）
+- **保留**「今年 vs 去年同期」摘要（Revenue 沒有這個資訊），卡改名「📊 今年 vs 去年同期」，cta 照舊導收益分頁
+
+### 盤點家務（BACKLOG 核實標記）
+- R9（頂列 tooltip）/ R11（switchTab active 查證無 bug）/ #17（多步 undo）/ #19（分組視圖）/ #5·R10（緊湊模式）— 早已完成，補標
+
+### 驗證
+瀏覽器 17 條斷言全過（收合 8 顆/更多計數/active 入前6/展開收合循環/類型列/跨天 2 顆@起訖/拖曳屬性/年度卡無橫條有同期/top10 內容+排序+轉譯/aria-live/label 34 顆/job-title 關聯）。
+（附註：其中 1 條首輪紅是 rAF render 時序的測試假陰性，等 frame 後重驗 ✅）
+
+---
+
 ## v3.28.1 — R12 勞報標記（schema v19）（2026-07-11）
 
 ### 使用者定案

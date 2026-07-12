@@ -54,7 +54,7 @@
 
 ---
 
-### 4. 全局計時器「今日總工時」儀表板
+### 4. 全局計時器「今日總工時」儀表板 ⏸ 使用者暫不需要（2026-07-12）
 **痛點**：v3.10 做了全局計時器，但只能看單一案件累積。
 
 **內容**：
@@ -75,29 +75,27 @@
 > 來源：桌面 760px + 手機 375px 實跑 review（demo 資料）。完整驗證方式見當日 session。
 
 **P1 — 手機可用性（影響最大）**
-- **R1. 案件 tab 篩選牆收合**：手機 ~14 行 chips（月份2+狀態3+業主4+類型5）首屏看不到案件。業主/類型改「前 N 顆 + 更多▾」或 collapsible；狀態列保留。類型 chips 從 tags 自動生成無上限，必收。
+- **R1. 案件 tab 篩選牆收合** ✅ v3.28.2（業主/類型 > 6 顆收合成 更多▾；active 必入前 6）。
 - **R2. FAB（＋）蓋內容** ✅ v3.27.3（main padding-bottom 96px）。
 - **R3. 未登入紅 banner 可關閉**：純本機使用者永遠頂紅色警告（手機占兩行）。加 X 關閉 + 記住（UI 偏好走獨立 localStorage key 合規），或降級黃色單行。
 
 **P2 — 中優先**
 - **R4. 備份提醒卡對比不足** ✅ v3.27.3 關閉（v3.26.0 警示聚合後該卡已不存在，chip 對比達標）。
-- **R5. 行事曆多日案件 pill 重複**：同案件每天一顆截字 pill → 噪音。改只在起訖日顯示（連續 bar 工程較大，暫緩）。
+- **R5. 行事曆多日案件 pill 重複** ✅ v3.28.2（只在起訖日顯示；連續 bar 仍暫緩）。
 - **R6. 收益 stat 卡孤兒**：6 卡排 5+1，「最豐月份」獨佔一行 → grid `auto-fit` 或 3×2。
 - **R7. 請款單控制區收摺** ✅ v3.27.3（個資+狀態細項進 ⚙ details；狀態 preset 高頻留主行）。
 - **R8. 「月底快到」卡點擊死碼**：`renderTodayTodo` 的 `it.action` 從未接上（onClick 三元式兩分支都回 `''`），pointer 游標但點了沒反應 → render 時 `it.action` 存在就綁 click（`switchTab('invoice')`）。
 
 **P3 — 低優先**
-- **R9. 頂列 emoji icon 無 tooltip**：🔎 ↻ 📜 加 `title` 屬性，零成本。
-- **R10. 案件列表密度**：行高偏高、第二行常空，一屏僅 ~9 筆 → **與下方 #5 緊湊模式同方向，做時合併**。
-- **R11. switchTab active class 查證**：程式呼叫 `switchTab()` 後 `.tab` 無 `active`（實測 active:[]）。點擊路徑可能正常，查是否只有程式路徑漏。
+- **R9. 頂列 emoji icon 無 tooltip** ✅ 已完成（2026-07-12 核實：index.html 頂列按鈕全有 title + aria-label）。
+- **R10. 案件列表密度** ✅ 已完成（2026-07-12 核實：v3.21.0 compact view 已是預設，#5 一併關閉）。
+- **R11. switchTab active class 查證** ✅ 查證無 bug（2026-07-12：switchTab 有 `classList.toggle('active', dataset.tab===tab)`，nav 全有 data-tab）。
 
 **明確不做**：emoji icon 全換 SVG、換色盤/字型/版型（設計工具 generic 建議，不適用既有 app）。
 
 **2026-07-09 使用者反饋追加**
 - **R12. 勞報案件標記** ✅ v3.28.1（laborReported + modal checkbox + 三態篩選 chip + row 標記；schema v19；收益分組暫緩 — 要統計時再加）。
-- **R13. 使用頻率統計（usage-driven 優化依據）**：利用**既有** `logAction` / `actionLog`（`cloud-ftActionLog_v1`，上限 500 筆）彙總各 action type 次數 → 找最常用功能當優化目標。
-  - 短期（零開發）：從正式站匯出操作日誌 JSON → 給 AI 彙總分析
-  - 長期（小）：logAction 內加 `{type: count}` 累積 counter（獨立本機 key，屬分析數據非業務資料，合規），設定頁顯示 top 10 + 匯出按鈕，突破 500 筆上限
+- **R13. 使用頻率統計（usage-driven 優化依據）** ✅ v3.28.2 收尾（counter v3.25.3 起收集、📊 匯出既有；top 10 顯示 UI 在操作日誌 modal details）。
 - **R14. 行事曆拖曳改日期** ✅ 已完成（2026-07-10 核實：`job-cal-drag` 在 app.js:7231 早已實作，且 5 月操作 log 有實際使用 2 次）
 
 **2026-07-10 UI/UX/UAT 實測追加（demo 資料 + 流程實跑）**
@@ -107,7 +105,7 @@
 - **R17. Modal dirty 保護 + focus** ✅ v3.27.1（dirty confirm + 更新入口擋 dirty + focus 第一欄）
 - **R18. 驗證錯誤 inline** ✅ v3.27.1（標紅 + focus + 輸入解除）
 - **R19. :focus-visible** ✅ v3.28.0（隨快捷鍵系統一起出）。
-- **R20. Toast 無 aria-live；101/103 input 無 label 關聯（P3）**：modal 表單優先。
+- **R20. Toast 無 aria-live；input 無 label 關聯** ✅ v3.28.2（#toast aria-live=polite；32 個裸 label 補 for，剩 3 個非緊鄰複合列）。
 - **R21. tab 列捲動提示** ✅ v3.27.3（≤640px 右緣 mask 漸隱）。
 - **R22. 雙歡迎 UI 同屏重疊** ✅ v3.27.1（onboarding 開著時隱藏歡迎卡）。
 - **R23. row「⧉ 複製為新案件」** ✅ v3.25.2（duplicateJobFromRow：modal 複製模式 + 標題全選，流水案件 3 動作）
@@ -128,7 +126,7 @@
 
 ---
 
-### 5. 案件列表緊湊模式
+### 5. 案件列表緊湊模式 ✅ 已完成（2026-07-12 核實：v3.21.0 compact view 已是預設，R10 一併關閉）
 **痛點**：每筆案件一張 card 高度 ~80px，案件多時垂直滾很久。
 
 **內容**：
@@ -151,13 +149,9 @@
 
 ---
 
-### 7. Dashboard「年度收入對比」併進 Revenue
-**痛點**：Dashboard 第三張卡跟 Revenue 重複度高。
-
-**內容**：砍掉 Dashboard 「📊 年度收入對比」+ cta-link，使用者改點 Revenue tab。
-
-**工程量**：小（直接刪 HTML / JS handler）。
-**注意**：要先確認沒有用到（年度對比的數據可能跑在 Dashboard render 才即時更新）。
+### 7. Dashboard「年度收入對比」併進 Revenue ✅ v3.28.2（瘦身版）
+**結果**：各年度橫條砍掉（與 Revenue 年度模式重複）；「今年 vs 去年同期」摘要保留
+（核實 Revenue 沒有同期對比資訊，砍掉會遺失），卡改名、cta 照舊導收益分頁。
 
 ---
 
@@ -181,14 +175,9 @@
 
 ---
 
-### 10. 手機滑動快速 action
-**痛點**：手機上批次操作不直覺。
-
-**內容**：
-- 滑動 row 出現左右快速 action：左滑 → 標完成、右滑 → 標收款、長按 → 進批次模式
-- 需要 hammer.js 或自己寫 touch handler
-
-**工程量**：中-大。
+### 10. 手機滑動快速 action ✅ v3.28.3 收尾
+- 左滑標完成 / 右滑標收款：v3.20.0 早已完成（native touch，無 hammer.js）
+- 長按 500ms → 進批次模式並選取該筆：v3.28.3 補上
 
 ---
 
@@ -198,13 +187,11 @@
 
 ---
 
-### 12. 標籤系統升級（v3.14 進階版）
-- 標籤統計分頁（哪個 tag 最多 / 哪個 tag 帶來最多收入）
-- 業主分頁 tag filter chip（依 tag 過濾業主列表）
-- 標籤顏色（每個 tag 可設色）
-- 預定義標籤模板（VIP / 大客戶 / 潛在 / 拖款戶 等預先建好）
-
-**工程量**：中。
+### 12. 標籤系統升級（v3.14 進階版）✅ v3.28.3
+- 標籤統計 ✅（收益→分析 pie 既有金額+佔比，legend 補筆數）
+- 業主分頁 tag filter chip ✅（session UI 篩選）
+- 標籤顏色 ✅（config.tagColors + 設定頁 color picker + 左緣色條；緊湊列不套）
+- 預定義標籤模板 ✅（業主 datalist 帶 VIP/大客戶/長期/潛在/拖款戶）
 
 ---
 
@@ -254,18 +241,15 @@
 
 ## 💡 其他點子
 
-### 17. 撤銷系統 v2（多步 undo + Ctrl+Z）
-- 目前 v3.15 是單層 undo
-- 升級成 stack（多步 undo）
-- 接 Ctrl+Z 鍵盤
+### 17. 撤銷系統 v2（多步 undo + Ctrl+Z）✅ 已完成（2026-07-12 核實）
+- `undoStack[]` 已是多步 stack（UNDO_MAX 上限）；Ctrl+Z 已接（v3.28.0 快捷鍵系統）
 
 ### 18. PWA push 通知
 - 目前是「開頁時推一次」
 - 升級用 Service Worker push API（要 push server，純前端架不起來）
 
-### 19. 案件「依日期分組」視圖
-- 案件列表多一個「按日分組」/「按業主分組」/「按類型分組」的 view 模式
-- 工程量：中
+### 19. 案件「依日期分組」視圖 ✅ 已完成（2026-07-12 核實）
+- `jobs-group-by` select 已有 依日期/業主/狀態/主標籤 四種（v3.18.0）
 
 ### 20. 業主關係圖
 - 視覺化業主之間的關聯（同類型 / 同月活躍 / 介紹關係）

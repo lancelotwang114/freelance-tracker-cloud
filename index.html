@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="app-version" content="2026-07-11-v3.28.1">
+<meta name="app-version" content="2026-07-12-v3.28.3">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -173,8 +173,9 @@
       <div id="month-chart"></div>
     </div>
 
+    <!-- v3.28.2（#7）：各年度橫條砍掉（與收益分頁重複），只留 Revenue 沒有的同期對比 -->
     <div class="card">
-      <h3>📊 年度收入對比</h3>
+      <h3>📊 今年 vs 去年同期</h3>
       <div id="year-comparison"></div>
       <div class="cta-link" onclick="switchTab('revenue')">
         查看完整年度趨勢 →
@@ -435,6 +436,8 @@
             <option value="name">依名稱</option>
           </select>
         </div>
+        <!-- v3.28.3（#12）：業主標籤篩選 chips（有業主帶標籤才顯示） -->
+        <div id="client-tag-filter" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;"></div>
         <div id="clients-list"></div>
       </div>
     </div>
@@ -506,24 +509,24 @@
         <h3 style="font-size: 14px; margin-bottom: 10px;">📇 通訊錄</h3>
         <div class="contact-grid">
           <div>
-            <label>聯絡人</label>
+            <label for="client-contact-person">聯絡人</label>
             <input type="text" id="client-contact-person" placeholder="例：王經理" oninput="onClientContactChange()">
           </div>
           <div>
-            <label>電話</label>
+            <label for="client-contact-phone">電話</label>
             <input type="tel" id="client-contact-phone" placeholder="例：02-1234-5678" oninput="onClientContactChange()">
           </div>
           <div>
-            <label>Email</label>
+            <label for="client-contact-email">Email</label>
             <input type="email" id="client-contact-email" placeholder="例：contact@example.com" oninput="onClientContactChange()">
           </div>
           <div>
-            <label>地址</label>
+            <label for="client-contact-address">地址</label>
             <input type="text" id="client-contact-address" placeholder="例：台北市信義區..." oninput="onClientContactChange()">
           </div>
         </div>
         <div style="margin-top: 10px;">
-          <label>內部備註（業主看不到）</label>
+          <label for="client-contact-note">內部備註（業主看不到）</label>
           <textarea id="client-contact-note" placeholder="例：對方喜歡簡潔風格、偏好 Email 溝通、月底結款" oninput="onClientContactChange()" style="min-height: 60px;"></textarea>
         </div>
         <div id="client-contact-saved-hint" class="reminder-hint" style="margin-top: 4px; opacity: 0; transition: opacity .2s;">✓ 已儲存</div>
@@ -755,7 +758,7 @@
 
     <!-- v3.22.8：顯示偏好（加新功能 toggle 都放這） -->
     <div class="card collapsible collapsed" id="card-display-pref">
-      <div class="card-head" onclick="toggleCard('card-display-pref')">
+      <div class="card-head" onclick="toggleCard('card-display-pref'); renderTagColorSettings();">
         <h3>🎨 顯示偏好</h3>
         <span class="toggle-arrow">▼</span>
       </div>
@@ -793,6 +796,15 @@
             <span style="margin-left: 8px; font-size: 11px; color: var(--muted);">（隨機說一句鼓勵的話）</span>
           </div>
         </div>
+
+        <div class="section-divider"></div>
+
+        <!-- v3.28.3（#12）：標籤顏色 -->
+        <h4 style="margin: 4px 0 8px; font-size: 14px; font-weight: 600;">🏷️ 標籤顏色</h4>
+        <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px;">
+          給標籤設色後，案件列表 / 篩選 chips / 業主標籤都會顯示左緣色條。兩台電腦會同步。
+        </div>
+        <div id="tag-color-list"></div>
       </div>
     </div>
 
@@ -930,7 +942,7 @@
     <h2 id="payment-account-editor-title">編輯收款帳號</h2>
     <input type="hidden" id="pae-id">
 
-    <label>標籤（自己看的，例：個人 / 工作室）</label>
+    <label for="pae-label">標籤（自己看的，例：個人 / 工作室）</label>
     <input type="text" id="pae-label" placeholder="例：個人">
 
     <!-- ── 個人資訊 ──（v3.2.0-ui：顯示 toggle 已搬到請款單外層；這裡只剩欄位輸入）-->
@@ -941,15 +953,15 @@
       </p>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
         <div>
-          <label>姓名</label>
+          <label for="pae-name">姓名</label>
           <input type="text" id="pae-name" placeholder="王小明">
         </div>
         <div>
-          <label>電話</label>
+          <label for="pae-phone">電話</label>
           <input type="text" id="pae-phone" placeholder="0912-345-678">
         </div>
         <div style="grid-column: 1 / -1;">
-          <label>Email</label>
+          <label for="pae-email">Email</label>
           <input type="email" id="pae-email" placeholder="you@example.com">
         </div>
       </div>
@@ -960,19 +972,19 @@
       <strong style="font-size: 14px; display: block; margin-bottom: 8px;">🧾 發票 / 抬頭資訊（不填則請款單不會顯示這塊）</strong>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
         <div>
-          <label>發票抬頭</label>
+          <label for="pae-invoice-title">發票抬頭</label>
           <input type="text" id="pae-invoice-title" placeholder="例：XX 工作室">
         </div>
         <div>
-          <label>統一編號</label>
+          <label for="pae-tax-id">統一編號</label>
           <input type="text" id="pae-tax-id" placeholder="8 位數字（個人空白）">
         </div>
         <div style="grid-column: 1 / -1;">
-          <label>寄送地址</label>
+          <label for="pae-address">寄送地址</label>
           <input type="text" id="pae-address" placeholder="例：台北市..">
         </div>
         <div style="grid-column: 1 / -1;">
-          <label>發票備註</label>
+          <label for="pae-invoice-note">發票備註</label>
           <input type="text" id="pae-invoice-note" placeholder="例：請註明案件編號">
         </div>
       </div>
@@ -983,26 +995,26 @@
       <strong style="font-size: 14px; display: block; margin-bottom: 8px;">💳 匯款資訊</strong>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
         <div>
-          <label>戶名（請款單顯示）</label>
+          <label for="pae-holder-name">戶名（請款單顯示）</label>
           <input type="text" id="pae-holder-name" placeholder="留空則用上面姓名">
         </div>
         <div>
-          <label>匯款銀行</label>
+          <label for="pae-bank">匯款銀行</label>
           <input type="text" id="pae-bank" placeholder="例：玉山銀行 (808)">
         </div>
         <div style="grid-column: 1 / -1;">
-          <label>匯款帳號</label>
+          <label for="pae-account">匯款帳號</label>
           <input type="text" id="pae-account" placeholder="0000-000-000000">
         </div>
         <div style="grid-column: 1 / -1;">
-          <label>帳號備註</label>
+          <label for="pae-account-note">帳號備註</label>
           <input type="text" id="pae-account-note" placeholder="例：跨行匯款請扣手續費">
         </div>
       </div>
 
       <!-- 存摺照片 -->
       <div style="margin-top: 10px;">
-        <label>存摺照片（請款單會附上）</label>
+        <label for="pae-bankbook-image">存摺照片（請款單會附上）</label>
         <input type="hidden" id="pae-bankbook-image" value="">
         <input type="hidden" id="pae-bankbook-fileid" value="">
         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
@@ -1036,13 +1048,13 @@
     <!-- ===== 區 1：基本資訊 ===== -->
     <div class="job-section">
       <div class="job-section-label">基本資訊</div>
-      <label>業主</label>
+      <label for="job-client">業主</label>
     <select id="job-client" onchange="onJobClientChange()"></select>
     <div id="job-prepaid-hint" class="hidden" style="background: var(--success-light); color: var(--success); padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-top: 4px;"></div>
 
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
       <div>
-        <label>開始日期</label>
+        <label for="job-date">開始日期</label>
         <input type="date" id="job-date">
         <!-- v3.24.18：快速選日期按鈕 -->
         <div class="date-quick-picks">
@@ -1053,7 +1065,7 @@
         </div>
       </div>
       <div>
-        <label>截止日（選填）</label>
+        <label for="job-end-date">截止日（選填）</label>
         <input type="date" id="job-end-date" placeholder="跨天案件才填">
         <!-- v3.24.18：快速選日期按鈕（截止日常用 +N 天） -->
         <div class="date-quick-picks">
@@ -1065,7 +1077,7 @@
       </div>
     </div>
 
-    <label>案件名稱</label>
+    <label for="job-title">案件名稱</label>
     <input type="text" id="job-title" placeholder="例：首頁 banner 設計">
 
     <label>標籤（選填，可多個）</label>
@@ -1094,15 +1106,15 @@
     <!-- v3.2.0：金額拆成 單價 × 數量；amount 仍是「總金額」自動算 -->
     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
       <div>
-        <label>單價</label>
+        <label for="job-unit-price">單價</label>
         <input type="number" id="job-unit-price" placeholder="0" oninput="onJobUnitOrQtyChange()">
       </div>
       <div>
-        <label>數量</label>
+        <label for="job-quantity">數量</label>
         <input type="number" id="job-quantity" placeholder="1" min="1" step="1" value="1" oninput="onJobUnitOrQtyChange()">
       </div>
       <div>
-        <label>總金額</label>
+        <label for="job-amount">總金額</label>
         <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">
         <!-- v3.24.18：千分位即時 hint，避免大數字眼花 -->
         <div id="job-amount-formatted" class="num-hint" style="font-size: 11px; color: var(--muted); margin-top: 2px; min-height: 14px;"></div>
@@ -1278,11 +1290,11 @@
 <div class="modal-bg" id="client-modal">
   <div class="modal">
     <h2 id="client-modal-title">新增業主</h2>
-    <label>業主名稱</label>
+    <label for="client-name">業主名稱</label>
     <input type="text" id="client-name" placeholder="例：A 公司">
     <label>顏色標記</label>
     <div id="color-picker" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
-    <label>備註（例：聯絡人、匯款帳號等）</label>
+    <label for="client-note">備註（例：聯絡人、匯款帳號等）</label>
     <textarea id="client-note"></textarea>
 
     <div class="section-divider"></div>
@@ -1337,13 +1349,13 @@
     </p>
     <div style="display: grid; grid-template-columns: 1fr 100px; gap: 8px;">
       <div>
-        <label>介紹人</label>
+        <label for="client-commission-to">介紹人</label>
         <select id="client-commission-to">
           <option value="">— 無 —</option>
         </select>
       </div>
       <div>
-        <label>抽成 %</label>
+        <label for="client-commission-rate">抽成 %</label>
         <input type="number" id="client-commission-rate" min="0" max="100" step="0.5" placeholder="0">
       </div>
     </div>
@@ -1357,13 +1369,13 @@
     </p>
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
       <div>
-        <label>固定請款日</label>
+        <label for="client-billing-day">固定請款日</label>
         <select id="client-billing-day">
           <option value="0">— 無固定 —</option>
         </select>
       </div>
       <div>
-        <label>提前幾天提醒</label>
+        <label for="client-billing-remind-days">提前幾天提醒</label>
         <input type="number" id="client-billing-remind-days" min="1" max="30" value="3" placeholder="3">
       </div>
     </div>
@@ -1382,13 +1394,18 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" aria-live="polite"></div>
 
 <!-- v2.9.5: 操作日誌 Modal -->
 <div class="modal-bg" id="action-log-modal">
   <div class="modal" style="max-width: 640px;">
     <h2>📜 操作日誌</h2>
     <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">最近 <span id="action-log-count">0</span> 筆操作（只存本機，最多 500 筆）</p>
+    <!-- v3.28.2（R13）：usage counter top 10（lifetime，只存本機） -->
+    <details style="font-size: 12px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;">
+      <summary style="cursor: pointer; color: var(--muted);">📊 常用功能 top 10（累計）</summary>
+      <div id="usage-top10" style="margin-top: 6px;"></div>
+    </details>
     <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; align-items: center;">
       <select id="log-filter-type" onchange="renderActionLog()" style="font-size: 12px; padding: 4px 6px;"></select>
       <select id="log-filter-client" onchange="renderActionLog()" style="font-size: 12px; padding: 4px 6px;"></select>
@@ -1448,7 +1465,7 @@
   <div class="modal" style="max-width: 420px;">
     <h2>💰 標記為已收款</h2>
     <div id="paid-date-info" style="font-size: 14px; color: var(--muted); margin-bottom: 12px;"></div>
-    <label>收款日期</label>
+    <label for="paid-date-input">收款日期</label>
     <input type="date" id="paid-date-input">
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closePaidDateModal()">取消</button>
