@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-15-v3.28.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-15-v3.28.5';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6011,9 +6011,17 @@ function toggleDashBulkSelect(id) {
   renderDashboard();
 }
 
+// v3.28.5：dashboard「待完成案件」清單（原「近期案件」最新 10 筆）— 使用者核定
+// 篩選：未完成且未取消、非估價單（「已收待做」也算待完成）；排序：日期舊→新（逾期浮頂）；全部不截斷
+// render 跟批次全選共用這一個來源（原本兩處各自複製查詢，是不同步 bug 源）
+function dashPendingJobs() {
+  return state.jobs
+    .filter(j => !j.done && !j.cancelled && !j.isEstimate)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+
 function dashBulkSelectAll() {
-  const recent = [...state.jobs].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0, 10);
-  recent.forEach(j => { if (!j.cancelled) dashBulkSelected.add(j.id); });
+  dashPendingJobs().forEach(j => dashBulkSelected.add(j.id));
   renderDashboard();
 }
 
@@ -6615,11 +6623,11 @@ function renderDashboard() {
   countUpStat('stat-year', yearAmt);
   document.getElementById('stat-year-sub').textContent = year + ' 年已收款';
 
-  // 近期案件（v2.7.10：擴大到 10 筆 + 支援 dashboard 批次模式）
-  const recent = [...state.jobs].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0, 10);
+  // v3.28.5：近期案件 → 待完成案件（全部顯示、舊→新、標完成即消失，跟熱路徑吻合）
+  const recent = dashPendingJobs();
   const recentBox = document.getElementById('recent-jobs');
   if (!recent.length) {
-    recentBox.innerHTML = emptyState('還沒有案件', '點右下角 + 新增第一筆');
+    recentBox.innerHTML = emptyState('☕ 沒有待完成案件', '享受空檔，或點右下角 + 接新案');
   } else {
     let html = '';
     if (dashBulkMode) {
