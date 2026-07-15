@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-12-v3.28.3';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-07-15-v3.28.4';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1854,18 +1854,29 @@ async function calendarListCalendars() {
 
 // 列出指定 calendar 內的事件，可選 filter
 // extendedQuery 會被加到 query string，例：'privateExtendedProperty=ftSource=freelance-tracker-cloud'
+// v3.28.4（R24）：兩個根因修正 —
+//   1. fields 補 reminders：之前沒拉這欄位 → 比對器把 undefined 當「不同」→ 每輪 518 事件全量重 PUT
+//   2. pageToken 翻頁：之前只拿第一頁 2500 筆 → 超出的事件永遠「找不到」→ 每輪重複 create 灌爆日曆
+//      （fields 必須含 nextPageToken，否則會被 fields 過濾掉、永遠只有一頁）
 async function calendarListEvents(calendarId, extendedQuery) {
-  const params = new URLSearchParams({
-    maxResults: '2500',
-    showDeleted: 'false',
-    singleEvents: 'true',
-    fields: 'items(id,summary,description,start,end,colorId,extendedProperties)',
-  });
-  let url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`;
-  if (extendedQuery) url += '&' + extendedQuery;
-  const r = await driveFetch(url);
-  const data = await r.json();
-  return data.items || [];
+  const items = [];
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({
+      maxResults: '2500',
+      showDeleted: 'false',
+      singleEvents: 'true',
+      fields: 'nextPageToken,items(id,summary,description,start,end,colorId,reminders,extendedProperties)',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+    let url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`;
+    if (extendedQuery) url += '&' + extendedQuery;
+    const r = await driveFetch(url);
+    const data = await r.json();
+    items.push(...(data.items || []));
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return items;
 }
 
 async function calendarCreateEvent(calendarId, eventResource) {
@@ -2352,7 +2363,9 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
     console.warn(`[cloud-merge] 偵測到 ${result.conflicts.length} 筆衝突 → 先備份本機 → 自動全採雲端`);
     if (typeof cloudCreateSnapshot === 'function') {
       const tsLabel = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
-      const conflictLabel = `衝突備份_${result.conflicts.length}筆_${tsLabel}`;
+      // v3.28.4：先抓數字 — .then 執行時 result.conflicts 已被清空（之前 log 永遠 conflictCount: 0）
+      const conflictCount = result.conflicts.length;
+      const conflictLabel = `衝突備份_${conflictCount}筆_${tsLabel}`;
       cloudCreateSnapshot('manual', conflictLabel)
         .then(created => {
           console.log('[cloud-merge] ✓ 衝突前本機備份已建立:', created.id, conflictLabel);
@@ -2360,7 +2373,7 @@ async function cloudResolveAndMerge({ remoteData, remoteMeta, fileId, trackerCre
             logAction('cloud-conflict-backup', {
               fileId: created.id,
               label: conflictLabel,
-              conflictCount: result.conflicts.length
+              conflictCount
             });
           }
         })
@@ -2862,6 +2875,14 @@ function _cloudMergeConfig(base, local, remote) {
   const remoteObj = remote || {};
   const allKeys = new Set([...Object.keys(baseObj), ...Object.keys(localObj), ...Object.keys(remoteObj)]);
   for (const k of allKeys) {
+    // v3.28.4：lastModifiedAt 是「存檔時間戳」metadata，兩台常駐機必然各自 bump →
+    // 每輪 auto-pull 都判成 field-conflict → 觸發衝突備份 snapshot spam（log 實證每 40 分鐘一個）。
+    // 取較新者（ISO 字串可直接字典序比較）、永不進 conflicts。
+    if (k === 'lastModifiedAt') {
+      const lT = String(localObj[k] || ''), rT = String(remoteObj[k] || '');
+      merged[k] = lT > rT ? localObj[k] : remoteObj[k];
+      continue;
+    }
     const bV = baseObj[k], lV = localObj[k], rV = remoteObj[k];
     const lChanged = !_cloudDeepEqual(bV, lV);
     const rChanged = !_cloudDeepEqual(bV, rV);
@@ -3499,6 +3520,28 @@ async function cloudPruneSnapshots() {
   if (!isCloudSignedIn()) return;
   try {
     const all = await cloudListSnapshots();
+
+    // v3.28.4：衝突備份（-manual-衝突備份）全清（使用者 2026-07-15 核定）—
+    // lastModifiedAt 假衝突源頭已根治，存量是每 40 分鐘堆出來的同狀態重複備份（數百~數千個）。
+    // 只留 24h 內的：真衝突剛發生時備份還有救援價值，隔天 prune 自動清掉。
+    // list 單頁上限 1000 → 一輪清不完沒關係，每日 prune 會續清。一般手動快照不受影響。
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const conflictBks = all.filter(f =>
+      f.name.includes('-manual-衝突備份') &&
+      (Date.now() - new Date(f.modifiedTime).getTime()) > DAY_MS
+    );
+    if (conflictBks.length > 0) {
+      console.log(`[snapshot-prune] 清理 ${conflictBks.length} 筆衝突備份殘骸`);
+      let cbDeleted = 0;
+      for (const f of conflictBks) {
+        try { await driveDeleteFile(f.id); cbDeleted++; }
+        catch (e) { console.warn('[snapshot-prune] conflict-backup delete failed:', f.name, e); }
+      }
+      if (cbDeleted > 0 && typeof logAction === 'function') {
+        logAction('cloud-conflict-backup-prune', { deletedCount: cbDeleted });
+      }
+    }
+
     const autos = [];
     for (const f of all) {
       const m = f.name.match(/^snapshot-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-auto\b/);
@@ -4265,9 +4308,14 @@ async function cloudSyncCalendar() {
 
     toastProgress('🔍 比對差異中…', 30000);
     const existingMap = new Map();
+    // v3.28.4（R24）：同 ftKey 重複事件 = 翻頁 bug 時代累積的殘骸 → 收集起來排進刪除
+    // 一輪刪不完沒關係（單筆失敗只 console.warn），下輪 sync 會繼續清
+    const dupes = [];
     for (const ev of existing) {
       const key = ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.ftKey;
-      if (key) existingMap.set(key, ev);
+      if (!key) continue;
+      if (existingMap.has(key)) dupes.push(ev);
+      else existingMap.set(key, ev);
     }
 
     const target = buildTargetCalendarEvents(cfg);
@@ -4291,6 +4339,8 @@ async function cloudSyncCalendar() {
     for (const [key, ev] of existingMap) {
       if (!targetKeys.has(key)) toDelete.push(ev);
     }
+    // v3.28.4（R24）：重複殘骸一併刪
+    toDelete.push(...dupes);
 
     let added = 0, updated = 0, deleted = 0;
 

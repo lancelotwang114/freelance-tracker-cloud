@@ -109,7 +109,7 @@
 - **R21. tab 列捲動提示** ✅ v3.27.3（≤640px 右緣 mask 漸隱）。
 - **R22. 雙歡迎 UI 同屏重疊** ✅ v3.27.1（onboarding 開著時隱藏歡迎卡）。
 - **R23. row「⧉ 複製為新案件」** ✅ v3.25.2（duplicateJobFromRow：modal 複製模式 + 標題全選，流水案件 3 動作）
-- **R24. calendar-sync 每輪 PATCH ~530 事件（P2）**：🔍 v3.25.3 已埋診斷（diffFields 統計進 calendar-sync log）— **下次真實同步後看日誌內 diffFields 就知道兇手欄位，再修比對邏輯**。
+- **R24. calendar-sync 每輪 PATCH ~530 事件** ✅ v3.28.4（診斷 log 破案：fields 沒拉 reminders → 全量誤判；加碼發現無翻頁 → 每輪重複 create 灌爆日曆 + lastModifiedAt 永久衝突 → snapshot spam，三顆一起修）。
 - **R25. log 三件套** ✅ v3.25.3（cat 分流 + push/pull 每日聚合降噪 + via 欄位 + tab/act usage counter + 📊 匯出統計）。註：counter top10 顯示 UI 未做，匯出 JSON 已可分析。
 - **R26. 離線不鎖編輯** ✅ v3.25.2
 - **R27. 編輯 modal 開啟不彈全屏鎖** ✅ v3.25.2

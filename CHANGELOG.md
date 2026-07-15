@@ -1,5 +1,57 @@
 ﻿# 版本更新歷史
 
+## v3.28.4 — R24 根治 + 衝突備份 spam 修復（2026-07-15）
+
+### 背景：使用者匯出 3 天操作統計（ft-usage-stats-2026-07-15.json），log 實證三顆 bug
+
+### Bug 1（R24 主因）：每輪 518 事件全量重 PUT
+- log：每輪 calendar-sync `updated: 518, diffFields: {"reminders.useDefault": 518}`
+- 根因：`calendarListEvents` 的 `fields` 沒拉 `reminders` → 拉回的事件該欄位永遠 undefined →
+  比對器把 undefined 當「跟 target 不同」→ 全量誤判
+- 修：fields 補 `reminders`
+
+### Bug 2（更嚴重）：每輪重複 create ~52 事件，日曆被灌爆
+- log：每輪 `added: 51-52`（建立成功、下輪又不認得）
+- 根因：list 只拿第一頁（maxResults 2500、無 pageToken 翻頁）。重複事件長期累積超過 2500 後，
+  超出頁的 ftKey 永遠「找不到」→ 每輪重建 → 越積越多惡性循環
+- 修：pageToken 翻頁迴圈（fields 必須含 `nextPageToken`，否則被 fields 過濾掉永遠單頁）
+- 清理：existingMap 建構時發現同 ftKey 重複 → 收進 toDelete 一併刪。
+  歷史殘骸可能數千筆，一輪刪不完沒關係（單筆失敗 console.warn 不中斷），下輪續清、自我修復
+
+### Bug 3：每 40 分鐘一個「衝突備份」snapshot（Drive spam）
+- log：每輪 `cloud-merge-auto-remote-wins count:1` + 衝突備份快照
+- 根因：`config.lastModifiedAt` 是存檔時間戳 metadata，兩台常駐機必然各自 bump →
+  `_cloudMergeConfig` 三方合併永遠判成 field-conflict → 每輪快照 + toast + remote-wins
+- 修：lastModifiedAt 特例 — 取較新者（ISO 字典序）、永不進 conflicts；其他 key 衝突行為不變
+- 順修：`cloud-conflict-backup` log 的 `conflictCount` 永遠是 0（async .then 執行時
+  result.conflicts 已被清空）→ 先抓 const 再進 closure
+
+### 8 項同步機制 self-review
+1 無新觸發點（全是既有路徑內部修正）✅ 2 無新 mutable 入口，cloudCalendarSyncInProgress 鎖不動 ✅
+3 lastSyncedAt（Drive modifiedTime）沒動；merged.lastModifiedAt=兩台較新者，語意更正確 ✅
+4 無新 alert；刪除失敗靜默續清 ✅ 5 flag 在 finally reset（既有，查證）✅
+6 lastModifiedAt 取較新：remote 較新→noop 不推；local 較新→推一次（合理）；相比之前每輪衝突+快照+push 嚴格變少 ✅
+7 無新 setTimeout ✅ 8 兩台同刪同一 dupe → 第二台 404 → catch warn 無害；業務 key 衝突行為不變（斷言驗證）✅
+
+### 驗證
+瀏覽器斷言 16 條全過：merge 5 條（lastModifiedAt 零衝突/取較新×2/一般 key 行為不變/單邊 fallback）、
+翻頁 5 條（3 頁全拿/3 request/fields 含 reminders+nextPageToken/pageToken 傳遞/extendedQuery 每頁帶）、
+dry-run cloudSyncCalendar 6 條（stub 全套 API：新增 1/誤判歸零/刪孤兒+重複 3/保留第一份/log 正確/真舊格式仍升級）。
+
+### Bug 4（追加，使用者核定「全刪光」）：衝突備份 snapshot 永久堆積
+- prune 分層保留只認 `-auto` 檔名；衝突備份是 manual 型 → 從不清理 → Drive 已堆數百~數千個
+- 修：`cloudPruneSnapshots` 加規則 — 檔名含 `-manual-衝突備份` 且 **>24h** → 刪
+  （24h 救援窗：真衝突剛發生的備份留一天；隔天自動清。一般手動快照完全不動）
+- list 單頁 1000 上限 → 一輪清不完，每日 prune 續清直到乾淨
+- 驗證：斷言 6 條 — >24h 衝突備份刪 / 24h 內留 / 一般手動不動 / auto 分層照舊（含每月留 1 邊界）/ prune log
+
+### 給使用者
+- 部署後第一次 calendar 同步會刪大量歷史重複事件，跑很久是正常的（下輪會繼續清）
+- 幾乎沒在用行事曆的話：設定 → 📅 Google 行事曆同步 → 關掉自動同步，40 分鐘循環直接停
+- 衝突備份殘骸會由每日 prune 分批自動清（每天最多 ~1000 個），不用手動進 Drive 刪
+
+---
+
 ## v3.28.3 — #10 長按進批次 + #12 標籤系統升級（2026-07-12）
 
 ### #10 手機滑動快速 action 收尾
