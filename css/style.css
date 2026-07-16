@@ -20,20 +20,21 @@
   --bg: #f4f2ec;
   --card: #fdfcf9;
   --text: #1f1d18;
-  --muted: #8b8677;
+  /* v3.28.6：亮色語意色文字加深到 WCAG AA（muted 3.54→4.55 / success 3.76→5.22 / gold 3.17→5.09 / orange 2.94→4.82，vs card） */
+  --muted: #7a7462;
   --border: #e3dfd4;
   --primary: #0f766e;
   --primary-dark: #115e59;
   --primary-light: #ddede7;
-  --success: #0d9464;
+  --success: #0b7a52;
   --success-light: #d9ecdf;
   --warning: #b45309;
   --warning-light: #f7ecd8;
   --danger: #dc2626;
   --danger-light: #fbe3e0;
-  --orange: #ea7317;
+  --orange: #b8520d;
   --orange-light: #fbe8d5;
-  --gold: #b8860b;
+  --gold: #8a670a;
   --shadow: 0 1px 3px rgba(70,60,30,0.05), 0 1px 2px rgba(70,60,30,0.07);
 }
 
@@ -1147,6 +1148,8 @@ body.has-sync-banner { padding-top: 48px; }
 }
 .btn-primary { background: var(--primary); color: #fff; }
 .btn-primary:hover { background: var(--primary-dark); }
+/* v3.28.6：暗色 primary（#35b5a8）上白字只有 2.52，改深字 6.68（hover 4.74 也過） */
+html[data-theme="dark"] .btn-primary { color: #08211d; }
 .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .btn-outline:hover { background: var(--bg); }
 .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--border); }
