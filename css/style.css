@@ -3877,10 +3877,69 @@ body.view-board #jobs-group-control {
   margin-top: 2px;
 }
 
+/* ==================== v3.29.0：報價單 ==================== */
+.quote-layout { display: grid; grid-template-columns: minmax(340px, 1fr) 794px; gap: 14px; align-items: start; margin-top: 14px; }
+/* main 限寬 900px 放不下「編輯區＋794px 紙張」並排 → 寬螢幕時報價單分頁撐出 main */
+@media (min-width: 1240px) {
+  #tab-quote { position: relative; left: 50%; width: min(1500px, calc(100vw - 48px)); transform: translateX(-50%); }
+}
+.quote-editor { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; padding: 14px; }
+.quote-editor h4 { font-size: 13px; color: var(--muted); margin: 14px 0 6px; letter-spacing: 1px; }
+.quote-editor h4:first-child { margin-top: 0; }
+.quote-editor input, .quote-editor select, .quote-editor textarea { padding: 5px 7px; font-size: 13px; border-radius: 6px; min-width: 0; }
+.quote-editor textarea { min-height: 0; line-height: 1.6; }
+.qe-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.qe-cat { border: 1px solid var(--border); border-radius: 9px; padding: 8px; margin-bottom: 8px; }
+.qe-ch { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
+.qe-ch input { font-weight: 700; }
+.qe-it { display: grid; grid-template-columns: 1.2fr 1.2fr .9fr 72px auto; gap: 4px; align-items: center; margin-top: 3px; }
+.qe-hdr { font-size: 11px; color: var(--muted); }
+.qe-rush { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; margin-top: 3px; }
+.qe-ops { display: flex; gap: 2px; }
+.qe-ops button, .qe-rush > button { border: 1px solid var(--border); background: var(--card); color: var(--muted); border-radius: 5px; padding: 2px 6px; font-size: 12px; cursor: pointer; }
+.quote-editor .qe-del { color: var(--danger); }
+.qe-add { width: 100%; margin-top: 6px; padding: 5px; font-size: 12px; color: var(--primary); background: none; border: 1px dashed var(--border); border-radius: 6px; cursor: pointer; }
+.qe-hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.quote-scroll { overflow-x: auto; }
+@media (max-width: 1239px) {
+  .quote-layout { grid-template-columns: 1fr; }
+  .quote-editor { position: static; max-height: none; }
+}
+
+/* 報價單本體：紙張配色固定（不跟暗色主題），匯出/列印一致 */
+.qs-sheet { width: 794px; margin: 0 auto; background: #fff; color: #3a302f; box-shadow: 0 4px 24px rgba(0,0,0,.12); font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+.qs-band { background: #f6ece8; padding: 34px 48px 26px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.qs-band h1 { margin: 0; font-family: "Noto Serif TC", serif; font-size: 28px; letter-spacing: 6px; color: #5c3d38; }
+.qs-band small { display: block; font-size: 11px; letter-spacing: 4px; color: #8f6a63; margin-top: 4px; }
+.qs-client { margin-top: 14px; padding-top: 10px; border-top: 1px solid #dcc3bd; font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #2e2524; }
+.qs-meta { display: grid; grid-template-columns: auto auto; gap: 3px 14px; font-size: 13px; color: #2e2524; align-items: baseline; }
+.qs-meta span { font-size: 11px; letter-spacing: 1px; color: #8f6a63; text-align: right; }
+.qs-meta b { font-weight: 500; }
+.qs-body { padding: 22px 48px 40px; }
+.qs-sec { display: grid; grid-template-columns: var(--qs-tagw, 76px) 1fr; border-bottom: 1px solid #f0e4e0; padding: 10px 0; }
+.qs-tag { align-self: start; justify-self: start; background: #a8726a; color: #fff; font-size: 12.5px; letter-spacing: 2px; padding: 3px 10px; border-radius: 14px; font-weight: 500; white-space: nowrap; }
+.qs-row { display: grid; grid-template-columns: 1.3fr 1.4fr 1fr 82px; gap: 8px; font-size: 12.5px; padding: 4px 0; }
+.qs-sub { color: #6e5c58; font-size: 11.5px; }
+.qs-pr { text-align: right; font-weight: 700; color: #5c3d38; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qs-pr.ask { font-weight: 500; color: #a8726a; }
+.qs-bt { display: grid; gap: 14px; margin-top: 22px; }
+.qs-bx { background: #fbf6f4; border-radius: 14px; padding: 14px 18px; }
+.qs-bx h3 { margin: 0 0 8px; font-family: "Noto Serif TC", serif; font-size: 14px; color: #5c3d38; letter-spacing: 3px; }
+.qs-kv { display: grid; grid-template-columns: auto auto; justify-content: start; gap: 4px 24px; font-size: 12.5px; }
+.qs-kv span { white-space: nowrap; }
+.qs-kv b { font-weight: 500; white-space: nowrap; }
+.qs-kv .qs-hot { color: #b0473f; font-weight: 700; }
+.qs-ng { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: start; }
+.qs-gt { font-size: 11.5px; letter-spacing: 2px; color: #5c3d38; font-weight: 700; border: 1px solid #dcc3bd; border-radius: 10px; padding: 1px 8px; margin-top: 3px; white-space: nowrap; }
+.qs-ng ul { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.9; }
+
 /* ==================== Print ==================== */
 @media print {
   .top-bar, header, nav.tabs, .fab, .no-print { display: none !important; }
   body { background: #fff; padding: 0; }
   main { padding: 0; }
   .invoice { box-shadow: none; padding: 20px; }
+  .quote-layout { display: block; margin: 0; }
+  .qs-sheet { box-shadow: none; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .qs-sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

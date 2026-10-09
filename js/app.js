@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-07-16-v3.28.6';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.29.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5915,7 +5915,7 @@ function switchTab(tab) {
   // v3.25.3（R25）：唯讀行為進 usage counter（logAction 只記 mutation，補熱區盲點）
   if (typeof bumpUsage === 'function') bumpUsage('tab:' + tab);
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  ['dashboard','jobs','calendar','revenue','clients','invoice','settings'].forEach(t => {
+  ['dashboard','jobs','calendar','revenue','clients','invoice','quote','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.toggle('hidden', t !== tab);
   });
   // v3.9.0：離開業主分頁時自動回列表（避免下次回來還停在 detail）
@@ -5928,7 +5928,7 @@ function switchTab(tab) {
   // 設定/請款/收益分頁仍然隱藏（這些頁面通常不會新增）
   const fabWrap = document.getElementById('fab-wrap');
   if (fabWrap) {
-    if (tab === 'settings' || tab === 'invoice' || tab === 'revenue') {
+    if (tab === 'settings' || tab === 'invoice' || tab === 'quote' || tab === 'revenue') {
       fabWrap.style.display = 'none';
     } else {
       fabWrap.style.display = '';
@@ -5970,6 +5970,7 @@ function renderActiveTab() {
       else renderClients();
       break;
     case 'invoice':   renderInvoice();   break;
+    case 'quote':     renderQuote();     break;  // v3.29.0
     // settings 不需要 render（純靜態）
   }
 }
@@ -5983,6 +5984,7 @@ function renderAll() {
   renderRevenue();
   renderClients();
   renderInvoice();
+  if (currentTab === 'quote') renderQuote();  // v3.29.0：pull/merge 進來的 quoteSheet 要即時反映（隱藏時量不到標籤寬，切過去再畫）
   renderBadge();
   renderBackupStatus();
   // v3.0.0-alpha.3：把存摺照片 placeholder 換成實際 <img>（fire-and-forget；cache 命中秒出）
@@ -11015,6 +11017,285 @@ async function exportInvoicePDF() {
 function printInvoice() {
   recordInvoiceHistory('print');
   window.print();
+}
+
+// ============== v3.29.0：報價單（公版價目表）==============
+// 業務資料 → config.quoteSheet（buildTrackerWrapper 裝載雲端，mergeStates 以整個 key 三方合併）。
+// 沒編輯過就不寫入 config，畫面用 QUOTE_DEFAULT；第一次編輯才複製一份進 config 再 saveConfigOnly()。
+// 舊版 app 相容：config 是整份 stringify / 整份取代，未知 key 原樣帶回（同 v3.28.3 tagColors 先例），不需 schema bump。
+// 收款帳號不另存：撈 config.userInfo.paymentAccounts（請款單分頁管理），payAccountId 空 = 跟請款單目前選的那筆。
+const QUOTE_DEFAULT = {
+  title: '報價單', en: 'QUOTATION', client: '欣莘醫美',
+  contactName: 'Yaya', phone: '0988-040141', email: 'k7992629@gmail.com', date: '',
+  cats: [
+    ['廣告', [['FB、PMAX、LINE', '靜圖', '單張', 1300], ['FB、PMAX、LINE', '動圖', '單張', 1800], ['尺寸延伸（resize）', '方形改橫式、排版', '單張', 300], ['舊圖修改', '改價格、文字、醫師', '單張', 100]]],
+    ['官網', [['Banner 橫幅', '首頁輪播、醫師團體圖', '單張', 1000], ['療程頁', '上架＋製圖', '一份（約6-10組圖）', 4500], ['療程頁', '製圖（不含假案例）', '一份（約6-10組圖）', 4000], ['專欄文', '製圖', '一頁（約4-6張圖）', 1400], ['案例文', '製圖', '一頁', 800]]],
+    ['社群', [['IG貼文（新知、時事）', '長安＋板橋', '一組', 2000], ['IG貼文（案例）', '長安＋板橋', '一組', 800], ['LINE選單', '一般+翔評', '一組', 1000]]],
+    ['YT', [['封面', 'YT＋官網', '一組', 1200]]],
+    ['現場', [['活動DM＋TV版影片', '', '單張＋單支', 1800], ['美療DM', '', '單張', 1500], ['療程本加頁', '', '每頁', 1500]]],
+    ['客服', [['案例BA', '現有案例', '單張', 300], ['案例BA', '假案例', '單張', 600]]],
+    ['外部', [['公車廣告', '', '單張', 3500], ['外牆帆布、看板', '', '單張', 4500]]],
+    ['茶會', [['PPT簡報', '', '', null], ['價目DM', '', '單張', 800], ['抽獎券', '', '一組', 500], ['背板、布條', '', '單張', 1500], ['展架', '', '單張', 1500]]],
+    ['產品', [['包裝設計', '', '', null], ['產品介紹DM', '', '單張', 1500]]],
+    ['其他', [['人物精修', '', '單張', 300], ['名片設計', '', '單面', 1200], ['名片設計', '', '雙面', 2000]]]
+  ].map(([name, items]) => ({ name, items: items.map(([item, detail, qty, price]) => ({ item, detail, qty, price })) })),
+  rush: [{ label: '今日發案 隔日交件', value: '依該項單價加價 30%' }, { label: '今日發案 今日交件', value: '依該項單價加價 50%' }],
+  payTerms: '當月結案，次月 10 日前匯款',
+  payAccountId: '',
+  notes: [
+    { title: '計價', lines: ['以上報價均為含稅價', '可申報勞務報酬單', '以上僅為圖片設計報價，不包含印刷費用', '非上述設計內容，另行報價', '素材需由業主提供，需求變更另行計價', '當月結案金額滿 NT$20,000，總金額打 95 折', '當月結案金額滿 NT$35,000，總金額打 9 折'].join('\n') },
+    { title: '修改', lines: '可免費修改兩次，第三次起每次酌收該項單價 10% 修改費' },
+    { title: '交付', lines: ['交件僅提供 JPG 圖檔', '原始檔（PSD／AI）另議'].join('\n') }
+  ]
+};
+
+function getQuoteSheet() {
+  return config.quoteSheet || Object.assign({}, QUOTE_DEFAULT, { date: todayStr() });
+}
+
+// 第一次編輯才把預設值複製進 config（之後一律改 config.quoteSheet 本體）
+function quoteMutable() {
+  if (!config.quoteSheet) config.quoteSheet = JSON.parse(JSON.stringify(getQuoteSheet()));
+  return config.quoteSheet;
+}
+
+function getQuotePayAccount(q) {
+  const list = (config.userInfo && config.userInfo.paymentAccounts) || [];
+  return (q.payAccountId && list.find(a => a.id === q.payAccountId)) || getActivePaymentAccount();
+}
+
+function renderQuote() {
+  // 襯線字只有報價單用 → 第一次開分頁才載
+  if (!document.getElementById('quote-font')) {
+    const l = document.createElement('link');
+    l.id = 'quote-font'; l.rel = 'stylesheet';
+    l.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&display=swap';
+    l.onload = () => document.fonts.ready.then(renderQuoteSheet);  // 字檔下載完再重量標籤寬
+    document.head.appendChild(l);
+  }
+  // 正在編輯欄位時不重畫編輯區（pull 進來會搶走游標），只更新右邊報價單
+  const ed = document.getElementById('quote-editor');
+  if (ed && !ed.contains(document.activeElement)) { renderQuoteEditor(); _quoteEditorStale = false; }
+  else _quoteEditorStale = true;
+  renderQuoteSheet();
+}
+
+function renderQuoteSheet() {
+  const view = document.getElementById('quote-view');
+  if (!view) return;
+  const q = getQuoteSheet();
+  const e = escapeHtml;
+  const money = v => v == null || v === '' ? '另報價' : 'NT$' + Number(v).toLocaleString();
+  const acct = getQuotePayAccount(q);
+  const holder = acct ? (acct.holderName || (config.userInfo && config.userInfo.name) || '') : '';
+  const payRows = [['付款條件', q.payTerms], ['銀行', acct && acct.bank], ['帳號', acct && acct.account], ['戶名', holder]].filter(x => x[1]);
+  const secs = q.cats.map(c => `<div class="qs-sec"><span class="qs-tag">${e(c.name)}</span><div>` +
+    c.items.map((r, i) => `<div class="qs-row"><span>${i > 0 && c.items[i - 1].item === r.item ? '' : e(r.item)}</span><span class="qs-sub">${e(r.detail)}</span><span class="qs-sub">${e(r.qty)}</span><span class="qs-pr${r.price == null ? ' ask' : ''}">${money(r.price)}</span></div>`).join('') +
+    `</div></div>`).join('');
+  const notes = q.notes.map(g => ({ t: g.title, l: String(g.lines || '').split('\n').filter(x => x.trim()) })).filter(g => g.l.length);
+  view.innerHTML = `<div class="qs-sheet">
+    <div class="qs-band"><div><h1>${e(q.title)}</h1><small>${e(q.en)}</small>${q.client ? `<div class="qs-client">${e(q.client)}</div>` : ''}</div>
+      <div class="qs-meta">${[['聯絡人', q.contactName], ['電話', q.phone], ['Email', q.email], ['報價日期', q.date]].filter(x => x[1]).map(([k, v]) => `<span>${k}</span><b>${e(v)}</b>`).join('')}</div></div>
+    <div class="qs-body">${secs}
+      <div class="qs-bt">
+        ${q.rush.length ? `<div class="qs-bx"><h3>急件費</h3><div class="qs-kv">${q.rush.map(r => `<span>${e(r.label)}</span><b class="qs-hot">${e(r.value)}</b>`).join('')}</div></div>` : ''}
+        ${payRows.length ? `<div class="qs-bx"><h3>付款方式</h3><div class="qs-kv">${payRows.map(([k, v]) => `<span>${k}</span><b>${e(v)}</b>`).join('')}</div></div>` : ''}
+        ${notes.length ? `<div class="qs-bx"><h3>備註</h3><div class="qs-ng">${notes.map(g => `<span class="qs-gt">${e(g.t)}</span><ul>${g.l.map(n => `<li>${e(n)}</li>`).join('')}</ul>`).join('')}</div></div>` : ''}
+      </div></div></div>`;
+  // 類別標籤欄寬 = 最長標籤 + 間距（如 youtube 這種長名稱），所有區塊對齊
+  const tags = [...view.querySelectorAll('.qs-tag')].map(t => t.offsetWidth + 16);
+  view.firstElementChild.style.setProperty('--qs-tagw', Math.max(76, ...tags) + 'px');
+}
+
+function renderQuoteEditor() {
+  const ed = document.getElementById('quote-editor');
+  if (!ed) return;
+  const q = getQuoteSheet();
+  const e = escapeHtml;
+  const inp = (path, v, ph = '', type = 'text') => `<input data-qp="${path}" value="${e(v == null ? '' : v)}" placeholder="${ph}" type="${type}">`;
+  const ops = (a, i, j) => `<span class="qe-ops"><button type="button" data-qa="${a}Up" data-c="${i}" data-i="${j}" title="上移">↑</button><button type="button" data-qa="${a}Down" data-c="${i}" data-i="${j}" title="下移">↓</button><button type="button" class="qe-del" data-qa="${a}Del" data-c="${i}" data-i="${j}" title="刪除">✕</button></span>`;
+  const accts = (config.userInfo && config.userInfo.paymentAccounts) || [];
+  ed.innerHTML = `
+    <h4>抬頭</h4>
+    <div class="qe-grid2">${inp('title', q.title, '標題')}${inp('en', q.en, '英文小字')}</div>
+    <h4>客戶名稱</h4>
+    ${inp('client', q.client, '業主名稱', 'text').replace('<input', '<input list="quote-client-list"')}
+    <datalist id="quote-client-list">${(state.clients || []).map(c => `<option value="${e(c.name)}">`).join('')}</datalist>
+    <h4>聯絡資訊 / 報價日期</h4>
+    <div class="qe-grid2">${inp('contactName', q.contactName, '聯絡人')}${inp('phone', q.phone, '電話')}${inp('email', q.email, 'Email')}${inp('date', q.date, '', 'date')}</div>
+    <h4>價目</h4>
+    ${q.cats.map((c, ci) => `<div class="qe-cat"><div class="qe-ch">${inp(`cats.${ci}.name`, c.name, '類別')}${ops('cat', ci, '')}</div>
+      <div class="qe-it qe-hdr"><span>項目</span><span>細項</span><span>數量</span><span>單價</span><span></span></div>
+      ${c.items.map((r, ii) => `<div class="qe-it">${inp(`cats.${ci}.items.${ii}.item`, r.item)}${inp(`cats.${ci}.items.${ii}.detail`, r.detail)}${inp(`cats.${ci}.items.${ii}.qty`, r.qty)}${inp(`cats.${ci}.items.${ii}.price`, r.price, '另報價', 'number')}${ops('it', ci, ii)}</div>`).join('')}
+      <button type="button" class="qe-add" data-qa="itAdd" data-c="${ci}">＋ 項目</button></div>`).join('')}
+    <button type="button" class="qe-add" data-qa="catAdd">＋ 類別</button>
+    <h4>急件費</h4>
+    ${q.rush.map((r, ri) => `<div class="qe-rush">${inp(`rush.${ri}.label`, r.label, '條件')}${inp(`rush.${ri}.value`, r.value, '加價')}<button type="button" class="qe-del" data-qa="rushDel" data-c="${ri}">✕</button></div>`).join('')}
+    <button type="button" class="qe-add" data-qa="rushAdd">＋ 急件條件</button>
+    <h4>付款方式</h4>
+    ${inp('payTerms', q.payTerms, '付款條件（留空不顯示）')}
+    <select data-qp="payAccountId" style="margin-top:4px;">
+      <option value="">跟請款單目前選的帳號</option>
+      ${accts.map(a => `<option value="${e(a.id)}"${a.id === q.payAccountId ? ' selected' : ''}>${e(a.label || a.bank || '未命名')}${a.account ? '（' + e(a.account) + '）' : ''}</option>`).join('')}
+    </select>
+    <div class="qe-hint">${accts.length ? '銀行／帳號／戶名從收款帳號帶入，到「請款單」分頁管理。' : '還沒有收款帳號 → 到「請款單」分頁新增，這裡會自動帶入。'}</div>
+    <h4>備註（分組，一行一條）</h4>
+    ${q.notes.map((g, gi) => `<div class="qe-cat"><div class="qe-ch">${inp(`notes.${gi}.title`, g.title, '分組名稱')}${ops('ng', gi, '')}</div>
+      <textarea data-qp="notes.${gi}.lines" rows="${Math.max(2, String(g.lines || '').split('\n').length)}">${e(g.lines)}</textarea></div>`).join('')}
+    <button type="button" class="qe-add" data-qa="ngAdd">＋ 備註分組</button>`;
+}
+
+function _quoteSwap(a, i, j) { if (j >= 0 && j < a.length) [a[i], a[j]] = [a[j], a[i]]; }
+const QUOTE_ACTIONS = {
+  catUp: (q, c) => _quoteSwap(q.cats, c, c - 1), catDown: (q, c) => _quoteSwap(q.cats, c, c + 1),
+  catDel: (q, c) => q.cats.splice(c, 1),
+  catAdd: q => q.cats.push({ name: '新類別', items: [{ item: '', detail: '', qty: '單張', price: null }] }),
+  itUp: (q, c, i) => _quoteSwap(q.cats[c].items, i, i - 1), itDown: (q, c, i) => _quoteSwap(q.cats[c].items, i, i + 1),
+  itDel: (q, c, i) => q.cats[c].items.splice(i, 1),
+  itAdd: (q, c) => q.cats[c].items.push({ item: '', detail: '', qty: '單張', price: null }),
+  rushDel: (q, c) => q.rush.splice(c, 1), rushAdd: q => q.rush.push({ label: '', value: '' }),
+  ngUp: (q, c) => _quoteSwap(q.notes, c, c - 1), ngDown: (q, c) => _quoteSwap(q.notes, c, c + 1),
+  ngDel: (q, c) => q.notes.splice(c, 1),
+  ngAdd: q => q.notes.push({ title: '其他', lines: '' })
+};
+
+document.getElementById('quote-editor')?.addEventListener('input', ev => {
+  const p = ev.target.dataset.qp;
+  if (!p) return;
+  const keys = p.split('.');
+  let o = quoteMutable();
+  keys.slice(0, -1).forEach(k => { o = o[k]; });
+  const last = keys[keys.length - 1];
+  o[last] = last === 'price' ? (ev.target.value === '' ? null : Number(ev.target.value)) : ev.target.value;
+  saveConfigOnly();
+  renderQuoteSheet();
+});
+document.getElementById('quote-editor')?.addEventListener('click', ev => {
+  const b = ev.target.closest('[data-qa]');
+  if (!b) return;
+  const a = b.dataset.qa, c = +b.dataset.c, cur = getQuoteSheet();
+  // confirm 放在 quoteMutable() 之前：取消時不該把預設值寫進 config 推 Drive
+  if (a === 'catDel' && !confirm(`刪除類別「${cur.cats[c].name}」和底下所有項目？`)) return;
+  if (a === 'ngDel' && !confirm(`刪除備註分組「${cur.notes[c].title}」？`)) return;
+  QUOTE_ACTIONS[a](quoteMutable(), c, +b.dataset.i);
+  saveConfigOnly();
+  renderQuoteEditor();
+  renderQuoteSheet();
+});
+// 打字中 pull 進來的新資料（renderQuote 跳過了編輯區）→ 離開編輯區時補畫，避免 data-qp 索引對到舊結構
+let _quoteEditorStale = false;
+document.getElementById('quote-editor')?.addEventListener('focusout', ev => {
+  if (_quoteEditorStale && !ev.currentTarget.contains(ev.relatedTarget)) {
+    _quoteEditorStale = false;
+    renderQuoteEditor();
+  }
+});
+
+function resetQuoteSheet() {
+  if (!confirm('報價單還原成預設內容？目前的修改會清掉（另一台電腦同步後也會還原）。')) return;
+  config.quoteSheet = JSON.parse(JSON.stringify(Object.assign({}, QUOTE_DEFAULT, { date: todayStr() })));
+  saveConfigOnly();
+  renderQuoteEditor();
+  renderQuoteSheet();
+}
+
+async function captureQuoteCanvas() {
+  const sheet = document.querySelector('#quote-view .qs-sheet');
+  if (!sheet) return null;
+  toastProgress('🎨 渲染中...');
+  await document.fonts.ready;
+  await loadScript(HTML2CANVAS_CDN);
+  return html2canvas(sheet, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+}
+
+function getQuoteFilename(ext) {
+  const q = getQuoteSheet();
+  return `${q.client ? q.client + '_' : ''}${q.title || '報價單'}_${q.date || todayStr()}.${ext}`;
+}
+
+async function exportQuotePNG() {
+  try {
+    const canvas = await captureQuoteCanvas();
+    if (!canvas) return;
+    const link = document.createElement('a');
+    link.download = getQuoteFilename('png');
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    toastDismiss();
+    toast('✓ 已下載圖片');
+  } catch (err) {
+    toastDismiss();
+    toast('匯出失敗：' + err.message);
+  }
+}
+
+// 同 copyInvoiceImage：複製到剪貼簿，可直接貼到 LINE / Messenger / Email
+async function copyQuoteImage() {
+  try {
+    const canvas = await captureQuoteCanvas();
+    if (!canvas) return;
+    canvas.toBlob(async (blob) => {
+      if (!blob) { toastDismiss(); toast('產生圖片失敗'); return; }
+      try {
+        if (!navigator.clipboard || !window.ClipboardItem) {
+          toastDismiss();
+          alert('此瀏覽器不支援複製圖片到剪貼簿，請改用「下載圖片」按鈕。\n\n（建議瀏覽器：Chrome / Edge / Safari 最新版）');
+          return;
+        }
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        toastDismiss();
+        toast('✓ 已複製，可直接貼到 LINE / Messenger / Email');
+      } catch (err) {
+        toastDismiss();
+        if (String(err).includes('NotAllowedError') || String(err).includes('Document is not focused')) {
+          alert('複製失敗：請先點一下頁面任何地方再試（瀏覽器要求頁面在前景才允許複製）。');
+        } else {
+          alert('複製失敗：' + err.message + '\n\n你的瀏覽器可能不支援，請改用「下載圖片」。');
+        }
+      }
+    }, 'image/png');
+  } catch (err) {
+    toastDismiss();
+    toast('匯出失敗：' + err.message);
+  }
+}
+
+async function exportQuotePDF() {
+  try {
+    const canvas = await captureQuoteCanvas();
+    if (!canvas) return;
+    await loadScript(JSPDF_CDN);
+    const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = 210, H = 297, m = 8;
+    // 分頁切在類別 / 區塊交界（不切半行字）；JPEG 壓縮（PNG 整張 A4 會到 20MB+）
+    const sheet = document.querySelector('#quote-view .qs-sheet');
+    const k = canvas.width / sheet.offsetWidth;                 // CSS px → canvas px
+    const pageH = Math.floor(canvas.width * (H - m * 2) / (W - m * 2));
+    const top0 = sheet.getBoundingClientRect().top;
+    const cuts = [...sheet.querySelectorAll('.qs-sec, .qs-bx')].map(el => Math.round((el.getBoundingClientRect().top - top0) * k));
+    let y = 0;
+    while (y < canvas.height) {
+      let end = Math.min(y + pageH, canvas.height);
+      if (end < canvas.height) {
+        const c = cuts.filter(v => v > y && v <= end).pop();
+        if (c) end = c;
+      }
+      const part = document.createElement('canvas');
+      part.width = canvas.width; part.height = end - y;
+      const ctx = part.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, part.width, part.height);
+      ctx.drawImage(canvas, 0, y, canvas.width, part.height, 0, 0, canvas.width, part.height);
+      if (y > 0) pdf.addPage();
+      pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', m, m, W - m * 2, part.height * (W - m * 2) / canvas.width);
+      y = end;
+    }
+    pdf.save(getQuoteFilename('pdf'));
+    toastDismiss();
+    toast('✓ 已下載 PDF');
+  } catch (err) {
+    toastDismiss();
+    toast('匯出失敗：' + err.message);
+  }
 }
 
 // ============== v3.12.0: 請款單歷史紀錄 ==============
