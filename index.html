@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-09-v3.29.2">
+<meta name="app-version" content="2026-10-09-v3.30.0">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -100,9 +100,10 @@
     <!-- v3.29.1：行事曆分頁使用量 0 → 先隱藏（功能與 renderCalendar 保留，移除 hidden 即復原） -->
     <button data-tab="calendar" class="hidden">行事曆</button>
     <button data-tab="revenue">收益</button>
-    <button data-tab="clients">業主</button>
-    <button data-tab="invoice">請款單</button>
-    <button data-tab="quote">報價單</button>
+    <!-- v3.30.0：業主（usage 1 次）隱藏 — 業主頁改從案件列業主色塊 / 單據「業主資料」/ 設定「業主管理」進入 -->
+    <button data-tab="clients" class="hidden">業主</button>
+    <!-- v3.30.0：請款單 + 報價單合併為「單據」，內部仍是 invoice / quote 兩個 tab，靠 #doc-switch 切換 -->
+    <button data-tab="invoice">單據</button>
     <button data-tab="settings">設定</button>
   </nav>
 
@@ -543,6 +544,14 @@
     </div>
   </section>
 
+  <!-- v3.30.0：單據 — 請款單 / 報價單切換（switchTab 在 invoice / quote 時顯示） -->
+  <div id="doc-switch" class="hidden no-print" style="margin-bottom: 10px;">
+    <div class="revenue-toggle">
+      <button data-doc="invoice" onclick="switchTab('invoice')">🧾 請款單</button>
+      <button data-doc="quote" onclick="switchTab('quote')">📄 報價單</button>
+    </div>
+  </div>
+
   <!-- Invoice -->
   <section id="tab-invoice" class="hidden">
     <div class="card no-print" style="padding: 12px;">
@@ -551,7 +560,8 @@
       <!-- 修：select 全域 width:100% 在 flex 內會 overflow，用 flex-wrap + explicit min-width 解決 -->
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end;">
         <div style="min-width: 0;">
-          <span style="font-size: 11px; color: var(--muted);">業主</span>
+          <span style="font-size: 11px; color: var(--muted); display: flex; justify-content: space-between;">業主
+            <a href="#" onclick="event.preventDefault(); viewClientDetail(document.getElementById('inv-client').value)" style="color: var(--primary); text-decoration: none;">業主資料 ›</a></span>
           <select id="inv-client" style="margin-top: 2px; width: 100%;"></select>
         </div>
         <div style="min-width: 0;">
@@ -682,6 +692,12 @@
 
   <!-- Settings -->
   <section id="tab-settings" class="hidden">
+
+    <!-- v3.30.0：業主分頁按鈕隱藏後的列表入口 -->
+    <div class="card" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+      <div><b>👥 業主管理</b><div style="font-size: 12px; color: var(--muted);">業主列表、聯絡資訊、個別統計</div></div>
+      <button class="btn btn-outline btn-sm" onclick="switchTab('clients')">開啟 ›</button>
+    </div>
 
     <!-- ============== ☁️ 雲端同步（v3.24.16 改名 + 整合）============== -->
     <!-- v3.24.16：原「🔐 Google Drive 同步」改名「☁️ 雲端同步」，並把「💾 資料備份（離線）」+「📦 雲端備份歷史」併進來當 sub-section -->

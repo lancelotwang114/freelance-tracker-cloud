@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.29.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.30.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5939,7 +5939,11 @@ function switchTab(tab) {
   currentTab = tab;
   // v3.25.3（R25）：唯讀行為進 usage counter（logAction 只記 mutation，補熱區盲點）
   if (typeof bumpUsage === 'function') bumpUsage('tab:' + tab);
-  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  // v3.30.0：「單據」nav 按鈕（data-tab=invoice）在 invoice / quote 都亮；#doc-switch 只在這兩個 tab 顯示
+  const isDoc = tab === 'invoice' || tab === 'quote';
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (isDoc && b.dataset.tab === 'invoice')));
+  document.getElementById('doc-switch')?.classList.toggle('hidden', !isDoc);
+  document.querySelectorAll('#doc-switch button').forEach(b => b.classList.toggle('active', b.dataset.doc === tab));
   ['dashboard','jobs','calendar','revenue','clients','invoice','quote','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.toggle('hidden', t !== tab);
   });
@@ -7808,6 +7812,9 @@ function openCustomMonthFilter() {
 
 // ============== v3.9.0：業主 detail 頁（CRM-lite）==============
 function viewClientDetail(clientId) {
+  // v3.30.0：從其他分頁（總覽 / 案件列業主色塊、單據「業主資料」）呼叫時先切過去
+  //   舊版只在業主分頁內有效，其他分頁點色塊畫面不會動；業主 nav 隱藏後這是主要入口
+  if (currentTab !== 'clients') switchTab('clients');
   detailClientId = clientId;
   document.getElementById('client-list-view')?.classList.add('hidden');
   document.getElementById('client-detail-view')?.classList.remove('hidden');
@@ -15668,7 +15675,7 @@ function _kbShowHelp() {
     m.innerHTML = `<div class="modal" style="max-width: 440px;">
       <h2>⌨️ 鍵盤快捷鍵</h2>
       <table class="kb-help-table">
-        <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>切換分頁（總覽/案件/收益/業主/請款單/設定）</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>切換分頁（總覽/案件/收益/業主/單據/設定）</td></tr>
         <tr><td><kbd>N</kbd></td><td>新增案件</td></tr>
         <tr><td><kbd>Shift</kbd>+<kbd>N</kbd></td><td>新增業主</td></tr>
         <tr><td><kbd>/</kbd></td><td>全域搜尋</td></tr>
