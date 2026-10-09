@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.33.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.34.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -12577,11 +12577,13 @@ function drawInvoice() {
     ${topPersonalLine}
     <div class="invoice-header">
       <div>
-        <h2>${periodLabel} 工作明細</h2>
+        <h2 class="invoice-title">請款單</h2>
+        <div class="invoice-title-en">INVOICE</div>
         <div class="meta">業主：${escapeHtml(c.name)}</div>
       </div>
       <div style="text-align: right;">
         <div class="meta">請款日：${todayStr()}</div>
+        <div class="meta">請款期間：${escapeHtml(periodLabel)}</div>
         <div class="meta">共 ${jobs.length} 筆 · ${fmt(finalTotal)}</div>
       </div>
     </div>
@@ -13994,7 +13996,7 @@ function copyInvoiceText() {
   const jobs = snap.jobs;
   const paid = jobs.reduce((s,j) => s + jobPaidTotal(j), 0);
   const unpaid = jobs.filter(j => j.done).reduce((s,j) => s + jobUnpaidAmount(j), 0);
-  const txt = `${periodLabel} ${c.name} 工作明細\n\n` +
+  const txt = `${periodLabel} ${c.name} 請款單\n\n` +
     jobs.map(j => {
       const final = jobFinalAmount(j);
       const disc = jobDiscountAmount(j);
@@ -14018,7 +14020,7 @@ function enterClientMode(cid) {
   if (!c) { alert('找不到此業主的資料'); return; }
   document.querySelector('nav.tabs').style.display = 'none';
   document.getElementById('fab-add').style.display = 'none';
-  document.getElementById('page-title').textContent = c.name + ' - 工作明細';
+  document.getElementById('page-title').textContent = c.name + ' - 請款單';
   document.getElementById('page-sub').textContent = '只讀檢視';
   document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden'));
   const inv = document.getElementById('tab-invoice');

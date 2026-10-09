@@ -1487,6 +1487,9 @@ input:focus, select:focus, textarea:focus {
   border-bottom: 2px solid var(--text);
 }
 .invoice-header h2 { font-size: 24px; margin-bottom: 4px; }
+/* v3.34.0：抬頭「請款單 / INVOICE」— 與報價單「報價單 / QUOTATION」同一套 */
+.invoice-header h2.invoice-title { font-size: 28px; letter-spacing: 6px; margin-bottom: 0; }
+.invoice-title-en { font-size: 11px; letter-spacing: 4px; color: #6b7280; margin-bottom: 8px; }
 .invoice-header .meta { color: var(--muted); font-size: 14px; }
 .invoice table { width: 100%; border-collapse: collapse; }
 .invoice th, .invoice td {
