@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-09-v3.31.0">
+<meta name="app-version" content="2026-10-09-v3.32.0">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -457,6 +457,9 @@
         </div>
         <div class="client-detail-actions">
           <button class="btn btn-outline btn-sm" id="client-detail-edit-btn" onclick="editCurrentDetailClient()">編輯</button>
+          <!-- v3.32.0：業主專屬單據入口 -->
+          <button class="btn btn-outline btn-sm" onclick="gotoInvoice(detailClientId)">🧾 請款單</button>
+          <button class="btn btn-outline btn-sm" onclick="openClientQuote(detailClientId)">📄 報價單</button>
           <button class="btn btn-primary btn-sm" id="client-detail-add-job-btn" onclick="addJobForCurrentClient()">＋ 新增案件</button>
         </div>
       </div>
@@ -678,12 +681,18 @@
   <!-- v3.29.0：報價單（公版價目表）— 資料存 config.quoteSheet，跟其他設定一起同步 Drive -->
   <section id="tab-quote" class="hidden">
     <div class="card no-print" style="padding: 12px;">
+      <!-- v3.32.0：報價對象 — 公版 / 各業主專屬（renderQuoteTarget 填入） -->
+      <label style="display: block; margin: 0 0 10px;">
+        <span style="font-size: 11px; color: var(--muted);">報價對象</span>
+        <select id="quote-target" onchange="setQuoteTarget(this.value)" style="margin-top: 2px;"></select>
+        <span id="quote-target-hint" style="display: block; font-size: 12px; color: var(--muted); margin-top: 4px;"></span>
+      </label>
       <div style="display:flex; gap: 8px; flex-wrap: wrap;">
         <button class="btn btn-primary" onclick="exportQuotePDF()">📄 下載 PDF</button>
         <button class="btn btn-primary" onclick="exportQuotePNG()">🖼️ 下載圖片</button>
         <button class="btn btn-outline" onclick="copyQuoteImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email">📋 複製圖片</button>
         <button class="btn btn-outline" onclick="window.print()">🖨️ 列印</button>
-        <button class="btn btn-outline" onclick="resetQuoteSheet()">↺ 還原預設</button>
+        <button class="btn btn-outline" id="quote-reset-btn" onclick="resetQuoteSheet()">↺ 還原預設</button>
       </div>
       <p style="font-size: 12px; color: var(--muted); margin: 8px 0 0;">單價留空 = 顯示「另報價」；欄位留空 = 報價單上不顯示。改動會自動存檔並同步到雲端。</p>
     </div>

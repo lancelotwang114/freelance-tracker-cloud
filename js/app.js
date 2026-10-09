@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.31.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.32.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -11143,14 +11143,81 @@ const QUOTE_DEFAULT = {
   ]
 };
 
-function getQuoteSheet() {
+// v3.32.0：業主專屬報價單 — quoteTarget '' = 公版（config.quoteSheet），否則 = 業主 id（client.quoteSheet）
+//   業主還沒專屬 → 顯示公版內容（客戶名稱帶業主名）；第一次編輯才複製一份進 client.quoteSheet，之後各自獨立
+//   存在業主 record → 走 state.clients 欄位級三方合併：兩台改不同業主的報價單互不衝突
+let quoteTarget = '';
+
+function _quoteBase() {
   return config.quoteSheet || Object.assign({}, QUOTE_DEFAULT, { date: todayStr() });
 }
 
-// 第一次編輯才把預設值複製進 config（之後一律改 config.quoteSheet 本體）
+function getQuoteSheet() {
+  const c = quoteTarget ? getClient(quoteTarget) : null;
+  if (!c) return _quoteBase();
+  return c.quoteSheet || Object.assign({}, _quoteBase(), { client: c.name });
+}
+
+// 第一次編輯才複製（公版：預設值 → config；業主：公版 → client.quoteSheet），之後一律改本體
 function quoteMutable() {
+  const c = quoteTarget ? getClient(quoteTarget) : null;
+  // 對象業主已被刪（例如另一台刪除、pull 進來時正在打字）→ 回 null 讓呼叫端中止，
+  //   絕不能落到下面改公版：編輯區還是該業主的內容，會把它寫進公版推上雲端
+  if (quoteTarget && !c) return null;
+  if (c) {
+    if (!c.quoteSheet) c.quoteSheet = JSON.parse(JSON.stringify(getQuoteSheet()));
+    return c.quoteSheet;
+  }
   if (!config.quoteSheet) config.quoteSheet = JSON.parse(JSON.stringify(getQuoteSheet()));
   return config.quoteSheet;
+}
+
+// 公版在 config → saveConfigOnly；業主專屬在 state.clients → save()
+function _quoteSave() {
+  if (quoteTarget && getClient(quoteTarget)) save(); else saveConfigOnly();
+}
+
+// quoteMutable 回 null 時：切回公版、重畫編輯區，這次輸入不寫入
+function _quoteTargetGone() {
+  quoteTarget = '';
+  renderQuoteEditor();
+  renderQuoteTarget();
+  renderQuoteSheet();
+  toast('⚠️ 這個業主已被刪除，已切回公版（剛才的輸入未儲存）', 5000);
+}
+
+function setQuoteTarget(cid) {
+  quoteTarget = getClient(cid) ? cid : '';
+  renderQuoteEditor();
+  renderQuoteTarget();
+  renderQuoteSheet();
+}
+
+// 業主詳細頁「📄 報價單」
+function openClientQuote(cid) {
+  quoteTarget = getClient(cid) ? cid : '';
+  switchTab('quote');
+}
+
+// 對象選單 + 狀態提示 + 還原按鈕文案
+function renderQuoteTarget() {
+  const sel = document.getElementById('quote-target');
+  if (!sel) return;
+  // 業主被刪時不在這裡改 quoteTarget（編輯區可能正在打字、還是舊內容）→ 由 quoteMutable 守門
+  sel.innerHTML = `<option value="">📋 公版（預設價目表）</option>` +
+    sortedClientsForPicker().map(c => `<option value="${escapeHtml(c.id)}"${c.id === quoteTarget ? ' selected' : ''}>${escapeHtml(c.name)}${c.quoteSheet ? '' : '（尚未建立）'}</option>`).join('');
+  sel.value = quoteTarget;
+  const c = quoteTarget ? getClient(quoteTarget) : null;
+  const hint = document.getElementById('quote-target-hint');
+  if (hint) hint.textContent = (quoteTarget && !c) ? '⚠️ 這個業主已被刪除，開始編輯前請改選對象。'
+    : !c ? '公版：新業主的報價單從這份複製。'
+    : c.quoteSheet ? `「${c.name}」專屬報價單（與公版互不影響）。`
+    : `目前顯示公版內容；一開始編輯就會建立「${c.name}」專屬報價單。`;
+  const rb = document.getElementById('quote-reset-btn');
+  if (rb) {
+    rb.textContent = c ? '↺ 重設為公版' : '↺ 還原預設';
+    rb.classList.toggle('hidden', !!c && !c.quoteSheet);
+  }
 }
 
 function getQuotePayAccount(q) {
@@ -11171,6 +11238,7 @@ function renderQuote() {
   const ed = document.getElementById('quote-editor');
   if (ed && !ed.contains(document.activeElement)) { renderQuoteEditor(); _quoteEditorStale = false; }
   else _quoteEditorStale = true;
+  renderQuoteTarget();  // v3.32.0
   renderQuoteSheet();
 }
 
@@ -11258,10 +11326,12 @@ document.getElementById('quote-editor')?.addEventListener('input', ev => {
   if (!p) return;
   const keys = p.split('.');
   let o = quoteMutable();
+  if (!o) { _quoteTargetGone(); return; }  // v3.32.0
   keys.slice(0, -1).forEach(k => { o = o[k]; });
   const last = keys[keys.length - 1];
   o[last] = last === 'price' ? (ev.target.value === '' ? null : Number(ev.target.value)) : ev.target.value;
-  saveConfigOnly();
+  _quoteSave();          // v3.32.0：公版 → config / 業主 → state.clients
+  renderQuoteTarget();   // 第一次編輯 → 提示從「尚未建立」變「專屬」
   renderQuoteSheet();
 });
 document.getElementById('quote-editor')?.addEventListener('click', ev => {
@@ -11271,9 +11341,12 @@ document.getElementById('quote-editor')?.addEventListener('click', ev => {
   // confirm 放在 quoteMutable() 之前：取消時不該把預設值寫進 config 推 Drive
   if (a === 'catDel' && !confirm(`刪除類別「${cur.cats[c].name}」和底下所有項目？`)) return;
   if (a === 'ngDel' && !confirm(`刪除備註分組「${cur.notes[c].title}」？`)) return;
-  QUOTE_ACTIONS[a](quoteMutable(), c, +b.dataset.i);
-  saveConfigOnly();
+  const m = quoteMutable();
+  if (!m) { _quoteTargetGone(); return; }  // v3.32.0
+  QUOTE_ACTIONS[a](m, c, +b.dataset.i);
+  _quoteSave();  // v3.32.0
   renderQuoteEditor();
+  renderQuoteTarget();
   renderQuoteSheet();
 });
 // 打字中 pull 進來的新資料（renderQuote 跳過了編輯區）→ 離開編輯區時補畫，避免 data-qp 索引對到舊結構
@@ -11286,10 +11359,22 @@ document.getElementById('quote-editor')?.addEventListener('focusout', ev => {
 });
 
 function resetQuoteSheet() {
-  if (!confirm('報價單還原成預設內容？目前的修改會清掉（另一台電腦同步後也會還原）。')) return;
-  config.quoteSheet = JSON.parse(JSON.stringify(Object.assign({}, QUOTE_DEFAULT, { date: todayStr() })));
-  saveConfigOnly();
+  // v3.32.0：業主專屬 → 刪掉專屬內容，回到顯示公版（可 Ctrl+Z 復原）
+  const c = quoteTarget ? getClient(quoteTarget) : null;
+  if (quoteTarget && !c) { _quoteTargetGone(); return; }  // 業主已刪 → 不可落到下面還原公版
+  if (c) {
+    if (!c.quoteSheet) return;
+    if (!confirm(`「${c.name}」的專屬報價單重設為公版？專屬的修改會清掉（另一台電腦同步後也會重設，可用 Ctrl+Z 復原）。`)) return;
+    pushUndoSnapshot(`已重設「${c.name}」報價單為公版`);
+    delete c.quoteSheet;
+    save();
+  } else {
+    if (!confirm('公版報價單還原成預設內容？目前的修改會清掉（另一台電腦同步後也會還原）。')) return;
+    config.quoteSheet = JSON.parse(JSON.stringify(Object.assign({}, QUOTE_DEFAULT, { date: todayStr() })));
+    saveConfigOnly();
+  }
   renderQuoteEditor();
+  renderQuoteTarget();
   renderQuoteSheet();
 }
 
@@ -13860,7 +13945,7 @@ function deleteClient() {
   if (!editingClientId) return;
   const c = getClient(editingClientId);
   const cnt = state.jobs.filter(j => j.clientId === editingClientId).length;
-  if (!confirm(`確定要刪除業主「${c.name}」？這將同時刪除 ${cnt} 筆案件。`)) return;
+  if (!confirm(`確定要刪除業主「${c.name}」？這將同時刪除 ${cnt} 筆案件${c.quoteSheet ? '和專屬報價單' : ''}。`)) return;  // v3.32.0
   // v3.15.0：snapshot for undo
   pushUndoSnapshot(`已刪除業主「${c.name}」+ ${cnt} 筆案件`);
   state.jobs = state.jobs.filter(j => j.clientId !== editingClientId);
