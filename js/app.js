@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.29.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.29.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -593,6 +593,12 @@ function _heartbeatTick() {
 }
 setInterval(_heartbeatTick, HEARTBEAT_CHECK_MS);
 
+// v3.29.1：網路類錯誤判斷（共用：silent refresh 文案分流 + sync guard 不鎖）
+function _isNetworkErrMsg(msg) {
+  // timed out / aborted：Firefox / Safari 的 AbortSignal.timeout 訊息（Chrome 是 "signal timed out"）
+  return /沒回應|網路|離線|failed to fetch|networkerror|network|timeout|timed out|aborted|load failed/i.test(String(msg || ''));
+}
+
 // v3.24.28：periodic refresh check — 每 20 分鐘背景檢查 token 還剩多少
 // 即使 visibilitychange / focus / heartbeat 都沒觸發，這個會主動跑
 // 目的：把「重登頻率」降到最低（純前端的極致）
@@ -624,8 +630,7 @@ function _handleSilentRefreshFailure(errMsg) {
   console.error('[cloud-auth] silent refresh failed after 3 retries:', errMsg);
   // v3.25.2（R28）：依失敗原因分流文案 — 網路問題不該叫使用者「重新登入」
   //   （背景 5 分鐘長 retry + 喚醒檢查多半會自己救回來；重登是 auth 死亡才需要的最後手段）
-  const _isNetworkIssue = !navigator.onLine
-    || /沒回應|failed to fetch|networkerror|network|timeout|load failed/i.test(String(errMsg || ''));
+  const _isNetworkIssue = !navigator.onLine || _isNetworkErrMsg(errMsg);
   // v3.24.13：toast 飄一下不夠醒目 → 觸發 banner（cloudSetSyncStatus 會連動 banner）
   if (typeof cloudSetSyncStatus === 'function') {
     cloudSetSyncStatus('error', _isNetworkIssue
@@ -1037,6 +1042,19 @@ function showSyncErrorOverlay() {
   //   上線後的重新評估由 online listener 排 20 秒檢查。
   if (!navigator.onLine) {
     console.log('[sync-guard] 離線中，不鎖編輯（上線後再評估）');
+    return;
+  }
+  // v3.29.1：navigator.onLine=true 但錯誤是網路類（Wi-Fi 抖動 / DNS / Drive 暫時連不上）→ 同離線處理，
+  //   只留紅 banner 不鎖。10/03 實證：pull "Failed to fetch" 20 秒後跳全屏鎖 + 「重新登入」按鈕，違反鐵則。
+  //   60 秒後再評估：若錯誤已轉成 auth 死亡（status 維持 error 不會重排 grace timer），屆時才鎖
+  if (_isNetworkErrMsg(cloudLastSyncError)) {
+    if (!_syncGuardDeferTimer) {
+      console.log('[sync-guard] 網路類錯誤，不鎖編輯，60 秒後再評估');
+      _syncGuardDeferTimer = setTimeout(() => {
+        _syncGuardDeferTimer = null;
+        if (cloudSyncStatus === 'error') showSyncErrorOverlay();
+      }, 60 * 1000);
+    }
     return;
   }
   // v3.27.1（R15）：從未連過雲端（無 trackerFileId）→ 純本機使用/試用情境，不鎖編輯
@@ -4752,7 +4770,8 @@ function saveActionLog() {
 // - cloud-push / cloud-pull 成功屬高頻噪音 → 不佔 500 筆額度，改進每日聚合 counter
 // - user 事件同時累積 lifetime counter（突破 500 筆上限，做 usage-driven 優化依據）
 const SYS_LOG_PREFIXES = ['cloud-', 'calendar-', 'sync-'];
-const AGGREGATED_SYS_TYPES = new Set(['cloud-push', 'cloud-pull']);
+// v3.29.1：token-refresh / merge-noop 每 40 分鐘各一筆 → 實測佔 500 筆中 486 筆，把 user 事件擠掉，改聚合
+const AGGREGATED_SYS_TYPES = new Set(['cloud-push', 'cloud-pull', 'cloud-token-refresh', 'cloud-merge-noop']);
 const SYS_COUNTER_KEY = 'cloud-ftSysCounters_v1';     // { '2026-07-10': { 'cloud-push': 14 } }，留 30 天
 const USAGE_COUNTER_KEY = 'cloud-ftUsageCount_v1';    // { 'tab:jobs': 123, 'act:job-create': 45 }，lifetime
 
@@ -4771,7 +4790,7 @@ function bumpUsage(key) {
 function _bumpSysCounter(type) {
   try {
     const all = JSON.parse(localStorage.getItem(SYS_COUNTER_KEY) || '{}');
-    const day = new Date().toISOString().slice(0, 10);
+    const day = new Date().toLocaleDateString('sv');  // v3.29.1：本地日期（原 toISOString 為 UTC，台灣 08:00 前算到前一天）
     all[day] = all[day] || {};
     all[day][type] = (all[day][type] || 0) + 1;
     const days = Object.keys(all).sort();
@@ -6858,8 +6877,58 @@ function jobRow(j, ctx) {
       <div class="title">${escapeHtml(j.title || '（無標題）')}${estimateBadge}${tagBadge}${laborBadge}${dueBadge}${subBadge}${discountBadge}${partialBadge}${writeOffBadge}${cancelBadge}</div>
       <div class="meta">${name} · ${j.date || '無日期'}</div>
     </div>
-    <div class="amount">${fmtM(finalAmt)}</div>
+    ${discAmt > 0
+      ? `<div class="amount">${fmtM(finalAmt)}</div>`
+      : `<div class="amount amount-editable" onclick="event.stopPropagation(); startInlineAmountEdit(this, '${j.id}')" title="點一下直接改金額">${fmtM(finalAmt)}</div>`}
   </div>`;
+}
+
+// v3.29.1：列上點金額直接改（實測 job-edit 31 次最高頻，常只為改金額）
+//   有折扣的案件不開放（顯示的是折後價，改原價會混淆）→ 照舊點整列開 modal
+//   Enter / 失焦 = 存；Esc = 取消
+function startInlineAmountEdit(el, id) {
+  const j = state.jobs.find(x => x.id === id);
+  if (!j || el.querySelector('input')) return;
+  const orig = el.innerHTML;
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.inputMode = 'numeric';
+  input.className = 'amount-inline-input';
+  input.value = +j.amount || 0;
+  input.onclick = e => e.stopPropagation();
+  // 不讓 row 的滑動完成 / 長按批次手勢在輸入框內觸發
+  input.ontouchstart = input.ontouchmove = input.ontouchend = e => e.stopPropagation();
+  let finished = false;
+  const finish = commit => {
+    if (finished) return;
+    finished = true;
+    // 編輯期間若 pull/merge 換掉了 state.jobs 物件 → 寫到最新那份，不寫到脫鉤的舊物件
+    const cur = state.jobs.find(x => x.id === id);
+    const v = +input.value;
+    if (!commit || input.value === '' || !(v >= 0) || (cur && v === (+cur.amount || 0))) {
+      el.innerHTML = orig;
+      return;
+    }
+    if (!cur) { render(); toast('⚠️ 這筆案件已被刪除，金額未儲存'); return; }
+    pushUndoSnapshot(`已修改「${cur.title || '無標題'}」金額`);
+    cur.amount = v;
+    recomputePaidStatus(cur);
+    save();
+    const c = getClient(cur.clientId);
+    logAction('job-edit', { jobId: id, title: cur.title, amount: v, clientId: cur.clientId, clientName: c?.name, via: 'inline-amount' });
+    render();
+    toast('✓ 金額已更新');
+  };
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+  input.onblur = () => finish(true);
+  el.innerHTML = '';
+  el.appendChild(input);
+  input.focus();
+  input.select();
 }
 
 // ============== Jobs Tab ==============
@@ -12806,6 +12875,7 @@ function openJobModal() {
   updateJobAmountSummary();
   _jobCreateVia = 'fab';  // v3.25.3（R25）：一般新增路徑（duplicateJob 會改成 'duplicate'）
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
+  document.getElementById('job-save-done-btn')?.classList.remove('hidden');  // v3.29.1
   document.getElementById('job-export-estimate-btn')?.classList.add('hidden');
   document.getElementById('job-confirm-estimate-btn')?.classList.add('hidden');
   // v2.6: 子任務 + 計時器（v3.10.0：新案件還沒 ID，計時器只能顯示 0:00:00）
@@ -13178,6 +13248,7 @@ function editJob(id) {
   if (document.getElementById('job-labor-reported')) document.getElementById('job-labor-reported').checked = !!j.laborReported;  // v3.28.1（R12）
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.remove('hidden');
+  document.getElementById('job-save-done-btn')?.classList.add('hidden');  // v3.29.1：編輯模式不顯示
   // 估價單模式：顯示「轉正」與「估價單 PDF」按鈕
   document.getElementById('job-export-estimate-btn')?.classList.toggle('hidden', !j.isEstimate);
   document.getElementById('job-confirm-estimate-btn')?.classList.toggle('hidden', !j.isEstimate);
@@ -13219,6 +13290,7 @@ function duplicateJob() {
   set('job-modal-title', el => { el.textContent = '新增案件（複製自現有案件）'; });
   set('job-delete-btn', el => el.classList.add('hidden'));
   set('job-duplicate-btn', el => el.classList.add('hidden'));
+  set('job-save-done-btn', el => el.classList.remove('hidden'));  // v3.29.1
   // 清狀態（新案件預設未完成、未收款、未取消、日期改成今天）
   set('job-date', el => { el.value = todayStr(); });
   set('job-end-date', el => { el.value = ''; });
@@ -13241,6 +13313,22 @@ function onJobDoneChange() {
   const dateEl = document.getElementById('job-done-at');
   if (checked && !dateEl.value) dateEl.value = todayStr();
   if (!checked) dateEl.value = '';
+}
+// v3.29.1：新增模式「✓ 存為已完成」— 勾完成（自動填完成日）後走一般 saveJob
+function saveJobAsDone() {
+  const doneEl = document.getElementById('job-done');
+  const dateEl = document.getElementById('job-done-at');
+  const prev = { done: doneEl.checked, date: dateEl.value, via: _jobCreateVia };
+  doneEl.checked = true;
+  onJobDoneChange();
+  _jobCreateVia = prev.via + '+done';  // usage log 可分辨走這顆按鈕的比例
+  saveJob();
+  // 驗證失敗（modal 仍開著）→ 還原表單，避免之後按一般「儲存」被誤標完成
+  if (document.getElementById('job-modal').classList.contains('open')) {
+    doneEl.checked = prev.done;
+    dateEl.value = prev.date;
+    _jobCreateVia = prev.via;
+  }
 }
 function onJobPaidChange() {
   const checked = document.getElementById('job-paid').checked;
@@ -15528,7 +15616,7 @@ function showOnboardingAgain() {
 // ============== v3.28.0：鍵盤快捷鍵系統（BACKLOG #2，使用者核准）==============
 // 規則：焦點在輸入元件時不攔（Esc 例外）；modal 開著時只有 Esc 作用；
 //       單鍵為主，不搶瀏覽器 Ctrl/Cmd 組合（Ctrl+Z undo 例外）
-const KB_TABS = ['dashboard', 'jobs', 'calendar', 'revenue', 'clients', 'invoice', 'settings'];
+const KB_TABS = ['dashboard', 'jobs', 'revenue', 'clients', 'invoice', 'settings'];  // v3.29.1：行事曆分頁隱藏，移出快捷鍵
 let _kbRowIdx = -1;   // jobs 列表鍵盤游標（-1 = 未啟用）
 
 function _kbTyping() {
@@ -15574,7 +15662,7 @@ function _kbShowHelp() {
     m.innerHTML = `<div class="modal" style="max-width: 440px;">
       <h2>⌨️ 鍵盤快捷鍵</h2>
       <table class="kb-help-table">
-        <tr><td><kbd>1</kbd>–<kbd>7</kbd></td><td>切換分頁（總覽/案件/行事曆/收益/業主/請款單/設定）</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>切換分頁（總覽/案件/收益/業主/請款單/設定）</td></tr>
         <tr><td><kbd>N</kbd></td><td>新增案件</td></tr>
         <tr><td><kbd>Shift</kbd>+<kbd>N</kbd></td><td>新增業主</td></tr>
         <tr><td><kbd>/</kbd></td><td>全域搜尋</td></tr>
@@ -15614,7 +15702,7 @@ document.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;  // 不搶其他瀏覽器組合鍵
 
   const k = e.key;
-  if (/^[1-7]$/.test(k)) { switchTab(KB_TABS[+k - 1]); return; }
+  if (/^[1-6]$/.test(k)) { switchTab(KB_TABS[+k - 1]); return; }
   const curId = () => (currentTab === 'jobs' ? _kbCurrentJobId() : null);
   switch (k) {
     case 'n': e.preventDefault(); openJobModal(); if (typeof bumpUsage === 'function') bumpUsage('kb:new-job'); break;

@@ -1,5 +1,28 @@
 ﻿# 版本更新歷史
 
+## v3.29.1 — 使用紀錄驅動：鎖屏誤觸修正 + 日誌降噪 + 補登/改金額少一步 + 隱藏行事曆（2026-10-09）
+
+### 背景：`ft-usage-stats-2026-10-09.json` 分析
+- job-edit 31 / job-done 22 / job-create 12；分頁：總覽 20、案件 13、收益 11、請款單 8、設定 2、業主 1、**行事曆 0**
+- 10/07 實例：新增 → 2 秒後列表點完成（補登已做完的案件）
+- 500 筆 recentEvents 中 486 筆是 token-refresh + merge-noop
+- 10/03 pull `Failed to fetch` → 20 秒後跳全屏編輯鎖（含「重新登入」按鈕）
+
+### 修正
+- **sync guard 網路類錯誤不鎖**：`navigator.onLine=true` 但錯誤訊息屬網路類（Failed to fetch / timeout / 網路 / 離線…）→ 只留紅 banner，不上全屏鎖；60 秒後再評估（錯誤若轉為 auth 死亡才鎖）。抽出 `_isNetworkErrMsg()` 與 silent refresh 文案分流共用
+- **日誌降噪**：`cloud-token-refresh` / `cloud-merge-noop` 改進每日聚合 counter，不再佔 500 筆額度
+- 每日 sys counter 改用本地日期（原 UTC，台灣 08:00 前記到前一天）
+
+### 簡化
+- 新增案件 modal 底部加「✓ 存為已完成」（只在新增 / 複製模式顯示）：自動勾完成 + 完成日今天；usage log `via` 帶 `+done`
+- 案件列（總覽待完成 + 案件分頁列表）點金額 → 直接改：Enter / 失焦存、Esc 取消；可 Ctrl+Z 復原；log `via: inline-amount`。有折扣的案件維持點整列開 modal（顯示的是折後價，避免混淆）
+- 行事曆分頁按鈕隱藏（功能保留，移除 `hidden` 即復原）；快捷鍵 1–7 → 1–6（usage 無任何 kb: 紀錄）
+
+### 資料 / 同步
+- 不改 schema：存為已完成走既有 `done` / `doneAt`；改金額寫回 `j.amount` → `recomputePaidStatus` → `save()`
+
+---
+
 ## v3.29.0 — 新分頁「報價單」：公版價目表編輯 + 匯出（2026-10-09）
 
 ### 功能

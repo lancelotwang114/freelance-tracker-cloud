@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-09-v3.29.0">
+<meta name="app-version" content="2026-10-09-v3.29.1">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -97,7 +97,8 @@
   <nav class="tabs">
     <button data-tab="dashboard" class="active">總覽<span class="badge hidden" id="dash-badge"></span></button>
     <button data-tab="jobs">案件</button>
-    <button data-tab="calendar">行事曆</button>
+    <!-- v3.29.1：行事曆分頁使用量 0 → 先隱藏（功能與 renderCalendar 保留，移除 hidden 即復原） -->
+    <button data-tab="calendar" class="hidden">行事曆</button>
     <button data-tab="revenue">收益</button>
     <button data-tab="clients">業主</button>
     <button data-tab="invoice">請款單</button>
@@ -1301,6 +1302,8 @@
       <button class="btn btn-outline hidden" id="job-export-estimate-btn" onclick="exportSingleJobPDF()">估價單 PDF</button>
       <button class="btn btn-success hidden" id="job-confirm-estimate-btn" onclick="confirmEstimateAsJob()">接案：轉為正式</button>
       <button class="btn btn-danger hidden" id="job-delete-btn" onclick="deleteJob()">刪除</button>
+      <!-- v3.29.1：新增模式專用 — 補登已做完的案件一鍵存（實測常見「新增 → 2 秒後列表點完成」） -->
+      <button class="btn btn-success hidden" id="job-save-done-btn" onclick="saveJobAsDone()">✓ 存為已完成</button>
       <button class="btn btn-primary" onclick="saveJob()">儲存</button>
     </div>
   </div>
