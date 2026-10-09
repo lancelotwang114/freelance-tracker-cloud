@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.32.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.33.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -4831,6 +4831,7 @@ const ACTION_LABELS = {
   'bulk-paid':        { icon: '💰',   label: '批次標收款' },
   'bulk-cancel':      { icon: '🚫',   label: '批次取消' },
   'bulk-discount':    { icon: '🏷️',   label: '批次設折扣' },
+  'bulk-labor':                   { icon: '🧾', label: '批次勞報' },           // v3.33.0
   'invoice-whole-discount':       { icon: '🏷️', label: '請款單整單折扣' },     // v3.31.0
   'invoice-whole-discount-clear': { icon: '🏷️', label: '清除整單折扣' },       // v3.31.0
   'data-import':      { icon: '📥',   label: '匯入資料' },
@@ -6223,6 +6224,25 @@ function bulkMarkDone() {
   save(); render();
 }
 
+// v3.33.0：批次勞報（總覽 / 案件分頁共用）— 選的全部已是勞報 → 取消；否則全部標勞報
+function bulkToggleLabor(ids) {
+  const jobs = ids.map(id => state.jobs.find(x => x.id === id)).filter(Boolean);
+  if (!jobs.length) { toast('沒有選任何案件'); return false; }
+  const on = !jobs.every(j => j.laborReported);
+  pushUndoSnapshot(`已${on ? '標記' : '取消'} ${jobs.length} 筆勞報`);
+  jobs.forEach(j => { j.laborReported = on; });
+  save();
+  logAction('bulk-labor', { count: jobs.length, on });
+  toast(on ? `🧾 已標記 ${jobs.length} 筆勞報` : `已取消 ${jobs.length} 筆勞報`);
+  return true;
+}
+function dashBulkToggleLabor() {
+  if (bulkToggleLabor(Array.from(dashBulkSelected))) { dashBulkExit(); render(); }
+}
+function jobsBulkToggleLabor() {
+  if (bulkToggleLabor([...bulkSelected])) { bulkSelected.clear(); render(); }
+}
+
 function bulkMarkPaid() {
   if (!bulkSelected.size) { toast('沒有選任何案件'); return; }
   // 用收款日期 modal（取代 prompt）
@@ -6683,6 +6703,7 @@ function renderDashboard() {
         <button class="btn btn-success btn-sm" onclick="dashBulkMarkDone()" ${!count?'disabled':''}>✓ 標完成</button>
         <button class="btn btn-primary btn-sm" onclick="dashBulkMarkPaid()" ${!count?'disabled':''}>$ 標收款（選日期）</button>
         <button class="btn btn-outline btn-sm" onclick="openBulkDiscountModal()" ${!count?'disabled':''}>🏷️ 設折扣</button>
+        <button class="btn btn-outline btn-sm" onclick="dashBulkToggleLabor()" ${!count?'disabled':''} title="選的全部已是勞報 → 取消；否則全部標勞報">🧾 勞報</button>
         <button class="btn btn-outline btn-sm" onclick="dashBulkMarkCancelled()" ${!count?'disabled':''}>🚫 取消</button>
         <button class="btn btn-outline btn-sm" onclick="toggleDashBulkMode()">✕ 退出</button>
       </div>`;

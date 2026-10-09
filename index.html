@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-09-v3.32.0">
+<meta name="app-version" content="2026-10-09-v3.33.0">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -221,6 +221,7 @@
         <button class="btn btn-outline btn-sm" onclick="bulkInvert()">反選</button>
         <button class="btn btn-primary btn-sm" onclick="bulkMarkDone()">✓ 標記完成</button>
         <button class="btn btn-primary btn-sm" onclick="bulkMarkPaid()">$ 標記已收</button>
+        <button class="btn btn-outline btn-sm" onclick="jobsBulkToggleLabor()" title="選的全部已是勞報 → 取消；否則全部標勞報">🧾 勞報</button>
         <button class="btn btn-danger btn-sm" onclick="bulkDelete()">🗑️ 刪除</button>
       </div>
       <!-- 列表視圖（現況） -->
@@ -404,7 +405,8 @@
         <div id="rev-tag-pie"></div>
       </div>
 
-      <div class="card">
+      <!-- v3.33.0：工時欄位隱藏 → 時薪趨勢（靠工時計算）一起隱藏 -->
+      <div class="card hidden">
         <h3>時薪趨勢</h3>
         <div id="rev-hourly-trend"></div>
       </div>
@@ -979,7 +981,8 @@
   <div class="fab-menu hidden" id="fab-menu">
     <button class="fab-menu-item" onclick="quickAddJob()">＋ 新增案件</button>
     <button class="fab-menu-item" onclick="quickAddClient()">👤 新增業主</button>
-    <button class="fab-menu-item" onclick="quickStartTimer()">⏱️ 開始計時</button>
+    <!-- v3.33.0：計時功能隱藏（JS 保留，移除 hidden 即復原） -->
+    <button class="fab-menu-item hidden" onclick="quickStartTimer()">⏱️ 開始計時</button>
     <button class="fab-menu-item" onclick="quickOpenLastJob()">📝 編輯最近一筆</button>
   </div>
   <button class="fab" id="fab-add" onclick="toggleFabMenu()" aria-label="快速新增">＋</button>
@@ -1171,7 +1174,8 @@
     </div>
     <!-- v3.6.3：工時 + 計時器合併成一行 -->
     <!-- v3.24.9：計時器 4 個 element 暫時隱藏（工時 input 保留可手動輸入；計時器 JS 函式仍保留） -->
-    <div class="job-hours-section">
+    <!-- v3.33.0：工時欄位隱藏（input 保留：editJob 照填、saveJob 照存原值，既有工時資料不會被清掉） -->
+    <div class="job-hours-section hidden">
       <label>工時（選填，手動輸入小時數）</label>
       <div class="hours-row">
         <input type="number" id="job-hours" placeholder="0" step="0.5" oninput="updateJobHourlyHint()">
