@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.29.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.29.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5364,8 +5364,14 @@ function fmt(n) { return 'NT$' + (n || 0).toLocaleString(); }
 function fmtM(n) { return '<span class="cur">NT$</span>' + (n || 0).toLocaleString(); }
 function thisMonth() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
 function getMonth(dateStr) { return dateStr ? dateStr.slice(0,7) : ''; }
-function todayStr() { const d = new Date(); return d.toISOString().slice(0,10); }
-function addDays(date, days) { const d = new Date(date); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
+// v3.29.2：改本地日期（原 toISOString 為 UTC → 台灣 00:00~08:00「今天」變昨天：新案件日期、完成日、逾期判斷全偏一天）
+function todayStr() { return new Date().toLocaleDateString('sv'); }
+function addDays(date, days) {
+  // 'YYYY-MM-DD' 字串原生解析為 UTC 午夜 → 補 T00:00 改本地解析，跨時區也不差一天
+  const d = new Date(typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date + 'T00:00' : date);
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString('sv');
+}
 function daysBetween(a, b) {
   const da = new Date(a), db = new Date(b);
   return Math.floor((db - da) / 86400000);
