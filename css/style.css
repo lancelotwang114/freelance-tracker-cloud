@@ -262,6 +262,15 @@ main { padding: 16px 16px 96px; max-width: 900px; margin: 0 auto; }
   border-radius: 0 0 8px 8px;
   padding: 4px 10px 10px;
 }
+/* v3.31.0：請款單工作明細勾選 + 整單折扣 */
+.inv-pick-group { font-size: 12px; color: var(--muted); margin: 8px 0 2px; }
+.inv-pick-row { display: grid; grid-template-columns: auto 82px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 2px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border); margin: 0; min-height: 36px; }
+.inv-pick-row input { width: 18px; height: 18px; margin: 0; }
+.inv-pick-date { color: var(--muted); font-variant-numeric: tabular-nums; }
+.inv-pick-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-pick-amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.inv-pick-empty { font-size: 13px; color: var(--muted); padding: 6px 2px; }
+.inv-whole-disc { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
 
 /* ==================== Cards & Stats ==================== */
 .card {

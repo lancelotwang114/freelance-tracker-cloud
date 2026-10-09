@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.30.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-09-v3.31.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -4831,6 +4831,8 @@ const ACTION_LABELS = {
   'bulk-paid':        { icon: '💰',   label: '批次標收款' },
   'bulk-cancel':      { icon: '🚫',   label: '批次取消' },
   'bulk-discount':    { icon: '🏷️',   label: '批次設折扣' },
+  'invoice-whole-discount':       { icon: '🏷️', label: '請款單整單折扣' },     // v3.31.0
+  'invoice-whole-discount-clear': { icon: '🏷️', label: '清除整單折扣' },       // v3.31.0
   'data-import':      { icon: '📥',   label: '匯入資料' },
   'data-clear':       { icon: '⚠️',   label: '清空資料' },
   'data-load-demo':   { icon: '🎲',   label: '載入範例' },
@@ -4987,7 +4989,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 19;  // v3.28.1（R12）：case.laborReported 勞報標記（預設 false）
+const CURRENT_SCHEMA_VERSION = 20;  // v3.31.0：case.discountNote 整單折扣備註（預設 ''）
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -5169,6 +5171,14 @@ const SCHEMA_MIGRATIONS = {
     state.jobs = (state.jobs || []).map(j => ({
       ...j,
       laborReported: !!j.laborReported
+    }));
+  },
+  // v19 → v20：case.discountNote 折扣備註（v3.31.0）— 請款單「整單折扣」寫回案件時標記（例「整單折扣 5%」），
+  //   空字串 = 個別折扣 / 無折扣。冪等：舊版 app 把 schemaVersion 寫回 19 後重跑也保留既有值
+  19: function(state) {
+    state.jobs = (state.jobs || []).map(j => ({
+      ...j,
+      discountNote: j.discountNote || ''
     }));
   }
 };
@@ -6131,6 +6141,7 @@ function confirmBulkDiscount() {
     if (!j || j.cancelled) return;
     j.discountType = type;
     j.discountValue = type === 'none' ? 0 : value;
+    j.discountNote = '';  // v3.31.0：批次個別折扣覆蓋整單折扣備註
     // 折扣變動後，已收款狀態可能改變（應收金額變了）
     recomputePaidStatus(j);
     count++;
@@ -6840,7 +6851,8 @@ function jobRow(j, ctx) {
   const subBadge = subTotal > 0 ? `<span class="tag-badge">☑️ ${subDone}/${subTotal}</span>` : '';
   // v2.8.0: 折扣 + 部分收款 badge
   const discAmt = jobDiscountAmount(j);
-  const discountBadge = discAmt > 0 ? `<span class="tag-badge" style="background: var(--warning-light); color: var(--warning);">折扣 ${fmt(discAmt).replace('NT$','').trim()}</span>` : '';
+  // v3.31.0：整單折扣（discountNote）標「整單折」，滑過看完整備註
+  const discountBadge = discAmt > 0 ? `<span class="tag-badge" style="background: var(--warning-light); color: var(--warning);"${j.discountNote ? ` title="${escapeHtml(j.discountNote)}"` : ''}>${j.discountNote ? '整單折' : '折扣'} ${fmt(discAmt).replace('NT$','').trim()}</span>` : '';
   const paidTotal = jobPaidTotal(j);
   const finalAmt = jobFinalAmount(j);
   const partialBadge = (paidTotal > 0 && !jobIsFullyPaid(j))
@@ -11428,7 +11440,8 @@ function getCurrentInvoiceSnapshot() {
     return d >= rangeStart && d <= rangeEnd;
   });
   const statusFilter = (typeof getInvoiceStatusFilter === 'function') ? getInvoiceStatusFilter() : null;
-  const jobs = statusFilter ? allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j))) : allJobs;
+  // v3.31.0：套用手動勾選 → 歷史快照記的是實際請款的案件
+  const jobs = _invApplyPick(statusFilter ? allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j))) : allJobs, cid, rangeStart, rangeEnd);
   const acct = getActivePaymentAccount();
   return {
     client: c,
@@ -12224,6 +12237,127 @@ function loadInvoiceStatusUI() {
   if (typeof syncInvPresetButtons === 'function') syncInvPresetButtons();
 }
 
+// ============== v3.31.0：請款單手動勾選案件 + 整單折扣 ==============
+// 勾選 = 製作這張請款單時的暫時選擇（UI 狀態，不寫進案件）；換業主 / 範圍 / 狀態篩選就重置。
+// 匯出時 recordInvoiceHistory 的快照會記下實際 jobIds，請款歷史照舊可查。
+// 整單折扣 = 寫回各案件 discountType/discountValue + discountNote（收益 / 待收自動正確）。
+let invPick = { key: '', exclude: new Set(), include: new Set() };
+
+// jobs = 符合範圍 + 狀態篩選的案件；回傳套用手動勾選後、依日期排序的實際請款案件
+function _invApplyPick(jobs, cid, rangeStart, rangeEnd) {
+  const key = [cid, rangeStart, rangeEnd, [...getInvoiceStatusFilter()].sort().join(',')].join('|');
+  if (invPick.key !== key) invPick = { key, exclude: new Set(), include: new Set() };
+  const ids = new Set(jobs.filter(j => !invPick.exclude.has(j.id)).map(j => j.id));
+  invPick.include.forEach(id => ids.add(id));
+  return state.jobs.filter(j => j.clientId === cid && ids.has(j.id))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+
+function toggleInvPick(id, checked, inFilter) {
+  // 兩邊都先清（案件可能在勾選後移進 / 移出本期，殘留在另一個 set 會取消不掉）
+  invPick.exclude.delete(id);
+  invPick.include.delete(id);
+  if (inFilter && !checked) invPick.exclude.add(id);
+  if (!inFilter && checked) invPick.include.add(id);
+  drawInvoice();
+}
+
+// 勾選清單：本期（範圍 + 狀態篩選內）+ 其他未請款（範圍外、已完成未結清）
+function renderInvoicePick(cid, inFilter, picked) {
+  const box = document.getElementById('inv-pick');
+  if (!box) return;
+  const inIds = new Set(inFilter.map(j => j.id));
+  const pickedIds = new Set(picked.map(j => j.id));
+  const others = state.jobs
+    // 已勾進來的一律列出（就算之後變成已結清），否則會變成看不到、取消不了的「隱形」明細
+    .filter(j => j.clientId === cid && !inIds.has(j.id) && (pickedIds.has(j.id) || (j.done && !j.cancelled && !j.isEstimate && !jobIsFullyPaid(j))))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const row = (j, isIn) => `<label class="inv-pick-row">
+      <input type="checkbox" data-id="${escapeHtml(j.id)}" ${pickedIds.has(j.id) ? 'checked' : ''} onchange="toggleInvPick(this.dataset.id, this.checked, ${isIn})">
+      <span class="inv-pick-date">${escapeHtml(j.date || '-')}</span>
+      <span class="inv-pick-title">${escapeHtml(j.title || '（無標題）')}${j.discountNote ? ' <span class="tag-badge">整單折</span>' : ''}</span>
+      <span class="inv-pick-amt">${fmt(jobFinalAmount(j))}</span>
+    </label>`;
+  // 重畫前保留展開狀態與折扣欄位輸入
+  const wasOpen = document.getElementById('inv-pick-details')?.open ?? true;
+  const wdType = document.getElementById('inv-wd-type')?.value || 'percent';
+  const wdValue = document.getElementById('inv-wd-value')?.value || '';
+  const hasWhole = picked.some(j => j.discountNote);
+  box.innerHTML = `<details id="inv-pick-details" class="inv-settings"${wasOpen ? ' open' : ''}>
+    <summary>📋 工作明細選擇（已選 ${picked.length} 筆 · ${fmt(picked.reduce((s, j) => s + jobFinalAmount(j), 0))}）</summary>
+    <div class="inv-settings-body">
+      <div class="inv-pick-group">本期（${inFilter.length}）</div>
+      ${inFilter.length ? inFilter.map(j => row(j, true)).join('') : '<div class="inv-pick-empty">這個範圍沒有符合的案件</div>'}
+      ${others.length ? `<div class="inv-pick-group">其他未請款（${others.length}）</div>${others.map(j => row(j, false)).join('')}` : ''}
+      <div class="inv-whole-disc">
+        <span>整單折扣</span>
+        <select id="inv-wd-type" style="width: auto;">
+          <option value="percent"${wdType === 'percent' ? ' selected' : ''}>%</option>
+          <option value="fixed"${wdType === 'fixed' ? ' selected' : ''}>金額</option>
+        </select>
+        <input type="number" id="inv-wd-value" min="0" placeholder="${wdType === 'fixed' ? '1000' : '5'}" value="${escapeHtml(wdValue)}" style="width: 90px;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="applyInvoiceWholeDiscount()">套用到已選案件</button>
+        ${hasWhole ? '<button type="button" class="btn btn-ghost btn-sm" onclick="clearInvoiceWholeDiscount()">清除整單折扣</button>' : ''}
+      </div>
+    </div>
+  </details>`;
+}
+
+function applyInvoiceWholeDiscount() {
+  const snap = getCurrentInvoiceSnapshot();
+  const jobs = snap ? snap.jobs.filter(j => !j.cancelled && !j.isEstimate) : [];
+  if (!jobs.length) { toast('沒有已選的案件'); return; }
+  const type = document.getElementById('inv-wd-type').value;
+  const value = +document.getElementById('inv-wd-value').value || 0;
+  if (value <= 0) { toast('請輸入折扣值'); return; }
+  if (type === 'percent' && value >= 100) { toast('百分比要小於 100'); return; }
+  const base = jobs.reduce((s, j) => s + (+j.amount || 0), 0);
+  if (type === 'fixed' && value >= base) { toast(`折扣金額要小於原價合計 ${fmt(base)}`); return; }
+  // 防呆：已有個別折扣（非整單折扣）的案件 → 列出來確認是否覆蓋
+  const indiv = jobs.filter(j => !j.discountNote && jobDiscountAmount(j) > 0);
+  if (indiv.length && !confirm(
+    `⚠️ 以下 ${indiv.length} 筆案件已有個別折扣，套用整單折扣會「覆蓋」原本的折扣：\n\n` +
+    indiv.map(j => `・${j.date || ''} ${j.title || '（無標題）'}（目前折 ${fmt(jobDiscountAmount(j))}）`).join('\n') +
+    '\n\n確定要覆蓋嗎？（可用 Ctrl+Z 復原）')) return;
+  const label = type === 'percent' ? `整單折扣 ${value}%` : `整單折扣 ${fmt(value)}`;
+  pushUndoSnapshot(`已套用${label}（${jobs.length} 筆）`);
+  if (type === 'percent') {
+    jobs.forEach(j => { j.discountType = 'percent'; j.discountValue = value; });
+  } else {
+    // 依原價比例分攤（最大餘數法）：先無條件捨去，剩下的 1 元依小數大小逐筆補
+    //   → 每筆 0 ≤ 折扣 ≤ 原價、總和精確等於輸入值（value < base 已驗證，補 1 元時必有空間）
+    const shares = jobs.map(j => {
+      const exact = value * (+j.amount || 0) / base;
+      return { j, n: Math.floor(exact), frac: exact - Math.floor(exact) };
+    });
+    let rest = value - shares.reduce((s, x) => s + x.n, 0);
+    shares.slice().sort((a, b) => b.frac - a.frac).forEach(x => {
+      if (rest > 0 && x.n < (+x.j.amount || 0)) { x.n++; rest--; }
+    });
+    shares.forEach(x => { x.j.discountType = 'fixed'; x.j.discountValue = x.n; });
+  }
+  jobs.forEach(j => { j.discountNote = label; recomputePaidStatus(j); });
+  save();
+  logAction('invoice-whole-discount', { clientId: snap.client.id, clientName: snap.client.name, count: jobs.length, type, value });
+  drawInvoice();
+  render();  // 徽章 / 提醒 / 其他分頁的金額同步更新
+  toast(`✓ 已套用${label}到 ${jobs.length} 筆案件`);
+}
+
+function clearInvoiceWholeDiscount() {
+  const snap = getCurrentInvoiceSnapshot();
+  const jobs = snap ? snap.jobs.filter(j => j.discountNote) : [];
+  if (!jobs.length) return;
+  if (!confirm(`清除 ${jobs.length} 筆案件的整單折扣？（恢復原價，可用 Ctrl+Z 復原）`)) return;
+  pushUndoSnapshot(`已清除整單折扣（${jobs.length} 筆）`);
+  jobs.forEach(j => { j.discountType = 'none'; j.discountValue = 0; j.discountNote = ''; recomputePaidStatus(j); });
+  save();
+  logAction('invoice-whole-discount-clear', { clientId: snap.client.id, clientName: snap.client.name, count: jobs.length });
+  drawInvoice();
+  render();
+  toast('已清除整單折扣');
+}
+
 function drawInvoice() {
   const cid = document.getElementById('inv-client').value;
   const mode = document.getElementById('inv-mode')?.value || 'single';
@@ -12264,8 +12398,11 @@ function drawInvoice() {
     return d >= rangeStart && d <= rangeEnd;
   });
   const statusFilter = getInvoiceStatusFilter();
-  const jobs = allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j)))
-                      .sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  const inFilter = allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j)))
+                          .sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  // v3.31.0：套用手動勾選（本期取消勾 / 加入其他未請款）
+  const jobs = _invApplyPick(inFilter, cid, rangeStart, rangeEnd);
+  renderInvoicePick(cid, inFilter, jobs);
 
   // 更新 toolbar 提示（顯示目前模式 + 筆數/總額，讓使用者寄出前心理預覽）
   const hintEl = document.getElementById('inv-status-hint');
@@ -12284,13 +12421,18 @@ function drawInvoice() {
   }
   // v2.8.1: 用 finalAmount + payment 計算
   const grossTotal = jobs.reduce((s,j) => s + (+j.amount||0), 0);              // 原價合計
-  const discountTotal = jobs.reduce((s,j) => s + jobDiscountAmount(j), 0);      // 折扣合計
   const finalTotal = jobs.reduce((s,j) => s + jobFinalAmount(j), 0);            // 應收合計
   const paidTotal = jobs.reduce((s,j) => s + jobPaidTotal(j), 0);               // 實收合計
   const unpaidTotal = jobs.filter(j => j.done).reduce((s,j) => s + jobUnpaidAmount(j), 0);  // 待收（已完成）
   const pendingTotal = jobs.filter(j => !j.done).reduce((s,j) => s + jobUnpaidAmount(j), 0); // 進行中
   const writeOffTotal = jobs.reduce((s,j) => s + (+j.writeOff || 0), 0);        // 呆帳合計
-  const showDiscount = discountTotal > 0;  // v2.9.8: 沒有折扣 → 隱藏整欄
+  // v3.31.0：整單折扣（discountNote）不進每列折扣欄，改在合計上方獨立一行「小計 / 整單折扣」
+  const isWholeDisc = j => !!j.discountNote && jobDiscountAmount(j) > 0;
+  // 用「原價 − 應收」反推，不用 jobDiscountAmount：% 折扣兩邊各自四捨五入會差 1 元（105 打 9 折：折 11 + 收 95 = 106）
+  const wholeDiscTotal = jobs.filter(isWholeDisc).reduce((s,j) => s + (+j.amount || 0) - jobFinalAmount(j), 0);
+  const indivDiscTotal = jobs.filter(j => !isWholeDisc(j)).reduce((s,j) => s + jobDiscountAmount(j), 0);
+  const wholeDiscLabel = [...new Set(jobs.filter(isWholeDisc).map(j => j.discountNote))].join('、');
+  const showDiscount = indivDiscTotal > 0;  // v2.9.8: 沒有（個別）折扣 → 隱藏整欄
 
   const u = config.userInfo || {};
   // v3.2.0：個人資訊優先用 active paymentAccount 的（per-account），fallback 到 top-level userInfo
@@ -12341,8 +12483,9 @@ function drawInvoice() {
       <thead><tr><th>日期</th><th>項目</th><th>說明</th><th class="num">單價</th><th class="num">數量</th>${showDiscount ? '<th class="num">折扣</th>' : ''}<th class="num">應收</th><th class="num">已收</th>${showStatusCol ? '<th>狀態</th>' : ''}</tr></thead>
       <tbody>
         ${jobs.map(j => {
-          const final = jobFinalAmount(j);
-          const disc = jobDiscountAmount(j);
+          // v3.31.0：整單折扣的案件每列顯示原價，折扣集中到底部一行
+          const final = isWholeDisc(j) ? (+j.amount || 0) : jobFinalAmount(j);
+          const disc = isWholeDisc(j) ? 0 : jobDiscountAmount(j);
           const gross = +j.amount || 0;
           const qty = (j.quantity != null && j.quantity > 0) ? j.quantity : 1;
           const unit = qty > 0 ? Math.round(gross / qty) : gross;
@@ -12372,9 +12515,17 @@ function drawInvoice() {
         }).join('')}
       </tbody>
       <tfoot>
-        <tr style="border-top: 2px solid var(--text); font-weight: 600;">
+        ${wholeDiscTotal > 0 ? `<tr style="border-top: 2px solid var(--text);">
+          <td colspan="${showDiscount ? 6 : 5}" style="text-align: right;">小計</td>
+          <td class="num">${fmt(finalTotal + wholeDiscTotal)}</td><td></td>${showStatusCol ? '<td></td>' : ''}
+        </tr>
+        <tr>
+          <td colspan="${showDiscount ? 6 : 5}" style="text-align: right; color: var(--warning);">${escapeHtml(wholeDiscLabel)}</td>
+          <td class="num" style="color: var(--warning);">−${fmt(wholeDiscTotal).replace('NT$','').trim()}</td><td></td>${showStatusCol ? '<td></td>' : ''}
+        </tr>` : ''}
+        <tr style="${wholeDiscTotal > 0 ? '' : 'border-top: 2px solid var(--text); '}font-weight: 600;">
           <td colspan="5" style="text-align: right;">合計</td>
-          ${showDiscount ? `<td class="num" style="color: var(--warning);">−${fmt(discountTotal).replace('NT$','').trim()}</td>` : ''}
+          ${showDiscount ? `<td class="num" style="color: var(--warning);">−${fmt(indivDiscTotal).replace('NT$','').trim()}</td>` : ''}
           <td class="num">${fmt(finalTotal)}</td>
           <td class="num" style="color: var(--success);">${fmt(paidTotal)}</td>
           ${showStatusCol ? '<td></td>' : ''}
@@ -12480,7 +12631,7 @@ function renderInvoiceNetBreakdown() {
     return d >= rangeStart && d <= rangeEnd;
   });
   const statusFilter = getInvoiceStatusFilter();
-  const jobs = allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j)));
+  const jobs = _invApplyPick(allJobs.filter(j => statusFilter.has(jobInvoiceCategory(j))), cid, rangeStart, rangeEnd);  // v3.31.0
 
   // 沒案件 → 隱藏對帳區（避免空畫面）
   if (jobs.length === 0) { box.classList.add('hidden'); return; }
@@ -12875,6 +13026,7 @@ function openJobModal() {
   document.getElementById('job-done-at').value = '';
   // v2.8.0: 折扣 + payments 重設
   setDiscountUI('none', 0);
+  document.getElementById('job-discount-summary-hint').textContent = '';  // v3.31.0
   document.getElementById('job-write-off').value = '';
   modalPayments = [];
   cancelAddJobPayment();
@@ -13246,6 +13398,8 @@ function editJob(id) {
   document.getElementById('job-done-at').value = j.doneAt || '';
   // v2.8.0: 折扣 + payments
   setDiscountUI(j.discountType || 'none', j.discountValue || 0);
+  // v3.31.0：整單折扣來源提示（在這裡改折扣 → saveJob 會清掉備註，變回個別折扣）
+  document.getElementById('job-discount-summary-hint').textContent = j.discountNote ? `（來自請款單：${j.discountNote}）` : '';
   document.getElementById('job-write-off').value = j.writeOff || '';
   modalPayments = JSON.parse(JSON.stringify(j.payments || []));
   cancelAddJobPayment();
@@ -13304,6 +13458,7 @@ function duplicateJob() {
   set('job-delete-btn', el => el.classList.add('hidden'));
   set('job-duplicate-btn', el => el.classList.add('hidden'));
   set('job-save-done-btn', el => el.classList.remove('hidden'));  // v3.29.1
+  set('job-discount-summary-hint', el => { el.textContent = ''; });  // v3.31.0：複製出的新案件不帶整單折扣備註
   // 清狀態（新案件預設未完成、未收款、未取消、日期改成今天）
   set('job-date', el => { el.value = todayStr(); });
   set('job-end-date', el => { el.value = ''; });
@@ -13456,6 +13611,8 @@ function saveJob() {
     else if (!j.done && payload.done) payload.doneAt = todayStr();
     else if (!payload.done) payload.doneAt = null;
     else payload.doneAt = j.doneAt;
+    // v3.31.0：在 modal 個別改了折扣 → 不再是整單折扣，清備註
+    if (payload.discountType !== (j.discountType || 'none') || payload.discountValue !== (+j.discountValue || 0)) payload.discountNote = '';
     Object.assign(j, payload);
     recomputePaidStatus(j);
     logAction('job-edit', { jobId: editingJobId, title: payload.title, amount: payload.amount, clientId: payload.clientId, clientName: c?.name });
@@ -13723,24 +13880,12 @@ function gotoInvoice(cid) {
 }
 
 function copyInvoiceText() {
-  const cid = document.getElementById('inv-client').value;
-  const mode = document.getElementById('inv-mode')?.value || 'single';
-  const mm = document.getElementById('inv-month').value;
-  const mmEnd = document.getElementById('inv-month-end')?.value || mm;
-  const c = getClient(cid); if (!c) return;
-
-  let rangeStart = mm, rangeEnd = mm;
-  if (mode === 'range') {
-    if (mmEnd < mm) { rangeStart = mmEnd; rangeEnd = mm; }
-    else { rangeStart = mm; rangeEnd = mmEnd; }
-  }
-  const periodLabel = rangeStart === rangeEnd ? rangeStart : `${rangeStart} ~ ${rangeEnd}`;
-
-  const jobs = activeJobs().filter(j => {
-    if (j.clientId !== cid) return false;
-    const m = getMonth(j.date);
-    return m >= rangeStart && m <= rangeEnd;
-  }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  // v3.31.0：改用 getCurrentInvoiceSnapshot（與畫面同一份：日期範圍 + 狀態篩選 + 手動勾選）
+  //   舊版自己算：不看狀態篩選、區間模式還讀已廢棄的 inv-month-end → 跟畫面上的請款單可能不一致
+  const snap = getCurrentInvoiceSnapshot(); if (!snap) return;
+  const c = snap.client;
+  const periodLabel = snap.periodLabel;
+  const jobs = snap.jobs;
   const paid = jobs.reduce((s,j) => s + jobPaidTotal(j), 0);
   const unpaid = jobs.filter(j => j.done).reduce((s,j) => s + jobUnpaidAmount(j), 0);
   const txt = `${periodLabel} ${c.name} 工作明細\n\n` +
