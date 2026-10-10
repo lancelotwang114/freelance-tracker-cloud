@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-09-v3.34.0">
+<meta name="app-version" content="2026-10-10-v3.35.0">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -1607,8 +1607,8 @@
 </div>
 
 <!-- v3.23.0：Mascot 小幫手（位置固定右下，inline SVG 由 JS 注入） -->
-<div id="mascot-bubble" class="mascot-bubble hidden">
-  <span class="mascot-bubble-close" onclick="mascotHideBubble()" title="關閉">✕</span>
+<div id="mascot-bubble" class="mascot-bubble hidden" onclick="mascotOnBubbleClick(event)">
+  <span class="mascot-bubble-close" onclick="event.stopPropagation(); mascotHideBubble()" title="關閉">✕</span>
   <span id="mascot-bubble-name" class="mascot-bubble-name"></span><span id="mascot-bubble-text"></span>
 </div>
 <div id="mascot-container" class="mascot-container hidden" onclick="mascotOnClick()" title="點擊看小幫手說話 / 設定頁可關閉"></div>

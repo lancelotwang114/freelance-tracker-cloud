@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-09-v3.34.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-10-v3.35.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5995,6 +5995,7 @@ function render() {
     renderAlerts();
     renderBadge();
     renderBackupStatus();
+    if (typeof mascotUpdateBadge === 'function') mascotUpdateBadge();  // v3.35.0：貓咪提醒紅點跟著資料變
   });
 }
 
@@ -8752,38 +8753,46 @@ function renderRevenue() {
 
 // v3.23.1：新版素材 (Mascot/0949.svg)，多了「手臂」造型，更立體可愛
 // 各部位加 id，未來方便用 CSS class 切換表情 / 狀態（idle/loading/thinking/success/error）
-const MASCOT_SVG = `<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <ellipse cx="120" cy="200" rx="60" ry="12" fill="#000" opacity="0.08"/>
-  <g id="robot">
-    <rect id="body" x="50" y="80" width="140" height="110" rx="35" fill="#4F8EF7"/>
-    <g id="antenna">
-      <line x1="120" y1="40" x2="120" y2="80" stroke="#4F8EF7" stroke-width="6"/>
-      <circle cx="120" cy="35" r="10" fill="#4F8EF7"/>
-    </g>
-    <rect id="face" x="70" y="95" width="100" height="70" rx="20" fill="#ffffff"/>
-    <g id="eyes">
-      <circle id="eyeL" cx="95" cy="125" r="10" fill="#1F2937"/>
-      <circle id="eyeR" cx="145" cy="125" r="10" fill="#1F2937"/>
-      <circle cx="92" cy="122" r="3" fill="#fff"/>
-      <circle cx="142" cy="122" r="3" fill="#fff"/>
-    </g>
-    <path id="mouth" d="M90 145 Q120 160 150 145" stroke="#1F2937" stroke-width="4" fill="none" stroke-linecap="round"/>
-    <g id="arms">
-      <rect x="35" y="100" width="20" height="50" rx="10" fill="#4F8EF7"/>
-      <rect x="185" y="100" width="20" height="50" rx="10" fill="#4F8EF7"/>
-    </g>
-    <g id="legs">
-      <ellipse cx="90" cy="185" rx="18" ry="12" fill="#3B82F6"/>
-      <ellipse cx="150" cy="185" rx="18" ry="12" fill="#3B82F6"/>
-    </g>
-    <g id="buttons">
-      <circle cx="95" cy="165" r="6" fill="#34D399"/>
-      <circle cx="120" cy="165" r="6" fill="#FBBF24"/>
-      <circle cx="145" cy="165" r="6" fill="#F87171"/>
-    </g>
-  </g>
+// v3.35.0：機器人 → 6 隻貓輪流（每小時換一隻）。共用臉部骨架（眼 98/142,96、鼻 120,110、嘴 y≈118），
+//   所以 #eyeL/#eyeR（<g>，CSS 縮放做閉眼 / 眨眼 / 睜大）、#mouth（path swap）、#tail / #paw（提醒動作）全部共用
+function _catSvg(p) {
+  const line = p.line || 'rgba(0,0,0,.12)';
+  const eye = cx => p.slit
+    ? `<g id="${cx < 120 ? 'eyeL' : 'eyeR'}"><ellipse cx="${cx}" cy="96" rx="10" ry="12" fill="${p.eye}"/><ellipse cx="${cx}" cy="96" rx="3" ry="9" fill="#1A1A1F"/></g>`
+    : `<g id="${cx < 120 ? 'eyeL' : 'eyeR'}"><ellipse cx="${cx}" cy="96" rx="8" ry="10" fill="${p.eye || '#2B2B2B'}"/><circle cx="${cx - 2}" cy="92" r="3" fill="#fff"/></g>`;
+  return `<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <ellipse cx="120" cy="216" rx="62" ry="10" fill="#000" opacity=".08"/>
+  <g id="tail"><path d="M168 196 Q212 190 206 146 Q203 130 192 136" stroke="${p.tail || p.body}" stroke-width="15" fill="none" stroke-linecap="round"/></g>
+  <ellipse cx="120" cy="170" rx="56" ry="46" fill="${p.body}" stroke="${line}" stroke-width="2"/>
+  ${p.belly ? `<ellipse cx="120" cy="178" rx="34" ry="30" fill="${p.belly}"/>` : ''}
+  <path d="M65 72 L76 29 L103 59 Z" fill="${p.ear || p.body}" stroke="${line}" stroke-width="2"/><path d="M175 72 L164 29 L137 59 Z" fill="${p.ear || p.body}" stroke="${line}" stroke-width="2"/>
+  <path d="M73 64 L78 41 L94 57 Z" fill="${p.earIn}"/><path d="M167 64 L162 41 L146 57 Z" fill="${p.earIn}"/>
+  <circle cx="120" cy="97" r="55" fill="${p.head || p.body}" stroke="${line}" stroke-width="2"/>
+  ${p.headExtra || ''}
+  ${p.muzzle ? `<ellipse cx="120" cy="116" rx="28" ry="20" fill="${p.muzzle}"/>` : ''}
+  <g id="eyes">${eye(98)}${eye(142)}</g>
+  ${p.blush ? '<ellipse cx="82" cy="114" rx="9" ry="5" fill="#F7B5B5" opacity=".7"/><ellipse cx="158" cy="114" rx="9" ry="5" fill="#F7B5B5" opacity=".7"/>' : ''}
+  <path d="M116 108 L124 108 L120 113 Z" fill="${p.nose || '#E88A8A'}"/>
+  <path id="mouth" d="M110 118 Q115 124 120 117 Q125 124 130 118" stroke="${p.mouth || '#2B2B2B'}" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M58 107 L86 112 M58 121 L86 118 M182 107 L154 112 M182 121 L154 118" stroke="${p.whisker || '#B9AE9C'}" stroke-width="2" stroke-linecap="round"/>
+  ${p.collar ? `<path d="M80 150 Q120 162 160 150" stroke="${p.collar}" stroke-width="8" fill="none" stroke-linecap="round"/><circle cx="120" cy="163" r="9" fill="#F2C14E" stroke="#C99A2E" stroke-width="2"/>` : ''}
+  <ellipse cx="93" cy="206" rx="16" ry="10" fill="${p.paw || p.belly || p.body}" stroke="${line}" stroke-width="2"/><ellipse cx="147" cy="206" rx="16" ry="10" fill="${p.paw || p.belly || p.body}" stroke="${line}" stroke-width="2"/>
+  ${p.extra || ''}
 </svg>`;
-
+}
+const MASCOT_CATS = [
+  { name: '招財', body: '#FFFDF8', line: '#E7DCCB', earIn: '#F7B5B5', blush: true, collar: '#D9534F', tail: '#F3EDE2', whisker: '#B9AE9C',
+    headExtra: '<path d="M120 43 Q133 54 128 67 Q120 60 112 67 Q107 54 120 43Z" fill="#F29D4B"/><ellipse cx="80" cy="72" rx="14" ry="10" fill="#3B3B3B" opacity=".85"/>',
+    extra: '<g id="paw"><path d="M170 132 Q196 96 186 72" stroke="#FFFDF8" stroke-width="22" fill="none" stroke-linecap="round"/><circle cx="186" cy="68" r="14" fill="#FFFDF8" stroke="#E7DCCB" stroke-width="2"/></g><ellipse cx="120" cy="188" rx="22" ry="16" fill="#F2C14E" stroke="#C99A2E" stroke-width="2"/><text x="120" y="194" text-anchor="middle" font-size="16" font-weight="700" fill="#8A6516">$</text>' },
+  { name: '橘子', body: '#F7A54A', belly: '#FFE8CC', earIn: '#FFC9A3', muzzle: '#FFE8CC', tail: '#F0913A', whisker: '#8A5A2B', nose: '#E86F6F',
+    headExtra: '<path d="M104 46 L108 62 M120 42 L120 60 M136 46 L132 62" stroke="#D97A25" stroke-width="5" stroke-linecap="round"/>' },
+  { name: '小黑', body: '#2F2F3A', line: '#5A5A6E', earIn: '#6B5B7B', eye: '#F5C542', slit: true, tail: '#2A2A33', mouth: '#C9C3D6', whisker: '#8C84A0', nose: '#E88AA6', collar: '#C0392B' },
+  { name: '虎斑', body: '#9AA0A8', belly: '#E4E6E9', earIn: '#E9B8B8', muzzle: '#E4E6E9', eye: '#7CB342', slit: true, tail: '#8A9098', whisker: '#5E646B',
+    headExtra: '<path d="M102 47 L106 63 M120 43 L120 61 M138 47 L134 63 M66 92 L80 94 M66 102 L80 101 M174 92 L160 94 M174 102 L160 101" stroke="#5E646B" stroke-width="5" stroke-linecap="round"/>' },
+  { name: '小白', body: '#FFFFFF', line: '#D6DCE4', earIn: '#F9C6D3', eye: '#4FA3E0', slit: true, blush: true, tail: '#F4F6F9', whisker: '#AEB7C2', nose: '#F29BB2' },
+  { name: '暹羅', body: '#F3E6D3', line: '#D9C7AE', ear: '#5B4636', earIn: '#7A6150', eye: '#5DA9E9', slit: true, tail: '#5B4636', paw: '#5B4636', whisker: '#8B7563',
+    muzzle: '#7A6150', mouth: '#F3E6D3', nose: '#3A2C22' },
+];
 // 訊息池：每事件 3-6 句，可愛 + 鼓勵風格
 const MASCOT_MESSAGES = {
   'job-create':       ['又有案件囉～', '新挑戰，加油！', '又要開始忙碌囉', '太好了，又有事做', '工作上門，衝啊！'],
@@ -8826,12 +8835,13 @@ let mascotInited = false;
 
 // v3.23.2 + v3.23.3：8 種狀態 + 4 種嘴巴（純 SVG path swap）
 const MASCOT_STATES = ['idle', 'loading', 'thinking', 'success', 'error', 'searching', 'celebrating', 'sleeping'];
+// v3.35.0：改貓臉座標（嘴在 y≈118，貓嘴 ω 形）
 const MASCOT_MOUTHS = {
-  happy:   'M90 145 Q120 160 150 145',     // 😊 預設笑
-  flat:    'M95 150 L145 150',              // 😐 一條線（loading/thinking/searching/sleeping）
-  worried: 'M90 152 Q120 138 150 152',      // 😟 反向弧線（error）
-  big:     'M85 142 Q120 168 155 142',      // 😄 大笑（success/celebrating）
-  open:    'M118 148 Q120 152 122 148 Q120 144 118 148', // 😮 小 O（shocked，動作不是 state）
+  happy:   'M110 118 Q115 124 120 117 Q125 124 130 118',  // 😺 ω 預設
+  flat:    'M112 120 L128 120',                            // 😐 一條線（loading/thinking/searching/sleeping）
+  worried: 'M110 124 Q120 114 130 124',                    // 😿 反向弧線（error）
+  big:     'M108 117 Q120 134 132 117',                    // 😸 大笑（success/celebrating）
+  open:    'M116 120 Q120 126 124 120 Q120 114 116 120',  // 🙀 小 O（shocked，動作不是 state）
 };
 // state → 嘴巴 map
 const MASCOT_STATE_TO_MOUTH = {
@@ -8857,33 +8867,18 @@ function mascotSetMouth(mouthKey) {
 
 // v3.23.3：眼睛切換（用 SVG circle 的 r 屬性）
 // open（預設 r=10） / shocked（r=14 大眼）/ closed（r=2 變點，sleeping 用）/ wink（左眼短暫變點）
+// v3.35.0：貓眼是 <g>（眼白 + 瞳孔 / 高光）→ 改用 container data-eyes + CSS scale，6 隻貓通用
 function mascotSetEyes(mode) {
-  const l = document.querySelector('#mascot-container #eyeL');
-  const r = document.querySelector('#mascot-container #eyeR');
-  if (!l || !r) return;
-  switch (mode) {
-    case 'shocked':
-      l.setAttribute('r', '14');
-      r.setAttribute('r', '14');
-      break;
-    case 'closed':  // sleeping
-      l.setAttribute('r', '2');
-      r.setAttribute('r', '2');
-      break;
-    case 'open':
-    default:
-      l.setAttribute('r', '10');
-      r.setAttribute('r', '10');
-  }
+  const c = document.getElementById('mascot-container');
+  if (c) c.dataset.eyes = (mode === 'shocked' || mode === 'closed') ? mode : 'open';
 }
 
-// 隨機眨眼（左眼閉 250ms 再回正）
+// 隨機眨眼（左眼閉 220ms 再回正）
 function mascotWink() {
   const l = document.querySelector('#mascot-container #eyeL');
   if (!l) return;
-  const orig = l.getAttribute('r');
-  l.setAttribute('r', '2');
-  setTimeout(() => l.setAttribute('r', orig || '10'), 220);
+  l.classList.add('mascot-wink');
+  setTimeout(() => l.classList.remove('mascot-wink'), 220);
 }
 
 // 排隨機眨眼計時器（25-45 秒一次，只在 idle 時觸發）
@@ -9020,7 +9015,7 @@ function mascotInit() {
   mascotState.name = config.mascotName || '';
   const c = document.getElementById('mascot-container');
   if (c) {
-    c.innerHTML = MASCOT_SVG;
+    mascotRenderCat();  // v3.35.0：依時段挑貓 + 提醒徽章
     c.classList.toggle('hidden', !mascotState.enabled);
     // v3.23.2：啟動時 set 預設狀態 idle
     mascotSetState('idle');
@@ -9035,22 +9030,128 @@ function mascotInit() {
   const inp = document.getElementById('pref-mascot-name');
   if (inp) inp.value = mascotState.name;
 
-  // 啟動 1.5 秒後看情況打招呼（避免跟 onboarding 同時跳出）
+  // 啟動 1.5 秒後：今天還沒提醒過 → 說最重要的一則（避免跟 onboarding 同時跳出）
   setTimeout(() => {
     if (!mascotState.enabled) return;
-    if (typeof activeJobs !== 'function') return;
-    const today = todayStr();
-    // 有逾期未完成 → 提醒催收
-    const overdue = activeJobs().filter(j => !j.done && j.date && j.date < today);
-    if (overdue.length > 0) { mascotSay('app-startup-overdue'); return; }
-    // 沒事 → 30% 機率隨機打招呼，避免每次都跳很煩
-    if (Math.random() < 0.3) mascotSay('app-startup-quiet');
+    if (!mascotDailyRemind() && Math.random() < 0.3) mascotSay('app-startup-quiet');
   }, 1500);
+  // v3.35.0：每分鐘 tick — 整點換貓、跨日補每日提醒（分頁常駐不關也會輪到）、更新徽章
+  setInterval(() => {
+    if (!mascotState.enabled) return;
+    const bubbleOpen = !document.getElementById('mascot-bubble')?.classList.contains('hidden');
+    if (!bubbleOpen && _mascotRenderedIdx !== _mascotCatIdx()) mascotRenderCat();
+    mascotDailyRemind();
+    mascotUpdateBadge();
+  }, 60 * 1000);
+}
+
+// ============== v3.35.0：貓咪輪替 + 提醒（截止 / 放太久 / 本月已賺） ==============
+const MASCOT_STALE_DAYS = 7;
+let _mascotRenderedIdx = -1;
+let _mascotRemindCursor = 0;
+
+function _mascotCatIdx() { return Math.floor(Date.now() / 3600000) % MASCOT_CATS.length; }  // 每小時換一隻
+
+function mascotRenderCat() {
+  const c = document.getElementById('mascot-container');
+  if (!c) return;
+  _mascotRenderedIdx = _mascotCatIdx();
+  c.innerHTML = _catSvg(MASCOT_CATS[_mascotRenderedIdx]) + '<span class="mascot-badge hidden"></span>';
+  mascotSetState(mascotState.current || 'idle');  // 換貓後重套嘴巴 / 眼睛
+  mascotUpdateBadge();
+}
+
+// 回傳依優先序排好的提醒：[{ text, ids?, label? }]
+function mascotCollectReminders() {
+  const today = todayStr();
+  const tomorrow = addDays(today, 1);
+  const staleBefore = addDays(today, -MASCOT_STALE_DAYS);
+  const active = state.jobs.filter(j => !j.done && !j.cancelled && !j.isEstimate);
+  const t = j => j.title || '（無標題）';
+  const out = [];
+  // 1. 截止：有截止日 → 截止日 ≤ 明天（含逾期）；沒截止日 → 開始日就是今天 / 明天
+  const due = active.filter(j => j.endDate ? j.endDate <= tomorrow : (j.date === today || j.date === tomorrow))
+    .sort((a, b) => (a.endDate || a.date).localeCompare(b.endDate || b.date));
+  if (due.length) {
+    const d = due[0].endDate || due[0].date;
+    const overdue = due.filter(j => (j.endDate || j.date) < today).length;
+    const text = due.length === 1
+      ? (d < today ? `「${t(due[0])}」已經逾期 ${daysBetween(d, today)} 天了，點我看看`
+        : d === today ? `「${t(due[0])}」今天要交喔，點我看看` : `「${t(due[0])}」明天截止，記得交件 🐾`)
+      : `有 ${due.length} 筆案件今明兩天要交${overdue ? `（${overdue} 筆已逾期）` : ''}，點我看看`;
+    out.push({ text, ids: due.map(j => j.id), label: '🐾 快截止的案件' });
+  }
+  // 2. 放太久：開始日已過 7 天還沒完成（已在截止清單的不重複）
+  const dueIds = new Set(due.map(j => j.id));
+  const stale = active.filter(j => !dueIds.has(j.id) && j.date && j.date <= staleBefore)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (stale.length) {
+    out.push({
+      text: stale.length === 1
+        ? `「${t(stale[0])}」放了 ${daysBetween(stale[0].date, today)} 天還沒完成，點我看看`
+        : `有 ${stale.length} 筆案件放超過 ${MASCOT_STALE_DAYS} 天還沒完成，點我看看`,
+      ids: stale.map(j => j.id), label: `🐾 放超過 ${MASCOT_STALE_DAYS} 天的案件`
+    });
+  }
+  // 3. 本月已賺：本月收款（payments.date）vs 上月同期（上月 1 日 ~ 同一天）
+  const ym = today.slice(0, 7);
+  const prevYm = addDays(ym + '-01', -1).slice(0, 7);
+  const prevCut = `${prevYm}-${today.slice(8)}`;
+  let cur = 0, prev = 0;
+  state.jobs.forEach(j => (j.payments || []).forEach(p => {
+    const d = p.date || '';
+    if (d.startsWith(ym)) cur += +p.amount || 0;
+    else if (d.startsWith(prevYm) && d <= prevCut) prev += +p.amount || 0;
+  }));
+  const pct = prev > 0 ? Math.round(Math.abs(cur - prev) / prev * 100) : 0;
+  out.push({
+    text: cur > 0
+      ? `本月已賺 ${fmt(cur)}${prev > 0 ? `，比上月同期${cur >= prev ? '多' : '少'} ${pct}%` : ''} 🐾`
+      : '本月還沒有入帳，一起加油！'
+  });
+  return out;
+}
+
+function mascotShowReminder(r) {
+  mascotSay(null, r.text, {
+    hideMs: 10000, alert: true,
+    action: r.ids ? () => { lockJobsToIds(r.ids, r.label); switchTab('jobs'); render(); } : null
+  });
+}
+
+// 每天第一次（每台電腦各自記；純 UI 偏好）說最重要的一則；有說回 true
+function mascotDailyRemind() {
+  const today = todayStr();
+  let last = '';
+  try { last = localStorage.getItem('cloud-mascot-last-remind-day') || ''; } catch (_) {}
+  if (last === today) return false;
+  try { localStorage.setItem('cloud-mascot-last-remind-day', today); } catch (_) {}
+  const rs = mascotCollectReminders();
+  _mascotRemindCursor = 1;  // 點貓咪從下一則開始輪
+  mascotShowReminder(rs[0]);
+  return true;
+}
+
+// 右上角紅點：需要處理的提醒數（截止 + 放太久，不含本月已賺）
+function mascotUpdateBadge() {
+  const b = document.querySelector('#mascot-container .mascot-badge');
+  if (!b || !mascotState.enabled) return;
+  const n = mascotCollectReminders().filter(r => r.ids).reduce((s, r) => s + r.ids.length, 0);
+  b.textContent = n > 9 ? '9+' : String(n);
+  b.classList.toggle('hidden', n === 0);
+}
+
+function mascotOnBubbleClick(ev) {
+  if (!mascotState.bubbleAction) return;
+  const fn = mascotState.bubbleAction;
+  mascotHideBubble();
+  fn();
 }
 
 // 觸發 mascot 講話（核心 API）
 // eventType: 'job-create' / 'job-done' / 'job-paid' / ... 任一 MASCOT_MESSAGES 的 key
-function mascotSay(eventType, customMsg) {
+// v3.35.0：opts = { hideMs, action, alert } — 提醒用：停久一點、點對話框執行 action、貓咪做提醒動作
+function mascotSay(eventType, customMsg, opts = {}) {
   if (!mascotState.enabled) return;
   if (!eventType && !customMsg) return;
 
@@ -9075,9 +9176,13 @@ function mascotSay(eventType, customMsg) {
   const textEl = document.getElementById('mascot-bubble-text');
   if (!bubble || !textEl) return;
 
-  // 名字前綴（有設名字才顯示）
-  if (nameEl) nameEl.textContent = mascotState.name ? `${mascotState.name}：` : '';
+  // 名字前綴：有自訂名字用自訂，否則用目前這隻貓的名字（v3.35.0）
+  const _who = mascotState.name || (MASCOT_CATS[_mascotCatIdx()] || {}).name || '';
+  if (nameEl) nameEl.textContent = _who ? `${_who}：` : '';
   textEl.textContent = msg;
+  // v3.35.0：提醒可點（跳到對應案件）
+  mascotState.bubbleAction = opts.action || null;
+  bubble.classList.toggle('actionable', !!opts.action);
 
   // 重啟 in 動畫
   bubble.classList.remove('hidden');
@@ -9085,16 +9190,19 @@ function mascotSay(eventType, customMsg) {
   void bubble.offsetWidth;  // 強制 reflow
   bubble.style.animation = '';
 
-  // 5 秒後自動消失
+  // 5 秒後自動消失（提醒 10 秒）
   if (mascotState.hideTimer) clearTimeout(mascotState.hideTimer);
-  mascotState.hideTimer = setTimeout(mascotHideBubble, MASCOT_BUBBLE_HIDE_MS);
+  mascotState.hideTimer = setTimeout(mascotHideBubble, opts.hideMs || MASCOT_BUBBLE_HIDE_MS);
 
-  // mascot 抖動表示有話要說
+  // mascot 抖動表示有話要說；提醒 → 跳起來揮手 + 搖尾巴（v3.35.0）
   const c = document.getElementById('mascot-container');
   if (c) {
-    c.classList.add('mascot-shake');
+    const cls = opts.alert ? 'mascot-alert' : 'mascot-shake';
+    c.classList.remove('mascot-alert', 'mascot-shake');
+    void c.offsetWidth;  // 重播動畫
+    c.classList.add(cls);
     if (mascotState.shakeTimer) clearTimeout(mascotState.shakeTimer);
-    mascotState.shakeTimer = setTimeout(() => c.classList.remove('mascot-shake'), MASCOT_SHAKE_MS);
+    mascotState.shakeTimer = setTimeout(() => c.classList.remove(cls), opts.alert ? 2600 : MASCOT_SHAKE_MS);
   }
 
   // v3.23.2：根據 event 自動切 state（success / error / thinking 會自動 2.5 秒後回 idle）
@@ -9110,8 +9218,11 @@ function mascotHideBubble() {
 }
 
 // 點 mascot → 隨機說一句招呼
+// v3.35.0：點貓咪 → 輪流說目前的提醒（截止 → 放太久 → 本月已賺）
 function mascotOnClick() {
-  mascotSay('idle-greeting');
+  const rs = mascotCollectReminders();
+  mascotShowReminder(rs[_mascotRemindCursor % rs.length]);
+  _mascotRemindCursor++;
 }
 
 // 設定頁：開關 toggle

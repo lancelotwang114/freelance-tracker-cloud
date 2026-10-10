@@ -3563,8 +3563,8 @@ body.view-board #jobs-group-control {
   position: fixed;
   bottom: 20px;
   left: 20px;
-  width: 64px;
-  height: 64px;
+  width: 96px;   /* v3.35.0：64 → 96（貓咪） */
+  height: 96px;
   cursor: pointer;
   z-index: 9990;
   transition: transform .2s;
@@ -3586,9 +3586,42 @@ body.view-board #jobs-group-control {
 /* 暗色模式：稍微亮一點，避免陰影吃掉細節 */
 [data-theme="dark"] .mascot-container { filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
 
+/* v3.35.0：貓眼（<g>）閉眼 / 睜大 / 眨眼 — 用 scale 取代舊版改 circle r */
+.mascot-container #eyeL, .mascot-container #eyeR { transform-box: fill-box; transform-origin: center; transition: transform .12s; }
+.mascot-container[data-eyes="closed"] #eyeL, .mascot-container[data-eyes="closed"] #eyeR,
+.mascot-container #eyeL.mascot-wink { transform: scaleY(.12); }
+.mascot-container[data-eyes="shocked"] #eyeL, .mascot-container[data-eyes="shocked"] #eyeR { transform: scale(1.35); }
+.mascot-container #tail, .mascot-container #paw { transform-box: view-box; }
+.mascot-container #tail { transform-origin: 168px 196px; }
+.mascot-container #paw { transform-origin: 172px 134px; animation: mascotPawWave 2.4s ease-in-out infinite; }  /* 招財貓常駐招手 */
+@keyframes mascotPawWave { 0%, 60%, 100% { transform: rotate(0); } 70% { transform: rotate(-14deg); } 85% { transform: rotate(6deg); } }
+
+/* v3.35.0：提醒動作 — 跳兩下 + 搖尾巴 + 揮手 */
+.mascot-container.mascot-alert svg { animation: mascotAlertHop 1.2s ease-in-out 2; }
+.mascot-container.mascot-alert #tail { animation: mascotTailWag .3s ease-in-out 8 alternate; }
+.mascot-container.mascot-alert #paw { animation: mascotPawWave .6s ease-in-out 4; }
+@keyframes mascotAlertHop {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  15% { transform: translateY(-18px) rotate(-6deg); }
+  30% { transform: translateY(0) rotate(0); }
+  45% { transform: translateY(-10px) rotate(6deg); }
+  60% { transform: translateY(0) rotate(0); }
+}
+@keyframes mascotTailWag { from { transform: rotate(-12deg); } to { transform: rotate(14deg); } }
+
+/* v3.35.0：需要處理的提醒數（截止 + 放太久） */
+.mascot-badge {
+  position: absolute; top: 4px; right: 4px; min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: 11px; background: var(--danger, #ef4444); color: #fff; font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px var(--card, #fff);
+}
+.mascot-badge.hidden { display: none; }
+.mascot-bubble.actionable { cursor: pointer; }
+.mascot-bubble.actionable:hover { border-color: var(--gold, var(--primary)); }
+
 .mascot-bubble {
   position: fixed;
-  bottom: 92px;
+  bottom: 124px;  /* v3.35.0：貓咪 96px 對應上移 */
   left: 16px;
   max-width: 240px;
   background: var(--card);
@@ -3750,10 +3783,15 @@ body.view-board #jobs-group-control {
   50% { transform: translateY(-8px) scale(1.2); opacity: 1; }
 }
 
+/* v3.35.0：96px 只在兩側有留白（主內容 900px 置中）時用；窄螢幕縮小，避免蓋住列左側「完成 / 收款」勾 */
+@media (max-width: 1139px) {
+  .mascot-container { width: 72px; height: 72px; }
+  .mascot-bubble { bottom: 100px; }
+}
 @media (max-width: 480px) {
   /* 手機 mascot 改更小 + 更靠下角，避開可能的底部 navigation */
-  .mascot-container { width: 48px; height: 48px; bottom: 16px; left: 12px; }
-  .mascot-bubble { bottom: 72px; left: 12px; max-width: 200px; font-size: 12px; }
+  .mascot-container { width: 60px; height: 60px; bottom: 16px; left: 12px; }  /* v3.35.0：48 → 60 */
+  .mascot-bubble { bottom: 84px; left: 12px; max-width: 220px; font-size: 13px; }
 }
 
 /* ==================== Utilities ==================== */
