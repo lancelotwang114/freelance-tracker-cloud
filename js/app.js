@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-10-v3.35.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-10-v3.36.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -3964,7 +3964,7 @@ function _calendarBuildJobEvent(job, client, todayStr) {
   }
   lines.push('');
   lines.push('在 App 中查看：');
-  lines.push(`https://lancelotwang114.github.io/freelance-tracker-cloud/#job-${job.id}`);
+  lines.push(`${_appUrl()}#job-${job.id}`);
 
   return {
     ftKey: `job-${job.id}`,
@@ -4240,7 +4240,7 @@ function buildTargetCalendarEvents(cfg) {
         lines.push('');
       });
       lines.push('在 App 中查看詳情：');
-      lines.push('https://lancelotwang114.github.io/freelance-tracker-cloud/');
+      lines.push(_appUrl());
 
       events.push({
         ftKey: `daily-${dateStr}`,
@@ -4990,7 +4990,7 @@ let revenueState = {
 
 // ============== Schema 版本化框架（v2.1+）==============
 // 每升一版資料模型就 +1，並新增對應的 migration 函式
-const CURRENT_SCHEMA_VERSION = 20;  // v3.31.0：case.discountNote 整單折扣備註（預設 ''）
+const CURRENT_SCHEMA_VERSION = 21;  // v3.36.0：公版報價單預設改空白，舊資料補存 config.quoteSheet
 
 const SCHEMA_MIGRATIONS = {
   // v1 → v2：加入 paid/doneAt/paidAt 欄位
@@ -5181,6 +5181,17 @@ const SCHEMA_MIGRATIONS = {
       ...j,
       discountNote: j.discountNote || ''
     }));
+  },
+  // v20 → v21：公版報價單預設值改空白（v3.36.0）。既有資料、但從沒編輯過公版（config 沒有 quoteSheet）的使用者，
+  //   原本畫面看到的是舊預設內容 → 補存成自己的 config.quoteSheet，升版後內容不變。
+  //   全新使用者（沒業主、沒案件）不補 → 拿到空白範本。呼叫點（load / applyTrackerData）都先載入 config 再跑 migration。
+  //   冪等：已有 quoteSheet 不動；兩台各自補的內容相同，合併不衝突
+  20: function(state) {
+    const hasData = (state.jobs || []).length > 0 || (state.clients || []).length > 0;
+    if (hasData && !config.quoteSheet) {
+      // 不帶 date（舊預設 date=''）：兩台若在不同天升級，補存內容仍完全相同 → 合併不會判成衝突
+      config.quoteSheet = JSON.parse(JSON.stringify(QUOTE_LEGACY_V329));
+    }
   }
 };
 
@@ -5375,6 +5386,9 @@ function fmt(n) { return 'NT$' + (n || 0).toLocaleString(); }
 function fmtM(n) { return '<span class="cur">NT$</span>' + (n || 0).toLocaleString(); }
 function thisMonth() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
 function getMonth(dateStr) { return dateStr ? dateStr.slice(0,7) : ''; }
+// v3.36.0：App 網址取目前部署位置（原寫死 GitHub Pages 網址；換網域不用改程式）
+//   去掉結尾 index.html → 現行部署產生的字串與舊寫死值相同，行事曆事件說明不會整批變動
+function _appUrl() { return location.origin + location.pathname.replace(/index\.html$/, ''); }
 // v3.29.2：改本地日期（原 toISOString 為 UTC → 台灣 00:00~08:00「今天」變昨天：新案件日期、完成日、逾期判斷全偏一天）
 function todayStr() { return new Date().toLocaleDateString('sv'); }
 function addDays(date, days) {
@@ -11250,7 +11264,19 @@ function printInvoice() {
 // 沒編輯過就不寫入 config，畫面用 QUOTE_DEFAULT；第一次編輯才複製一份進 config 再 saveConfigOnly()。
 // 舊版 app 相容：config 是整份 stringify / 整份取代，未知 key 原樣帶回（同 v3.28.3 tagColors 先例），不需 schema bump。
 // 收款帳號不另存：撈 config.userInfo.paymentAccounts（請款單分頁管理），payAccountId 空 = 跟請款單目前選的那筆。
+// v3.36.0：預設改通用空白範本；原個人化內容改名 QUOTE_LEGACY_V329，只給 schema v20→v21 migration
+//   「既有資料但從沒編輯過公版」的使用者補存成自己的 config.quoteSheet（屬於使用者的資料，不是程式預設值）
+//   移除條件：兩台都升到 v3.36+（雲端 config 已有 quoteSheet）後，下一版可刪 QUOTE_LEGACY_V329
 const QUOTE_DEFAULT = {
+  title: '報價單', en: 'QUOTATION', client: '',
+  contactName: '', phone: '', email: '', date: '',
+  cats: [{ name: '類別', items: [{ item: '項目名稱', detail: '細項說明', qty: '單張', price: null }] }],
+  rush: [],
+  payTerms: '',
+  payAccountId: '',
+  notes: [{ title: '備註', lines: '' }]
+};
+const QUOTE_LEGACY_V329 = {
   title: '報價單', en: 'QUOTATION', client: '欣莘醫美',
   contactName: 'Yaya', phone: '0988-040141', email: 'k7992629@gmail.com', date: '',
   cats: [
