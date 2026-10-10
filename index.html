@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-10-v3.36.0">
+<meta name="app-version" content="2026-10-10-v3.37.0">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -977,15 +977,18 @@
 </main>
 
 <!-- v3.17.0：FAB 升級成 Quick Add（點 ＋ 浮現選單，內含案件 / 業主 / 計時 / 範本選項） -->
+<!-- v3.37.0：新增案件（最常用）一鍵直達 → 主按鈕；新增業主（偶爾）→ 次按鈕；其餘收進 ⋯ -->
 <div class="fab-wrap" id="fab-wrap">
   <div class="fab-menu hidden" id="fab-menu">
-    <button class="fab-menu-item" onclick="quickAddJob()">＋ 新增案件</button>
-    <button class="fab-menu-item" onclick="quickAddClient()">👤 新增業主</button>
     <!-- v3.33.0：計時功能隱藏（JS 保留，移除 hidden 即復原） -->
     <button class="fab-menu-item hidden" onclick="quickStartTimer()">⏱️ 開始計時</button>
     <button class="fab-menu-item" onclick="quickOpenLastJob()">📝 編輯最近一筆</button>
   </div>
-  <button class="fab" id="fab-add" onclick="toggleFabMenu()" aria-label="快速新增">＋</button>
+  <div class="fab-stack">
+    <button class="fab-mini" onclick="toggleFabMenu()" aria-label="更多動作" title="更多動作">⋯</button>
+    <button class="fab-sub" onclick="quickAddClient()" aria-label="新增業主" title="新增業主">👤<span class="fab-label">新增業主</span></button>
+    <button class="fab" id="fab-add" onclick="quickAddJob()" aria-label="新增案件" title="新增案件（快捷鍵 N）">＋<span class="fab-label">新增案件</span></button>
+  </div>
 </div>
 
 <!-- v3.2.0：Modal — 編輯/新增 收款帳號（含個人 + 發票 + 匯款資訊） -->
@@ -1116,7 +1119,7 @@
           <button type="button" class="date-quick-btn" onclick="setJobDateQuick('start','clear')">清空</button>
         </div>
       </div>
-      <div>
+      <div class="job-more">
         <label for="job-end-date">截止日（選填）</label>
         <input type="date" id="job-end-date" placeholder="跨天案件才填">
         <!-- v3.24.18：快速選日期按鈕（截止日常用 +N 天） -->
@@ -1129,14 +1132,22 @@
       </div>
     </div>
 
-    <label for="job-title">案件名稱</label>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <label for="job-title" style="margin: 0;">案件名稱</label>
+      <!-- v3.37.0：從該業主報價單（沒有專屬則公版）挑項目 → 帶入名稱 / 單價 / 類別標籤，帶入後仍可自行修改 -->
+      <button type="button" class="btn btn-ghost btn-sm" onclick="toggleJobQuotePicker()" style="font-size: 12px;">📋 從報價單帶入</button>
+    </div>
     <input type="text" id="job-title" placeholder="例：首頁 banner 設計">
+    <div id="job-quote-picker" class="hidden job-quote-picker"></div>
 
+    <!-- v3.37.0：新增模式（.compact）收起的欄位一律標 .job-more -->
+    <div class="job-more">
     <label>標籤（選填，可多個）</label>
     <div id="job-tags-chips" class="tags-chips-row"></div>
     <div style="display: flex; gap: 6px; margin-top: 4px;">
       <input type="text" id="job-tag" placeholder="輸入後按 Enter（例：廣告、設計、動畫）" list="tag-suggestions" onkeydown="onJobTagKeydown(event)" style="flex: 1;">
       <button type="button" class="btn btn-outline btn-sm" onclick="addJobTagFromInput()">＋</button>
+    </div>
     </div>
     <datalist id="tag-suggestions"></datalist>
     </div>
@@ -1146,6 +1157,7 @@
     <div class="job-section">
       <div class="job-section-label">內容 與 金額</div>
 
+      <div class="job-more">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <label style="margin: 0;">細項說明（業主看得到）</label>
         <div style="display: flex; gap: 4px;">
@@ -1155,6 +1167,7 @@
       </div>
     <textarea id="job-details" placeholder="例：1280x400 banner x 2 張，含兩次修改"></textarea>
     <div id="template-picker" class="hidden" style="background: var(--bg); border-radius: 8px; padding: 8px; margin-top: -4px; margin-bottom: 8px; max-height: 200px; overflow-y: auto;"></div>
+      </div>
     <!-- v3.2.0：金額拆成 單價 × 數量；amount 仍是「總金額」自動算 -->
     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
       <div>
@@ -1189,7 +1202,7 @@
     </div>
 
     <!-- 折扣 collapsible（v3.6.4：多數案件不打折，預設收摺） -->
-    <details class="job-details-block" id="job-discount-details">
+    <details class="job-details-block job-more" id="job-discount-details">
       <summary>折扣（選填）<span id="job-discount-summary-hint" class="job-detail-hint"></span></summary>
       <div class="job-details-content">
         <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 6px;">
@@ -1211,12 +1224,14 @@
     </details>
 
     <!-- 金額計算結果 -->
-    <div id="job-amount-summary" style="background: var(--primary-light); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-top: 8px; min-height: 16px;"></div>
+    <div id="job-amount-summary" class="job-more" style="background: var(--primary-light); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-top: 8px; min-height: 16px;"></div>
     </div>
+    <!-- v3.37.0：新增模式只露常用欄位，其餘點這顆展開 -->
+    <button type="button" class="btn btn-ghost btn-sm job-more-toggle" onclick="toggleJobMoreFields()">更多欄位 ▾（截止日、標籤、說明、折扣、收款、勞報…）</button>
     <!-- /區 2 -->
 
     <!-- ===== 區 3：進度 + 收款 ===== -->
-    <div class="job-section">
+    <div class="job-section job-more">
       <div class="job-section-label">進度 與 收款</div>
 
       <!-- 完成 + 完成日 -->

@@ -1242,14 +1242,46 @@ html[data-theme="dark"] .btn-primary { color: #08211d; }
   background: var(--bg);
   color: var(--primary);
 }
-.fab-wrap.fab-open .fab {
-  transform: rotate(45deg);
-  background: var(--card);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
 .fab:active { transform: scale(0.96); }
 .fab:hover { box-shadow: 0 6px 20px rgba(37,99,235,.5); }
+
+/* v3.37.0：主按鈕「＋ 新增案件」膠囊（一鍵直達）、次按鈕「👤 新增業主」、⋯ 更多 */
+.fab-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.fab { width: auto; min-width: 56px; padding: 0 22px 0 18px; border-radius: 28px; gap: 6px; }
+.fab .fab-label { font-size: 16px; font-weight: 600; }
+.fab-sub, .fab-mini {
+  height: 44px; min-width: 44px; padding: 0 16px 0 12px; border-radius: 22px;
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  box-shadow: 0 3px 10px rgba(0,0,0,.15); font-family: inherit; font-size: 18px;
+  display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+  transition: transform .15s, border-color .15s;
+}
+.fab-sub .fab-label { font-size: 14px; font-weight: 500; }
+.fab-mini { width: 44px; padding: 0; font-size: 20px; color: var(--muted); }
+.fab-sub:hover, .fab-mini:hover { border-color: var(--primary); color: var(--primary); }
+.fab-sub:active, .fab-mini:active { transform: scale(0.96); }
+.fab-wrap.fab-open .fab-mini { border-color: var(--primary); color: var(--primary); }
+.fab-menu { bottom: auto; top: 0; right: 56px; }  /* 從 ⋯ 左邊彈出 */
+@media (max-width: 640px) {
+  .fab .fab-label, .fab-sub .fab-label { display: none; }
+  .fab { padding: 0; width: 56px; }
+  .fab-sub { padding: 0; width: 44px; }
+}
+
+/* v3.37.0：案件 modal 新增模式只露常用欄位 */
+#job-modal.compact .job-more { display: none !important; }
+#job-modal:not(.compact) .job-more-toggle { display: none; }
+.job-more-toggle { width: 100%; margin-top: 10px; color: var(--muted); }
+.job-quote-picker { background: var(--bg); border-radius: 8px; padding: 8px; margin: 4px 0 8px; max-height: 260px; overflow-y: auto; }
+.job-quote-picker .jqp-cat { font-size: 11px; color: var(--muted); margin: 6px 2px 2px; }
+.job-quote-picker .jqp-item {
+  display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; margin: 3px 0;
+  font-family: inherit; font-size: 13px; color: var(--text); cursor: pointer; min-height: 36px; align-items: center;
+}
+.job-quote-picker .jqp-item:hover { border-color: var(--primary); }
+.job-quote-picker .jqp-price { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.job-quote-picker .jqp-sub { color: var(--muted); font-size: 12px; }
 
 /* ==================== Empty & Filters ==================== */
 .empty {

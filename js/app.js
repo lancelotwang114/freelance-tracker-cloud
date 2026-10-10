@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-10-v3.36.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-10-v3.37.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -13248,8 +13248,10 @@ function openJobModal() {
   editingJobId = null;
   document.getElementById('job-modal-title').textContent = '新增案件';
   document.getElementById('job-delete-btn').classList.add('hidden');
-  const cs = document.getElementById('job-client');
-  cs.innerHTML = sortedClientsForPicker().map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  // v3.37.0：新增模式只露常用欄位（業主 / 開始日 / 名稱 / 金額），其餘「更多欄位 ▾」展開
+  document.getElementById('job-modal').classList.add('compact');
+  document.getElementById('job-quote-picker')?.classList.add('hidden');
+  _fillJobClientOptions();
   if (!document.getElementById('job-date').value) {
     document.getElementById('job-date').value = todayStr();
   }
@@ -13300,6 +13302,65 @@ function openJobModal() {
   // v3.27.1（R17）：記錄初始表單狀態（dirty-check 基準）+ focus 第一欄
   _jobFormSnapshot = _jobFormSig();
   document.getElementById('job-title')?.focus();
+}
+
+// v3.37.0：業主下拉（常用排前）+ 最後一項「＋ 新增業主…」（選了開業主 modal，存檔後自動選回新業主）
+function _fillJobClientOptions(selectId) {
+  const cs = document.getElementById('job-client');
+  cs.innerHTML = sortedClientsForPicker().map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('') +
+    '<option value="__new_client__">＋ 新增業主…</option>';
+  if (selectId) cs.value = selectId;
+  cs.dataset.prev = cs.value;
+}
+
+function toggleJobMoreFields() {
+  document.getElementById('job-modal').classList.remove('compact');
+}
+
+// v3.37.0：從報價單帶入 — 該業主專屬報價單，沒有則公版；帶入名稱 / 單價 / 類別標籤，之後仍可自行修改
+function _jobQuoteSheet() {
+  const c = getClient(document.getElementById('job-client').value);
+  return (c && c.quoteSheet) || _quoteBase();
+}
+
+function toggleJobQuotePicker() {
+  const box = document.getElementById('job-quote-picker');
+  if (!box) return;
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  renderJobQuotePicker();
+  box.classList.remove('hidden');
+}
+
+function renderJobQuotePicker() {
+  const box = document.getElementById('job-quote-picker');
+  if (!box) return;
+  const q = _jobQuoteSheet();
+  const c = getClient(document.getElementById('job-client').value);
+  const src = c && c.quoteSheet ? `「${escapeHtml(c.name)}」專屬報價單` : '公版報價單';
+  const cats = (q.cats || []).filter(cat => (cat.items || []).some(it => it.item));
+  box.innerHTML = `<div class="jqp-cat">來源：${src}（點選帶入，帶入後可再修改）</div>` +
+    (cats.length ? cats.map(cat => `<div class="jqp-cat">${escapeHtml(cat.name)}</div>` +
+      cat.items.map((it, ii) => it.item ? `<button type="button" class="jqp-item" data-ci="${q.cats.indexOf(cat)}" data-ii="${ii}" onclick="pickJobQuoteItem(+this.dataset.ci, +this.dataset.ii)">
+        <span>${escapeHtml(it.item)}${it.detail ? ` <span class="jqp-sub">${escapeHtml(it.detail)}</span>` : ''}${it.qty ? ` <span class="jqp-sub">／${escapeHtml(it.qty)}</span>` : ''}</span>
+        <span class="jqp-price">${it.price == null || it.price === '' ? '另報價' : fmt(+it.price)}</span></button>` : '').join('')).join('')
+    : '<div class="jqp-cat">報價單還沒有項目 → 到「單據 → 報價單」編輯</div>');
+}
+
+function pickJobQuoteItem(ci, ii) {
+  const q = _jobQuoteSheet();
+  const cat = q.cats[ci];
+  const it = cat && cat.items[ii];
+  if (!it) return;
+  document.getElementById('job-title').value = it.item + (it.detail ? '・' + it.detail : '');
+  if (it.price != null && it.price !== '') {
+    document.getElementById('job-unit-price').value = +it.price;
+    _jobAmountManuallyEdited = false;  // 讓 單價 × 數量 重算總金額
+    onJobUnitOrQtyChange();
+  }
+  // 類別當標籤（已有就不重複）→ 收益頁類型分佈自動分好
+  if (cat.name && !modalJobTags.includes(cat.name)) { modalJobTags.push(cat.name); renderJobTagsChips(); }
+  document.getElementById('job-quote-picker').classList.add('hidden');
+  toast('✓ 已帶入，可再自行修改', 2000);
 }
 
 // ============== v3.6.4：估價單 toggle 改放標題列 ==============
@@ -13590,7 +13651,17 @@ function refreshTagSuggestions() {
 
 // 切換業主時：儲值制業主自動勾「已收款」並顯示餘額
 function onJobClientChange() {
-  const cid = document.getElementById('job-client').value;
+  const sel = document.getElementById('job-client');
+  // v3.37.0：選「＋ 新增業主…」→ 選單先退回原業主，開業主 modal（存檔後 saveClient 會自動選回新業主）
+  if (sel.value === '__new_client__') {
+    sel.value = sel.dataset.prev || (sel.options[0] && sel.options[0].value) || '';
+    openClientModal();
+    return;
+  }
+  sel.dataset.prev = sel.value;
+  // v3.37.0：報價單帶入清單開著 → 跟著換成新業主的報價單
+  if (!document.getElementById('job-quote-picker')?.classList.contains('hidden')) renderJobQuotePicker();
+  const cid = sel.value;
   const c = getClient(cid);
   const hint = document.getElementById('job-prepaid-hint');
   if (!c?.prepaidMode) {
@@ -13598,8 +13669,10 @@ function onJobClientChange() {
     return;
   }
   // 儲值制業主：自動勾「已收款」（編輯時不要強制覆蓋）
+  // v3.37.0：job-paid 在付款重構後已移除（舊版直接 TypeError → 儲值制業主開不了新增視窗），加 null-guard
   if (!editingJobId) {
-    document.getElementById('job-paid').checked = true;
+    const paidEl = document.getElementById('job-paid');
+    if (paidEl) paidEl.checked = true;
   }
   // 顯示餘額提示
   const bal = clientBalance(cid);
@@ -13619,9 +13692,10 @@ function editJob(id) {
   editingJobId = id;
   document.getElementById('job-modal-title').textContent = '編輯案件';
   document.getElementById('job-delete-btn').classList.remove('hidden');
-  const cs = document.getElementById('job-client');
-  cs.innerHTML = sortedClientsForPicker().map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  cs.value = j.clientId;
+  // v3.37.0：編輯模式全部欄位展開
+  document.getElementById('job-modal').classList.remove('compact');
+  document.getElementById('job-quote-picker')?.classList.add('hidden');
+  _fillJobClientOptions(j.clientId);
   document.getElementById('job-date').value = j.date || '';
   document.getElementById('job-end-date').value = j.endDate || '';
   document.getElementById('job-title').value = j.title || '';
@@ -13704,6 +13778,7 @@ function duplicateJob() {
   set('job-duplicate-btn', el => el.classList.add('hidden'));
   set('job-save-done-btn', el => el.classList.remove('hidden'));  // v3.29.1
   set('job-discount-summary-hint', el => { el.textContent = ''; });  // v3.31.0：複製出的新案件不帶整單折扣備註
+  set('job-modal', el => el.classList.remove('compact'));  // v3.37.0：複製的欄位都有值 → 全部展開
   // 清狀態（新案件預設未完成、未收款、未取消、日期改成今天）
   set('job-date', el => { el.value = todayStr(); });
   set('job-end-date', el => { el.value = ''; });
@@ -14097,6 +14172,11 @@ function saveClient() {
     logAction('client-create', { clientId: newId, name: payload.name });
     // v3.23.0：mascot — 新業主
     if (typeof mascotSay === 'function') mascotSay('client-create');
+    // v3.37.0：從新增案件的「＋ 新增業主…」來的 → 案件 modal 還開著，業主選單直接選回新業主
+    if (document.getElementById('job-modal').classList.contains('open')) {
+      _fillJobClientOptions(newId);
+      onJobClientChange();
+    }
   }
   save(); closeClientModal(); render(); toast('已儲存');
 }
