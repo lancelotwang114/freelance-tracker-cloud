@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-10-v3.38.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-10-v3.38.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -12654,10 +12654,10 @@ function applyInvoiceWholeDiscount() {
     `⚠️ 以下 ${indiv.length} 筆案件已有個別折扣，套用整單折扣會「覆蓋」原本的折扣：\n\n` +
     indiv.map(j => `・${j.date || ''} ${j.title || '（無標題）'}（目前折 ${fmt(jobDiscountAmount(j))}）`).join('\n') +
     '\n\n確定要覆蓋嗎？（可用 Ctrl+Z 復原）')) return;
-  const label = type === 'percent' ? `整單折扣 ${value}%` : `整單折扣 ${fmt(value)}`;
-  pushUndoSnapshot(`已套用${label}（${jobs.length} 筆）`);
+  // 先算好每筆的折扣（不寫入），防呆通過才套用
+  let plan;
   if (type === 'percent') {
-    jobs.forEach(j => { j.discountType = 'percent'; j.discountValue = value; });
+    plan = jobs.map(j => ({ j, discountType: 'percent', discountValue: value }));
   } else {
     // 依原價比例分攤（最大餘數法）：先無條件捨去，剩下的 1 元依小數大小逐筆補
     //   → 每筆 0 ≤ 折扣 ≤ 原價、總和精確等於輸入值（value < base 已驗證，補 1 元時必有空間）
@@ -12669,8 +12669,28 @@ function applyInvoiceWholeDiscount() {
     shares.slice().sort((a, b) => b.frac - a.frac).forEach(x => {
       if (rest > 0 && x.n < (+x.j.amount || 0)) { x.n++; rest--; }
     });
-    shares.forEach(x => { x.j.discountType = 'fixed'; x.j.discountValue = x.n; });
+    plan = shares.map(x => ({ j: x.j, discountType: 'fixed', discountValue: x.n }));
   }
+  // v3.38.2 防呆：已收過款的案件 → 打折後可能「已收 > 應收」（多收），列出確認
+  //   正常流程是先打折再收款；這裡擋的是對已收款月份誤套用
+  const paidRows = plan.map(p => {
+    const paid = jobPaidTotal(p.j);
+    const after = jobFinalAmount({ amount: p.j.amount, discountType: p.discountType, discountValue: p.discountValue });
+    return { j: p.j, paid, after, over: Math.max(0, paid - after) };
+  }).filter(x => x.paid > 0);
+  if (paidRows.length) {
+    const over = paidRows.reduce((s, x) => s + x.over, 0);
+    const show = paidRows.slice(0, 10);
+    if (!confirm(
+      `⚠️ 以下 ${paidRows.length} 筆案件已經收過款，打折後應收會變少：\n\n` +
+      show.map(x => `・${x.j.date || ''} ${x.j.title || '（無標題）'}（已收 ${fmt(x.paid)} → 打折後應收 ${fmt(x.after)}）`).join('\n') +
+      (paidRows.length > show.length ? `\n…另外 ${paidRows.length - show.length} 筆` : '') +
+      (over > 0 ? `\n\n套用後帳面會「多收」${fmt(over)}（已收 > 應收）。` : '') +
+      '\n\n通常整單折扣要在收款前套用。確定還是要套用嗎？（可用 Ctrl+Z 復原）')) return;
+  }
+  const label = type === 'percent' ? `整單折扣 ${value}%` : `整單折扣 ${fmt(value)}`;
+  pushUndoSnapshot(`已套用${label}（${jobs.length} 筆）`);
+  plan.forEach(p => { p.j.discountType = p.discountType; p.j.discountValue = p.discountValue; });
   jobs.forEach(j => { j.discountNote = label; recomputePaidStatus(j); });
   save();
   logAction('invoice-whole-discount', { clientId: snap.client.id, clientName: snap.client.name, count: jobs.length, type, value });
