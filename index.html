@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-10-v3.37.0">
+<meta name="app-version" content="2026-10-10-v3.38.0">
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -707,11 +707,33 @@
   <!-- Settings -->
   <section id="tab-settings" class="hidden">
 
+    <!-- v3.38.0：設定頁分 4 組（我的資料 / 同步與備份 / 顯示 / 進階） -->
+    <h4 class="settings-group">我的資料</h4>
+
+    <!-- v3.38.0：個人資訊 / 收款帳號入口 + Logo（印在請款單、報價單） -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+        <div><b>👤 個人資訊與收款帳號</b><div style="font-size: 12px; color: var(--muted);">姓名、電話、Email、銀行帳號（請款單 / 報價單會帶入）</div></div>
+        <button class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId ? getInvSelectedAcctId() : null)">編輯 ›</button>
+      </div>
+      <div style="border-top: 1px solid var(--border); margin: 12px 0 0; padding-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <div id="brand-logo-preview" class="brand-logo-preview">尚未上傳</div>
+        <div style="flex: 1; min-width: 180px;">
+          <b>🖼️ Logo</b>
+          <div style="font-size: 12px; color: var(--muted); margin: 2px 0 6px;">顯示在請款單、報價單左上角（建議去背 PNG，會自動縮小）</div>
+          <label class="btn btn-outline btn-sm" style="cursor: pointer; margin: 0;">上傳 Logo<input type="file" accept="image/*" onchange="onBrandLogoFile(this)" hidden></label>
+          <button type="button" class="btn btn-ghost btn-sm hidden" id="brand-logo-remove" onclick="removeBrandLogo()">移除</button>
+        </div>
+      </div>
+    </div>
+
     <!-- v3.30.0：業主分頁按鈕隱藏後的列表入口 -->
     <div class="card" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
       <div><b>👥 業主管理</b><div style="font-size: 12px; color: var(--muted);">業主列表、聯絡資訊、個別統計</div></div>
       <button class="btn btn-outline btn-sm" onclick="switchTab('clients')">開啟 ›</button>
     </div>
+
+    <h4 class="settings-group">同步與備份</h4>
 
     <!-- ============== ☁️ 雲端同步（v3.24.16 改名 + 整合）============== -->
     <!-- v3.24.16：原「🔐 Google Drive 同步」改名「☁️ 雲端同步」，並把「💾 資料備份（離線）」+「📦 雲端備份歷史」併進來當 sub-section -->
@@ -807,6 +829,8 @@
     <!-- v3.6.1：移除 section 分類標題，所有 card 拉平展示；備份歷史移到最下面 -->
     <!-- v3.24.16：刪「我的收款資訊」卡（內容已搬到請款單分頁，這邊只是跳轉按鈕） -->
 
+    <h4 class="settings-group">顯示</h4>
+
     <!-- v3.22.8：顯示偏好（加新功能 toggle 都放這） -->
     <div class="card collapsible collapsed" id="card-display-pref">
       <div class="card-head" onclick="toggleCard('card-display-pref'); renderTagColorSettings();">
@@ -828,19 +852,19 @@
         <div class="section-divider"></div>
 
         <!-- 🤖 小幫手 sub-section（v3.24.16 從原獨立 card 搬來；v3.24.37 預設關閉 + 砍 dev tool 預覽） -->
-        <h4 style="margin: 4px 0 8px; font-size: 14px; font-weight: 600;">🤖 小幫手</h4>
+        <h4 style="margin: 4px 0 8px; font-size: 14px; font-weight: 600;">🐱 貓咪小幫手</h4>
         <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
           <input type="checkbox" id="pref-mascot-enabled" onchange="onMascotEnabledChange(this.checked)" style="margin-top: 3px;">
           <div>
-            <div style="font-weight: 500;">啟用小幫手（預設關閉）</div>
+            <div style="font-weight: 500;">啟用貓咪小幫手（預設關閉）</div>
             <div style="margin-top: 2px; color: var(--muted); font-size: 12px;">
-              左下角浮動的小角色。完成案件 / 收款 / 新增案件等時候會跳鼓勵文字。想要鼓勵動畫的人可以勾起來。
+              左下角的貓咪（6 隻每小時輪流）。提醒快截止、放超過 7 天的案件、本月已賺多少；點貓咪輪流看提醒。
             </div>
           </div>
         </label>
         <div id="mascot-extra-settings" class="hidden" style="margin-top: 12px; padding: 12px; background: var(--bg); border-radius: 8px;">
           <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500;">給它取個名字（選填）</label>
-          <input type="text" id="pref-mascot-name" placeholder="例如：小機、嘟嘟、肝寶…" maxlength="8" oninput="onMascotNameChange(this.value)" style="width: 100%; max-width: 200px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
+          <input type="text" id="pref-mascot-name" placeholder="例如：咪咪、阿肥、喵總…（留空用貓咪本名）" maxlength="8" oninput="onMascotNameChange(this.value)" style="width: 100%; max-width: 200px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
           <div style="margin-top: 6px; font-size: 11px; color: var(--muted);">取了名字之後，小幫手講話會自動帶上稱呼（例：「小機：完成一筆，做得好！」）</div>
           <div style="margin-top: 10px;">
             <button class="btn btn-outline btn-sm" onclick="mascotTestSay()">試試看 ▶</button>
@@ -864,6 +888,8 @@
          停用：桌面通知觸發（app.js 啟動 4 秒的 maybeFireNotifications 已刪除）。 -->
 
     <!-- v3.24.16：原「💾 資料備份」card 已搬進「☁️ 雲端同步」card 內當「💾 離線資料備份」sub-section -->
+
+    <h4 class="settings-group">進階</h4>
 
     <!-- 📅 Google Calendar 同步（v3.1.0 重做：直接打 Calendar API、不再經過 Apps Script） -->
     <div class="card collapsible collapsed" id="card-calendar">

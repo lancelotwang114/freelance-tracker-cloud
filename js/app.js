@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-10-v3.37.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-10-v3.38.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6040,6 +6040,7 @@ function renderAll() {
   renderClients();
   renderInvoice();
   if (currentTab === 'quote') renderQuote();  // v3.29.0：pull/merge 進來的 quoteSheet 要即時反映（隱藏時量不到標籤寬，切過去再畫）
+  renderBrandLogoPreview();  // v3.38.0：另一台換了 Logo → 設定頁預覽同步
   renderBadge();
   renderBackupStatus();
   // v3.0.0-alpha.3：把存摺照片 placeholder 換成實際 <img>（fire-and-forget；cache 命中秒出）
@@ -10325,7 +10326,7 @@ function renderJobTagsChips() {
   box.innerHTML = modalJobTags.map(t => `
     <span class="tag-chip">
       ${escapeHtml(t)}
-      <button type="button" onclick="removeJobTag('${escapeHtml(t).replace(/'/g, '&#39;')}')" title="移除標籤" aria-label="移除">×</button>
+      <button type="button" data-tag="${escapeHtml(t)}" onclick="removeJobTag(this.dataset.tag)" title="移除標籤" aria-label="移除">×</button>
     </span>`).join('');
 }
 
@@ -11414,7 +11415,7 @@ function renderQuoteSheet() {
     `</div></div>`).join('');
   const notes = q.notes.map(g => ({ t: g.title, l: String(g.lines || '').split('\n').filter(x => x.trim()) })).filter(g => g.l.length);
   view.innerHTML = `<div class="qs-sheet">
-    <div class="qs-band"><div><h1>${e(q.title)}</h1><small>${e(q.en)}</small>${q.client ? `<div class="qs-client">${e(q.client)}</div>` : ''}</div>
+    <div class="qs-band"><div>${brandLogoImg('qs-logo')}<h1>${e(q.title)}</h1><small>${e(q.en)}</small>${q.client ? `<div class="qs-client">${e(q.client)}</div>` : ''}</div>
       <div class="qs-meta">${[['聯絡人', q.contactName], ['電話', q.phone], ['Email', q.email], ['報價日期', q.date]].filter(x => x[1]).map(([k, v]) => `<span>${k}</span><b>${e(v)}</b>`).join('')}</div></div>
     <div class="qs-body">${secs}
       <div class="qs-bt">
@@ -11543,6 +11544,57 @@ async function captureQuoteCanvas() {
   await document.fonts.ready;
   await loadScript(HTML2CANVAS_CDN);
   return html2canvas(sheet, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+}
+
+// ============== v3.38.0：Logo（請款單 / 報價單左上角） ==============
+// 業務資料 → config.brandLogo（data URL，獨立 key：跟 userInfo / 收款帳號分開合併，兩台各改各的不衝突）
+// 上傳時縮到最長邊 320px；PNG 保留透明，超過 120KB 改 WebP（仍保留透明）以免拖大 Drive 同步檔
+const BRAND_LOGO_MAX_PX = 320;
+function onBrandLogoFile(input) {
+  const file = input.files && input.files[0];
+  input.value = '';  // 同一張可再選
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { toast('請選擇圖片檔'); return; }
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const s = Math.min(1, BRAND_LOGO_MAX_PX / Math.max(img.width, img.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(img.width * s));
+    cv.height = Math.max(1, Math.round(img.height * s));
+    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    let data = cv.toDataURL('image/png');
+    if (data.length > 120 * 1024) data = cv.toDataURL('image/webp', 0.9);
+    config.brandLogo = data;
+    saveConfigOnly();
+    renderBrandLogoPreview();
+    renderAll();
+    toast(`✓ Logo 已更新（${Math.round(data.length / 1024)} KB）`);
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('讀不到這張圖片'); };
+  img.src = url;
+}
+
+function removeBrandLogo() {
+  if (!config.brandLogo || !confirm('移除 Logo？請款單 / 報價單將不再顯示。')) return;
+  delete config.brandLogo;
+  saveConfigOnly();
+  renderBrandLogoPreview();
+  renderAll();
+}
+
+function renderBrandLogoPreview() {
+  const box = document.getElementById('brand-logo-preview');
+  if (!box) return;
+  box.innerHTML = brandLogoImg('') || '尚未上傳';
+  document.getElementById('brand-logo-remove')?.classList.toggle('hidden', !config.brandLogo);
+}
+
+// data URL 只接受圖片格式，避免設定檔被竄改時注入 HTML
+function brandLogoImg(cls) {
+  const d = config.brandLogo;
+  return (typeof d === 'string' && /^data:image\/(png|webp|jpeg|gif);base64,[A-Za-z0-9+/=]+$/.test(d)) ? `<img class="${cls}" src="${d}" alt="">` : '';
 }
 
 function getQuoteFilename(ext) {
@@ -12542,8 +12594,47 @@ function renderInvoicePick(cid, inFilter, picked) {
         <button type="button" class="btn btn-outline btn-sm" onclick="applyInvoiceWholeDiscount()">套用到已選案件</button>
         ${hasWhole ? '<button type="button" class="btn btn-ghost btn-sm" onclick="clearInvoiceWholeDiscount()">清除整單折扣</button>' : ''}
       </div>
+      ${_invTierHint(cid, picked)}
     </div>
   </details>`;
+}
+
+// v3.38.0：門檻折扣提示 — 從該業主報價單（沒有專屬則公版）備註解析「滿 NT$X … 打 Y 折」
+//   報價單文字就是規則來源；只提示 + 帶入欄位，不自動套用
+function _quoteDiscountTiers(cid) {
+  const c = getClient(cid);
+  const q = (c && c.quoteSheet) || _quoteBase();
+  const text = (q.notes || []).map(g => String(g.lines || '')).join('\n');
+  const tiers = [];
+  const re = /滿\s*(?:NT\$|\$)?\s*([\d,]+)[^\n]*?打\s*([\d.]+)\s*折/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const min = +m[1].replace(/,/g, '');
+    const z = parseFloat(m[2]);
+    // 95 折 → 5%、9 折 → 10%、8.5 折 → 15%；≤ 10 視為「幾折」（10 折 = 不打折 → 排除，不會誤判成 90%）
+    const pct = Math.round((z <= 10 ? 100 - z * 10 : 100 - z) * 10) / 10;
+    if (min > 0 && pct > 0 && pct < 100) tiers.push({ min, pct, text: m[0].trim() });
+  }
+  return tiers.sort((a, b) => b.min - a.min);
+}
+
+function _invTierHint(cid, picked) {
+  const base = picked.filter(j => !j.cancelled && !j.isEstimate).reduce((s, j) => s + (+j.amount || 0), 0);
+  const tier = _quoteDiscountTiers(cid).find(t => base >= t.min);
+  if (!tier) return '';
+  if (picked.some(j => j.discountNote === `整單折扣 ${tier.pct}%`)) {
+    return `<div class="inv-wd-hint">✓ 已套用報價單門檻折扣（${escapeHtml(tier.text)}）</div>`;
+  }
+  return `<div class="inv-wd-hint">💡 原價合計 ${fmt(base)}，符合報價單「${escapeHtml(tier.text)}」
+    <button type="button" class="btn btn-outline btn-sm" onclick="useInvoiceTier(${tier.pct})">帶入 ${tier.pct}%</button></div>`;
+}
+
+function useInvoiceTier(pct) {
+  document.getElementById('inv-wd-type').value = 'percent';
+  const v = document.getElementById('inv-wd-value');
+  v.value = pct;
+  v.focus();
+  toast(`已帶入 ${pct}%，確認後按「套用到已選案件」`, 3000);
 }
 
 function applyInvoiceWholeDiscount() {
@@ -12714,6 +12805,7 @@ function drawInvoice() {
     ${topPersonalLine}
     <div class="invoice-header">
       <div>
+        ${brandLogoImg('invoice-logo')}
         <h2 class="invoice-title">請款單</h2>
         <div class="invoice-title-en">INVOICE</div>
         <div class="meta">業主：${escapeHtml(c.name)}</div>
@@ -13352,13 +13444,19 @@ function pickJobQuoteItem(ci, ii) {
   const it = cat && cat.items[ii];
   if (!it) return;
   document.getElementById('job-title').value = it.item + (it.detail ? '・' + it.detail : '');
+  _jobAmountManuallyEdited = false;  // 讓 單價 × 數量 重算總金額
   if (it.price != null && it.price !== '') {
     document.getElementById('job-unit-price').value = +it.price;
-    _jobAmountManuallyEdited = false;  // 讓 單價 × 數量 重算總金額
-    onJobUnitOrQtyChange();
+  } else {
+    // 另報價：清掉前一次帶入 / 手填的單價與總金額，避免舊金額配新名稱被存進去
+    document.getElementById('job-unit-price').value = '';
+    document.getElementById('job-quantity').value = 1;
+    document.getElementById('job-amount').value = '';
   }
-  // 類別當標籤（已有就不重複）→ 收益頁類型分佈自動分好
-  if (cat.name && !modalJobTags.includes(cat.name)) { modalJobTags.push(cat.name); renderJobTagsChips(); }
+  onJobUnitOrQtyChange();
+  // 類別當標籤（已有就不重複；空白範本的佔位名稱「類別」不寫進資料）→ 收益頁類型分佈自動分好
+  const tag = (cat.name || '').trim();
+  if (tag && tag !== QUOTE_DEFAULT.cats[0].name && !modalJobTags.includes(tag)) { modalJobTags.push(tag); renderJobTagsChips(); }
   document.getElementById('job-quote-picker').classList.add('hidden');
   toast('✓ 已帶入，可再自行修改', 2000);
 }
@@ -13914,6 +14012,8 @@ function saveJob() {
     laborReported: !!document.getElementById('job-labor-reported')?.checked
   };
   // v3.27.1（R18）：驗證錯誤 inline — 欄位標紅 + focus，不再只丟底部 toast
+  // v3.38.0：業主必須是真的業主（擋「＋ 新增業主…」佔位值被存成 clientId → 孤兒案件）
+  if (!getClient(payload.clientId)) { _markFieldError('job-client', '請選擇業主'); return; }
   if (!payload.title) { _markFieldError('job-title', '請輸入案件名稱'); return; }
   // v3.24.0：擋負金額（0 仍允許 — 估價 / 諮詢用）
   if (payload.amount < 0) { _markFieldError('job-amount', '案件金額不能是負數'); return; }
@@ -14236,7 +14336,8 @@ function enterClientMode(cid) {
   const c = getClient(cid);
   if (!c) { alert('找不到此業主的資料'); return; }
   document.querySelector('nav.tabs').style.display = 'none';
-  document.getElementById('fab-add').style.display = 'none';
+  // v3.38.0：整組 FAB 都藏（v3.37 起多了 ⋯ / 新增業主，只藏 #fab-add 會在唯讀業主模式露出編輯入口）
+  document.getElementById('fab-wrap').style.display = 'none';
   document.getElementById('page-title').textContent = c.name + ' - 請款單';
   document.getElementById('page-sub').textContent = '只讀檢視';
   document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden'));
