@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-10-v3.38.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-10-v3.38.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -9251,6 +9251,7 @@ function onMascotEnabledChange(checked) {
   const extra = document.getElementById('mascot-extra-settings');
   if (extra) extra.classList.toggle('hidden', !mascotState.enabled);
   if (!mascotState.enabled) mascotHideBubble();
+  else mascotUpdateBadge();  // v3.38.1：剛開啟就刷新紅點（原本要等 render / 每分鐘 tick，最多晚 60 秒）
   toast(checked ? '✓ 已啟用小幫手' : '✓ 已關閉小幫手', 2000);
 }
 
