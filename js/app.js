@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-12-v3.40.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-12-v3.41.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5096,7 +5096,7 @@ const ACTION_LABELS = {
   'calendar-sync':          { icon: '📅', label: '同步到 Google Calendar' },
   'calendar-sync-error':    { icon: '⚠️', label: 'Calendar 同步失敗' }
 };
-const COLORS = ['#ef4444','#f59e0b','#10b981','#2563eb','#8b5cf6','#ec4899','#14b8a6','#64748b'];
+const COLORS = ['#d9708f','#9a7bd0','#e0915a','#5fa3c4','#c9a23f','#7fa98a','#c77fb8','#8c8597'];  // v3.41.0：新業主預設色改糖果色系（既有業主顏色不動）
 
 let state = {
   clients: [],
@@ -6993,7 +6993,7 @@ function renderDashboard() {
   const recent = dashPendingJobs();
   const recentBox = document.getElementById('recent-jobs');
   if (!recent.length) {
-    recentBox.innerHTML = emptyState('☕ 沒有待完成案件', '享受空檔，或點右下角 + 接新案');
+    recentBox.innerHTML = emptyState('沒有待完成案件', '享受空檔，或按上方「新增案件」接新案');
   } else {
     let html = '';
     if (dashBulkMode) {
@@ -7368,7 +7368,7 @@ function renderJobs() {
         `<button class="chip ${state.filters.clientId==='all'?'active':''}" onclick="setFilter('clientId','all')">全部</button>` +
         // v3.28.2（R1）：> N 顆收合成 更多▾
         collapseChipRow(
-          state.clients.map(c => `<button class="chip ${state.filters.clientId===c.id?'active':''}" onclick="setFilter('clientId','${c.id}')" style="${state.filters.clientId===c.id?'':'border-left: 3px solid '+c.color+';'}">${escapeHtml(c.name)}</button>`),
+          state.clients.map(c => `<button class="chip ${state.filters.clientId===c.id?'active':''}" onclick="setFilter('clientId','${c.id}')" ><span class="chip-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}</button>`),
           state.clients.findIndex(c => c.id === state.filters.clientId),
           'client') +
       '</div>' +
@@ -8488,7 +8488,7 @@ function setClientTagFilter(t) {
 
 function renderClients() {
   const container = document.getElementById('clients-list');
-  if (!state.clients.length) { container.innerHTML = emptyState('還沒有業主', '點右下角 + 新增第一個業主'); return; }
+  if (!state.clients.length) { container.innerHTML = emptyState('還沒有業主', '按上方「新增案件」旁的 ▾ 新增第一個業主'); return; }
 
   // 標籤篩選 chips（有業主帶標籤才顯示；標籤消失時自動重置）
   const tagFilterBox = document.getElementById('client-tag-filter');
@@ -13393,6 +13393,40 @@ function renderInvoiceNetBreakdown() {
   body.innerHTML = lines.join('<br>');
 }
 
+// v3.41.0：瀏覽器原生 alert → 站內提示框（非阻塞，多則依序顯示）。
+// 全站 43 處 alert() 皆已確認後面沒有緊接 reload / 跳頁，改非阻塞不影響流程；confirm() 仍用原生（同步回傳，之後分批改）
+const _uiAlertQueue = [];
+function uiAlert(msg) {
+  _uiAlertQueue.push(msg == null ? '' : String(msg));
+  if (_uiAlertQueue.length === 1) _uiAlertShow();
+}
+function _uiAlertShow() {
+  if (!_uiAlertQueue.length) return;
+  let ov = document.getElementById('ui-alert');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'ui-alert';
+    ov.className = 'ui-alert-ov';
+    ov.innerHTML = '<div class="ui-alert" role="alertdialog" aria-modal="true" aria-labelledby="ui-alert-msg"><div class="ui-alert-msg" id="ui-alert-msg"></div><button type="button" class="btn btn-primary">知道了</button></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('button').addEventListener('click', _uiAlertClose);
+    ov.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); _uiAlertClose(); } });
+  }
+  ov._prevFocus = document.activeElement;
+  ov.querySelector('.ui-alert-msg').textContent = _uiAlertQueue[0];
+  ov.classList.add('open');
+  ov.querySelector('button').focus();
+}
+function _uiAlertClose() {
+  const ov = document.getElementById('ui-alert');
+  if (!ov) return;
+  ov.classList.remove('open');
+  _uiAlertQueue.shift();
+  if (_uiAlertQueue.length) setTimeout(_uiAlertShow, 120);
+  else if (ov._prevFocus && ov._prevFocus.focus) { try { ov._prevFocus.focus(); } catch (_) {} }
+}
+window.alert = uiAlert;
+
 function emptyState(title, sub) {
   return `<div class="empty"><div class="icon"><span class="msr">inbox</span></div><div style="font-weight: 500;">${title}</div><div style="font-size: 13px; margin-top: 4px;">${sub}</div></div>`;
 }
@@ -13474,6 +13508,7 @@ function renderTodayTodo() {
   // v3.24.37：沒任何重點 → 顯示空 state（不再隱藏卡，行動永遠優先顯示）
   // v3.24.40：空 state 文字配合新範圍（月底 + 拖款）
   card.classList.remove('hidden');
+  card.classList.toggle('is-empty', items.length === 0);  // v3.41.0：沒重點時縮成一行
   if (items.length === 0) {
     box.innerHTML = `<div class="today-todo-item" style="opacity:.65;">
       <span class="today-todo-icon">☕</span>

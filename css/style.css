@@ -2257,7 +2257,7 @@ input:focus, select:focus, textarea:focus {
 .row-compact {
   display: grid;
   /* v3.26.0（設計D）：第一欄 12px 小點 → 20px avatar chip */
-  grid-template-columns: 20px 50px 1fr auto auto auto;
+  grid-template-columns: 20px 50px 1fr auto auto auto auto;  /* v3.41.0：7 個子元素（含快捷鈕）→ 7 欄，不再擠成兩行 */
   gap: 8px;
   align-items: center;
   padding: 6px 10px;
@@ -3163,6 +3163,8 @@ body.view-board #jobs-group-control {
   font-size: 12px;
   color: var(--muted);
   font-weight: 500;
+  white-space: nowrap;  /* v3.41.0：兩字標籤在 flex 內被擠成直排 */
+  flex-shrink: 0;
 }
 /* v3.6.1：label + select 視覺分組，避免 label 黏在前一個元件上 */
 .rev-control-group {
@@ -4480,3 +4482,30 @@ select.doc-chip-more { width: auto; padding: 5px 10px; font-size: 13px; border-r
 .job-amt-op { padding-top: 30px; color: var(--muted); font-size: 16px; }
 .invoice-side #inv-pay-account ~ .btn .msr { font-size: 16px; }
 @media (max-width: 640px) { .invoice-side #inv-pay-account { flex-basis: 100% !important; } }  /* 手機：帳號選單獨占一行，按鈕換到下一行 */
+
+/* ==================== v3.41.0：質感調整（字體 / 顏色收斂 / 互動回饋 / 圓角 / 站內提示框） ==================== */
+html[data-palette] body { font-family: "Plus Jakarta Sans", "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+h1, h2, h3, h4 { text-wrap: balance; }
+p { text-wrap: pretty; }
+/* 顏色收斂：業主色只留在頭像（降彩度），列左側色條拿掉（與頭像重複）；篩選鈕改小圓點 */
+.row-compact { border-left: 0 !important; }
+.client-chip, .chip-dot { filter: saturate(.6) brightness(1.06); }
+.chip-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+/* 圓角三級：控制項 10 / 卡片 16 / 膠囊全圓（內層小元件維持較小圓角） */
+html[data-palette] .card { border-radius: 16px; }
+html[data-palette] .btn, html[data-palette] input:not([type="checkbox"]):not([type="radio"]), html[data-palette] select, html[data-palette] textarea { border-radius: 10px; }
+/* 互動回饋：按下微沉、過渡一致；鍵盤焦點框 */
+.btn, .chip, .doc-chip, .tb-new, .tb-new-caret, nav.tabs button { transition: background-color .2s, border-color .2s, color .2s, box-shadow .2s, transform .1s; }
+.btn:active:not(:disabled), .chip:active, .doc-chip:active, .tb-new:active, .tb-new-caret:active, nav.tabs button:active { transform: translateY(1px); }
+button:focus-visible, a:focus-visible, summary:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* 今天的重點：沒內容時縮成一行 */
+.today-todo-card.is-empty { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+.today-todo-card.is-empty h3 { margin: 0 !important; }
+.today-todo-card.is-empty .today-todo-item { padding: 0; }
+/* 站內提示框（取代原生 alert） */
+.ui-alert-ov { position: fixed; inset: 0; z-index: 100000; display: none; align-items: center; justify-content: center; padding: 16px; background: rgba(40, 20, 30, .32); }
+.ui-alert-ov.open { display: flex; }
+.ui-alert { background: var(--card); color: var(--text); border-radius: 16px; padding: 20px 20px 16px; width: min(420px, 100%); box-shadow: 0 12px 40px -8px rgba(120, 60, 90, .35); display: grid; gap: 16px; }
+.ui-alert-msg { white-space: pre-line; font-size: 15px; line-height: 1.6; max-height: 60vh; overflow: auto; }
+.ui-alert .btn { justify-self: end; min-width: 96px; }
+@media (prefers-reduced-motion: no-preference) { .ui-alert-ov.open .ui-alert { animation: sgRise .22s cubic-bezier(.2, .8, .2, 1); } }
