@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-12-v3.41.0">
+<meta name="app-version" content="2026-10-13-v3.42.0">
 <meta name="theme-color" content="#c4567f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -189,6 +189,16 @@
         <div class="label">本月已收款</div>
         <div class="value" id="stat-paid">NT$0</div>
         <div class="delta" id="stat-paid-sub">0 筆</div>
+        <!-- v3.42.0：主角卡底部 — 比上月同期 + 年度累積 + 近 6 個月趨勢線（年度累積從獨立一條併進來） -->
+        <div class="stat-hero-foot">
+          <div class="stat-hero-meta">
+            <span class="stat-hero-delta hidden" id="stat-paid-delta"></span>
+            <div class="stat-hero-year clickable" onclick="event.stopPropagation(); dashStatJump('year')" title="點擊查看年度已收款的案件">
+              <span id="stat-year-sub">年度累積</span> <span class="value" id="stat-year">NT$0</span>
+            </div>
+          </div>
+          <svg class="stat-hero-spark" id="stat-paid-spark" viewBox="0 0 240 56" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
       </div>
       <div class="stat warning clickable" onclick="dashStatJump('unpaid')" title="點擊查看本月完成待收款的案件">
         <div class="label">本月待收款</div>
@@ -200,12 +210,6 @@
         <div class="value" id="stat-pending">NT$0</div>
         <div class="delta" id="stat-pending-sub" style="color: var(--muted);">0 筆</div>
       </div>
-    </div>
-    <!-- v3.24.37：年度收益降為次行 caption（單行小字），跟「本月」3 卡並列會混淆 -->
-    <div class="stat-year-caption clickable" onclick="dashStatJump('year')" title="點擊查看年度已收款的案件">
-      <span class="msr">insights</span> <span class="label">年度累積</span>
-      <span class="value" id="stat-year">NT$0</span>
-      <span class="delta" id="stat-year-sub"></span>
     </div>
 
     <!-- v3.24.18：今天該做什麼（v3.26.0 設計C：移到 hero 數字之後） -->

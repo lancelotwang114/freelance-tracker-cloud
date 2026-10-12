@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-12-v3.41.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-13-v3.42.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6951,6 +6951,47 @@ function renderBadge() {
 }
 
 // ============== Dashboard ==============
+// v3.42.0：「本月已收」主角卡 — 比上月同期（1～今天日期）+ 近 6 個月已收趨勢線；已收的歸月規則與 stat-paid 相同（payment.date）
+function _renderPaidHeroTrend(active, m) {
+  const [yy, mm] = m.split('-').map(Number);
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(yy, mm - 1 - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  const prevM = months[4];
+  const day = new Date().getDate();
+  const sums = Object.fromEntries(months.map(k => [k, 0]));
+  let prevSame = 0;
+  active.forEach(j => (j.payments || []).forEach(p => {
+    const k = getMonth(p.date), amt = +p.amount || 0;
+    if (k in sums) sums[k] += amt;
+    if (k === prevM && +String(p.date).slice(8, 10) <= day) prevSame += amt;
+  }));
+  const cur = sums[m];
+  const dEl = document.getElementById('stat-paid-delta');
+  if (dEl) {
+    // 上月同期 0 → 百分比沒意義，不顯示
+    dEl.classList.toggle('hidden', !prevSame);
+    if (prevSame) {
+      const pct = Math.round((cur - prevSame) / prevSame * 100);
+      dEl.className = 'stat-hero-delta ' + (pct >= 0 ? 'up' : 'down');
+      dEl.textContent = `${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct)}% 比上月同期`;
+      dEl.title = `上月 1～${day} 日已收 ${fmt(prevSame)}`;
+    }
+  }
+  const svg = document.getElementById('stat-paid-spark');
+  if (!svg) return;
+  const vals = months.map(k => sums[k]);
+  const W = 240, H = 56, max = Math.max(...vals, 1);
+  const pts = vals.map((v, i) => [i * W / 5, H - 4 - v / max * (H - 12)]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  svg.innerHTML = `<defs><linearGradient id="paid-spark-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color: var(--primary); stop-opacity: .22"/><stop offset="1" style="stop-color: var(--primary); stop-opacity: 0"/></linearGradient></defs>` +
+    `<path d="${line} L${W} ${H} L0 ${H} Z" fill="url(#paid-spark-fill)"/>` +
+    `<path d="${line}" fill="none" style="stroke: var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` +
+    `<title>近 6 個月已收：${months.map((k, i) => `${k.slice(5)}月 ${fmt(vals[i])}`).join('、')}</title>`;
+}
+
 function renderDashboard() {
   // v3.6.0：完全無資料時顯示 empty state 引導卡，4 張 stat 數字仍是 $0 但有 CTA
   const isEmpty = (state.clients.length === 0) && (state.jobs.length === 0);
@@ -6987,7 +7028,8 @@ function renderDashboard() {
   countUpStat('stat-pending', pendingAmt);
   document.getElementById('stat-pending-sub').textContent = monthJobs.filter(j=>!j.done).length + ' 筆';
   countUpStat('stat-year', yearAmt);
-  document.getElementById('stat-year-sub').textContent = year + ' 年已收款';
+  document.getElementById('stat-year-sub').textContent = year + ' 年累積';
+  _renderPaidHeroTrend(active, m);
 
   // v3.28.5：近期案件 → 待完成案件（全部顯示、舊→新、標完成即消失，跟熱路徑吻合）
   const recent = dashPendingJobs();
