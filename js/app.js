@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-13-v3.42.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-13-v3.43.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -564,7 +564,8 @@ function cloudAutoPullThrottled(trigger) {
 function _isAnyModalOpen() {
   // 找有 .open 或 .show 的 modal-bg / modal class
   const selectors = ['.modal-bg.open', '.modal-bg.show', '.modal.open', '.modal.show',
-                     '#job-modal.open', '#client-modal.open', '#invoice-modal.open'];
+                     '#job-modal.open', '#client-modal.open', '#invoice-modal.open',
+                     '.ui-alert-ov.open'];  // v3.43.0：站內確認 / 提示框開著也延後（確認期間不讓 pull 換掉 state）
   for (const sel of selectors) {
     try { if (document.querySelector(sel)) return true; } catch (_) {}
   }
@@ -1487,9 +1488,9 @@ function renderAccountDropdownMenu() {
 }
 
 // v3.24.38：dropdown 內登出前 confirm（避免誤點）
-function confirmCloudSignOut() {
+async function confirmCloudSignOut() {
   if (!isCloudSignedIn()) return;
-  const ok = confirm('登出 Google？\n\n本機資料會保留，但不會再跟 Drive 同步。\n下次登入會自動拉雲端最新版本。');
+  const ok = await uiConfirm('登出 Google？\n\n本機資料會保留，但不會再跟 Drive 同步。\n下次登入會自動拉雲端最新版本。');
   if (ok && typeof cloudSignOut === 'function') cloudSignOut();
 }
 
@@ -3625,7 +3626,7 @@ async function cloudRestoreSnapshot(fileId) {
 
 async function cloudDeleteSnapshot(fileId) {
   if (!isCloudSignedIn()) { alert('請先登入'); return; }
-  if (!confirm('確定要刪除這筆 snapshot？此動作無法還原。')) return;
+  if (!await uiConfirm('確定要刪除這筆 snapshot？此動作無法還原。')) return;
   toastProgress('🗑️ 刪除中…');
   try {
     await driveDeleteFile(fileId);
@@ -6459,9 +6460,9 @@ function confirmBulkDiscount() {
   render();
 }
 
-function dashBulkMarkCancelled() {
+async function dashBulkMarkCancelled() {
   if (!dashBulkSelected.size) return;
-  if (!confirm(`確定要把 ${dashBulkSelected.size} 筆案件標記為已取消？\n\n（取消的案件不計入收益統計，但保留紀錄）`)) return;
+  if (!await uiConfirm(`確定要把 ${dashBulkSelected.size} 筆案件標記為已取消？\n\n（取消的案件不計入收益統計，但保留紀錄）`)) return;
   const ids = Array.from(dashBulkSelected);
   // v3.15.0：snapshot for undo
   pushUndoSnapshot(`已取消 ${ids.length} 筆案件`);
@@ -6511,9 +6512,9 @@ function bulkInvert() {
   renderJobs();
 }
 
-function bulkMarkDone() {
+async function bulkMarkDone() {
   if (!bulkSelected.size) { toast('沒有選任何案件'); return; }
-  if (!confirm(`將選中的 ${bulkSelected.size} 筆案件標記為「已完成」（如果已是完成不變）？`)) return;
+  if (!await uiConfirm(`將選中的 ${bulkSelected.size} 筆案件標記為「已完成」（如果已是完成不變）？`)) return;
   // v3.15.0：snapshot for undo
   pushUndoSnapshot(`已標記 ${bulkSelected.size} 筆完成`);
   let n = 0;
@@ -6553,16 +6554,16 @@ function bulkMarkPaid() {
   openPaidDateModal([...bulkSelected]);
 }
 
-function bulkDelete() {
+async function bulkDelete() {
   if (!bulkSelected.size) { toast('沒有選任何案件'); return; }
   // v3.15.0：5 筆以下不需要二次驗證（有 undo 接住），多筆才嚴格 confirm
   const cnt = bulkSelected.size;
   if (cnt > 5) {
-    if (!confirm(`⚠️ 即將刪除 ${cnt} 筆案件！\n\n8 秒內可復原，超過 8 秒就只能從 Drive 備份還原。確定？`)) return;
-    const verify = prompt('最後確認：請輸入「確認刪除」四個字');
+    if (!await uiConfirm(`⚠️ 即將刪除 ${cnt} 筆案件！\n\n8 秒內可復原，超過 8 秒就只能從 Drive 備份還原。確定？`)) return;
+    const verify = await uiPrompt('最後確認：請輸入「確認刪除」四個字');
     if (verify !== '確認刪除') { toast('已取消'); return; }
   } else {
-    if (!confirm(`即將刪除 ${cnt} 筆案件（8 秒內可復原），確定？`)) return;
+    if (!await uiConfirm(`即將刪除 ${cnt} 筆案件（8 秒內可復原），確定？`)) return;
   }
   pushUndoSnapshot(`已刪除 ${cnt} 筆案件`);
   state.jobs = state.jobs.filter(j => !bulkSelected.has(j.id));
@@ -10887,10 +10888,10 @@ function finishActiveTimer() {
 }
 
 // 重設：清空累積但保留 jobId（按繼續會從 0 開始）
-function resetActiveTimer() {
+async function resetActiveTimer() {
   if (!activeTimer.jobId) return;
   if (getActiveTimerMs() > 0) {
-    if (!confirm('確定清空這段計時？此案件累計工時會歸零。')) return;
+    if (!await uiConfirm('確定清空這段計時？此案件累計工時會歸零。')) return;
   }
   activeTimer.startedAt = 0;
   activeTimer.accumulatedMs = 0;
@@ -10932,11 +10933,11 @@ function renderActiveTimerWidget() {
 }
 
 // Top bar widget 點擊：跳到該案件 modal
-function focusActiveTimerJob() {
+async function focusActiveTimerJob() {
   if (!activeTimer.jobId) return;
   const j = state.jobs.find(x => x.id === activeTimer.jobId);
   if (!j) {
-    if (confirm('原計時案件已被刪除，要清掉計時器嗎？')) clearActiveTimer();
+    if (await uiConfirm('原計時案件已被刪除，要清掉計時器嗎？')) clearActiveTimer();
     return;
   }
   editJob(activeTimer.jobId);
@@ -10979,7 +10980,7 @@ function refreshModalTimerDisplay(jobId, fallbackTimeSpentMs) {
 }
 
 // modal 內按「▶ 開始 / ⏸ 暫停 / ▶ 繼續」
-function toggleJobTimer() {
+async function toggleJobTimer() {
   const targetId = (typeof editingJobId !== 'undefined') ? editingJobId : null;
   if (!targetId) { toast('請先儲存案件再開始計時'); return; }
   if (activeTimer.jobId === targetId && activeTimer.startedAt) {
@@ -10989,14 +10990,14 @@ function toggleJobTimer() {
     if (activeTimer.jobId && activeTimer.jobId !== targetId) {
       const otherJob = state.jobs.find(x => x.id === activeTimer.jobId);
       const otherTitle = otherJob ? (otherJob.title || '案件') : '其他案件';
-      if (!confirm(`目前正在計時「${otherTitle}」，要切換到目前這個案件嗎？\n（前一個的計時會自動暫停並寫回工時）`)) return;
+      if (!await uiConfirm(`目前正在計時「${otherTitle}」，要切換到目前這個案件嗎？\n（前一個的計時會自動暫停並寫回工時）`)) return;
     }
     startActiveTimer(targetId);
   }
 }
 
 // modal 內按「重設」
-function resetJobTimer() {
+async function resetJobTimer() {
   const targetId = (typeof editingJobId !== 'undefined') ? editingJobId : null;
   if (!targetId) return;
   // 如果重設的是當前計時案件，呼叫 resetActiveTimer
@@ -11006,7 +11007,8 @@ function resetJobTimer() {
     // 重設別的案件的 timeSpentMs（沒在跑全局計時）
     const j = state.jobs.find(x => x.id === targetId);
     if (j && +j.timeSpentMs > 0) {
-      if (!confirm('確定清空此案件累計工時？')) return;
+      if (!await uiConfirm('確定清空此案件累計工時？')) return;
+      if (!state.jobs.includes(j)) { toast('資料剛同步更新，請再操作一次', 4000); return; }
       j.timeSpentMs = 0;
       save();
       refreshModalTimerDisplay();
@@ -11136,9 +11138,9 @@ async function exportSingleJobPDF() {
   }
 }
 
-function confirmEstimateAsJob() {
+async function confirmEstimateAsJob() {
   if (!editingJobId) return;
-  if (!confirm('確認接案？\n\n會把這張估價單轉成正式案件，計入收益統計。')) return;
+  if (!await uiConfirm('確認接案？\n\n會把這張估價單轉成正式案件，計入收益統計。')) return;
   const j = state.jobs.find(x => x.id === editingJobId);
   if (!j) return;
   j.isEstimate = false;
@@ -11163,7 +11165,7 @@ async function copyIcalUrl() {
     toast('✓ 已複製訂閱連結到剪貼簿', 4000);
   } catch (err) {
     // fallback
-    prompt('複製此連結（Ctrl+C / Cmd+C）：', url);
+    await uiPrompt('複製此連結（Ctrl+C / Cmd+C）：', url);
   }
 }
 
@@ -11846,13 +11848,13 @@ document.getElementById('quote-editor')?.addEventListener('input', ev => {
   renderQuoteTarget();   // 第一次編輯 → 提示從「尚未建立」變「專屬」
   renderQuoteSheet();
 });
-document.getElementById('quote-editor')?.addEventListener('click', ev => {
+document.getElementById('quote-editor')?.addEventListener('click', async ev => {
   const b = ev.target.closest('[data-qa]');
   if (!b) return;
   const a = b.dataset.qa, c = +b.dataset.c, cur = getQuoteSheet();
   // confirm 放在 quoteMutable() 之前：取消時不該把預設值寫進 config 推 Drive
-  if (a === 'catDel' && !confirm(`刪除類別「${cur.cats[c].name}」和底下所有項目？`)) return;
-  if (a === 'ngDel' && !confirm(`刪除備註分組「${cur.notes[c].title}」？`)) return;
+  if (a === 'catDel' && !await uiConfirm(`刪除類別「${cur.cats[c].name}」和底下所有項目？`)) return;
+  if (a === 'ngDel' && !await uiConfirm(`刪除備註分組「${cur.notes[c].title}」？`)) return;
   const m = quoteMutable();
   if (!m) { _quoteTargetGone(); return; }  // v3.32.0
   QUOTE_ACTIONS[a](m, c, +b.dataset.i);
@@ -11870,18 +11872,19 @@ document.getElementById('quote-editor')?.addEventListener('focusout', ev => {
   }
 });
 
-function resetQuoteSheet() {
+async function resetQuoteSheet() {
   // v3.32.0：業主專屬 → 刪掉專屬內容，回到顯示公版（可 Ctrl+Z 復原）
   const c = quoteTarget ? getClient(quoteTarget) : null;
   if (quoteTarget && !c) { _quoteTargetGone(); return; }  // 業主已刪 → 不可落到下面還原公版
   if (c) {
     if (!c.quoteSheet) return;
-    if (!confirm(`「${c.name}」的專屬報價單重設為公版？專屬的修改會清掉（另一台電腦同步後也會重設，可用 Ctrl+Z 復原）。`)) return;
+    if (!await uiConfirm(`「${c.name}」的專屬報價單重設為公版？專屬的修改會清掉（另一台電腦同步後也會重設，可用 Ctrl+Z 復原）。`)) return;
+    if (!state.clients.includes(c)) { toast('資料剛同步更新，請再操作一次', 4000); return; }
     pushUndoSnapshot(`已重設「${c.name}」報價單為公版`);
     delete c.quoteSheet;
     save();
   } else {
-    if (!confirm('公版報價單還原成預設內容？目前的修改會清掉（另一台電腦同步後也會還原）。')) return;
+    if (!await uiConfirm('公版報價單還原成預設內容？目前的修改會清掉（另一台電腦同步後也會還原）。')) return;
     config.quoteSheet = JSON.parse(JSON.stringify(Object.assign({}, QUOTE_DEFAULT, { date: todayStr() })));
     saveConfigOnly();
   }
@@ -11929,8 +11932,8 @@ function onBrandLogoFile(input) {
   img.src = url;
 }
 
-function removeBrandLogo() {
-  if (!config.brandLogo || !confirm('移除 Logo？請款單 / 報價單將不再顯示。')) return;
+async function removeBrandLogo() {
+  if (!config.brandLogo || !await uiConfirm('移除 Logo？請款單 / 報價單將不再顯示。')) return;
   delete config.brandLogo;
   saveConfigOnly();
   renderBrandLogoPreview();
@@ -12146,8 +12149,8 @@ function setInvoiceHistoryStatus(historyId, status) {
   toast(`✓ 已更新狀態為「${(INVOICE_STATUSES.find(x => x.v === status) || {}).label || status}」`, 2500);
 }
 
-function deleteInvoiceHistory(historyId) {
-  if (!confirm('確定刪除這筆請款紀錄？案件本身不會被刪。')) return;
+async function deleteInvoiceHistory(historyId) {
+  if (!await uiConfirm('確定刪除這筆請款紀錄？案件本身不會被刪。')) return;
   state.invoiceHistory = (state.invoiceHistory || []).filter(x => x.id !== historyId);
   save();
   renderInvoiceHistory();
@@ -12631,21 +12634,21 @@ function savePaymentAccountEditor() {
   toast('✓ 已儲存收款帳號');
 }
 
-function deleteSelectedPaymentAccount() {
+async function deleteSelectedPaymentAccount() {
   const id = getInvSelectedAcctId();
   if (!id) { toast('沒有選中的收款帳號可刪'); return; }
   ensurePaymentAccounts();
   const list = config.userInfo.paymentAccounts;
   const acct = list.find(a => a.id === id);
   if (!acct) return;
-  if (!confirm(`確定要刪除收款帳號「${acct.label || acct.bank || '未命名'}」？\n\n（這不會影響任何案件，但下拉選單會少一個選項）`)) return;
+  if (!await uiConfirm(`確定要刪除收款帳號「${acct.label || acct.bank || '未命名'}」？\n\n（這不會影響任何案件，但下拉選單會少一個選項）`)) return;
 
   // 若有 Drive 存摺照片，順手刪
   if (acct.bankbookImageFileId && typeof driveDeleteFile === 'function') {
     driveDeleteFile(acct.bankbookImageFileId).catch(e => console.warn('[bankbook] 清除孤兒失敗:', e));
   }
 
-  config.userInfo.paymentAccounts = list.filter(a => a.id !== id);
+  config.userInfo.paymentAccounts = config.userInfo.paymentAccounts.filter(a => a.id !== id);  // v3.43.0：用當下最新清單（確認期間可能已同步進新帳號）
   if (config.userInfo.selectedPaymentAccountId === id) {
     config.userInfo.selectedPaymentAccountId = (config.userInfo.paymentAccounts[0] && config.userInfo.paymentAccounts[0].id) || '';
   }
@@ -12996,7 +12999,7 @@ function useInvoiceTier(pct) {
   toast(`已帶入 ${pct}%，確認後按「套用到已選案件」`, 3000);
 }
 
-function applyInvoiceWholeDiscount() {
+async function applyInvoiceWholeDiscount() {
   const snap = getCurrentInvoiceSnapshot();
   const jobs = snap ? snap.jobs.filter(j => !j.cancelled && !j.isEstimate) : [];
   if (!jobs.length) { toast('沒有已選的案件'); return; }
@@ -13008,7 +13011,7 @@ function applyInvoiceWholeDiscount() {
   if (type === 'fixed' && value >= base) { toast(`折扣金額要小於原價合計 ${fmt(base)}`); return; }
   // 防呆：已有個別折扣（非整單折扣）的案件 → 列出來確認是否覆蓋
   const indiv = jobs.filter(j => !j.discountNote && jobDiscountAmount(j) > 0);
-  if (indiv.length && !confirm(
+  if (indiv.length && !await uiConfirm(
     `⚠️ 以下 ${indiv.length} 筆案件已有個別折扣，套用整單折扣會「覆蓋」原本的折扣：\n\n` +
     indiv.map(j => `・${j.date || ''} ${j.title || '（無標題）'}（目前折 ${fmt(jobDiscountAmount(j))}）`).join('\n') +
     '\n\n確定要覆蓋嗎？（可用 Ctrl+Z 復原）')) return;
@@ -13039,13 +13042,14 @@ function applyInvoiceWholeDiscount() {
   if (paidRows.length) {
     const over = paidRows.reduce((s, x) => s + x.over, 0);
     const show = paidRows.slice(0, 10);
-    if (!confirm(
+    if (!await uiConfirm(
       `⚠️ 以下 ${paidRows.length} 筆案件已經收過款，打折後應收會變少：\n\n` +
       show.map(x => `・${x.j.date || ''} ${x.j.title || '（無標題）'}（已收 ${fmt(x.paid)} → 打折後應收 ${fmt(x.after)}）`).join('\n') +
       (paidRows.length > show.length ? `\n…另外 ${paidRows.length - show.length} 筆` : '') +
       (over > 0 ? `\n\n套用後帳面會「多收」${fmt(over)}（已收 > 應收）。` : '') +
       '\n\n通常整單折扣要在收款前套用。確定還是要套用嗎？（可用 Ctrl+Z 復原）')) return;
   }
+  if (!jobs.every(j => state.jobs.includes(j))) { toast('資料剛同步更新，請再操作一次', 4000); return; }  // v3.43.0：確認期間被同步換掉 → 不寫舊物件
   const label = type === 'percent' ? `整單折扣 ${value}%` : `整單折扣 ${fmt(value)}`;
   pushUndoSnapshot(`已套用${label}（${jobs.length} 筆）`);
   plan.forEach(p => { p.j.discountType = p.discountType; p.j.discountValue = p.discountValue; });
@@ -13057,11 +13061,12 @@ function applyInvoiceWholeDiscount() {
   toast(`✓ 已套用${label}到 ${jobs.length} 筆案件`);
 }
 
-function clearInvoiceWholeDiscount() {
+async function clearInvoiceWholeDiscount() {
   const snap = getCurrentInvoiceSnapshot();
   const jobs = snap ? snap.jobs.filter(j => j.discountNote) : [];
   if (!jobs.length) return;
-  if (!confirm(`清除 ${jobs.length} 筆案件的整單折扣？（恢復原價，可用 Ctrl+Z 復原）`)) return;
+  if (!await uiConfirm(`清除 ${jobs.length} 筆案件的整單折扣？（恢復原價，可用 Ctrl+Z 復原）`)) return;
+  if (!jobs.every(j => state.jobs.includes(j))) { toast('資料剛同步更新，請再操作一次', 4000); return; }
   pushUndoSnapshot(`已清除整單折扣（${jobs.length} 筆）`);
   jobs.forEach(j => { j.discountType = 'none'; j.discountValue = 0; j.discountNote = ''; recomputePaidStatus(j); });
   save();
@@ -13452,7 +13457,7 @@ function _uiAlertShow() {
     ov.innerHTML = '<div class="ui-alert" role="alertdialog" aria-modal="true" aria-labelledby="ui-alert-msg"><div class="ui-alert-msg" id="ui-alert-msg"></div><button type="button" class="btn btn-primary">知道了</button></div>';
     document.body.appendChild(ov);
     ov.querySelector('button').addEventListener('click', _uiAlertClose);
-    ov.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); _uiAlertClose(); } });
+    ov.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); _uiAlertClose(); } });  // 不讓全站快捷鍵穿透
   }
   ov._prevFocus = document.activeElement;
   ov.querySelector('.ui-alert-msg').textContent = _uiAlertQueue[0];
@@ -13468,6 +13473,41 @@ function _uiAlertClose() {
   else if (ov._prevFocus && ov._prevFocus.focus) { try { ov._prevFocus.focus(); } catch (_) {} }
 }
 window.alert = uiAlert;
+
+// v3.43.0：原生 confirm / prompt → 站內對話框（回傳 Promise；呼叫端一律 await）
+//   危險動作（刪除 / 清空 / 覆蓋…）確定鈕紅色、預設焦點在「取消」，誤按 Enter 不會執行
+//   對話框開著時 _isAnyModalOpen() 為真 → auto pull 延後，避免確認期間資料被換掉
+function _uiDialog(msg, input) {
+  msg = msg == null ? '' : String(msg);
+  const danger = !input && /刪除|清空|清除|覆蓋|移除|放棄|登出|取消的案件/.test(msg);  // ponytail: 關鍵字判斷危險，新增危險文案時記得含這些字
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'ui-alert-ov ui-dialog-ov open';
+    ov.innerHTML = '<div class="ui-alert" role="dialog" aria-modal="true"><div class="ui-alert-msg"></div>' +
+      (input ? '<input type="text" class="ui-dialog-input">' : '') +
+      `<div class="ui-dialog-btns"><button type="button" class="btn btn-outline" data-r="0">取消</button><button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-r="1">確定</button></div></div>`;
+    ov.querySelector('.ui-alert-msg').textContent = msg;
+    const inp = ov.querySelector('input');
+    if (inp) inp.value = input.value || '';
+    const prev = document.activeElement;
+    const done = ok => {
+      ov.remove();
+      try { if (prev && prev.focus) prev.focus(); } catch (_) {}
+      resolve(inp ? (ok ? inp.value : null) : ok);
+    };
+    ov.addEventListener('click', e => { const b = e.target.closest('[data-r]'); if (b) done(b.dataset.r === '1'); });
+    ov.addEventListener('keydown', e => {
+      e.stopPropagation();  // 不讓全站快捷鍵（Esc 關視窗、N 新增…）穿透
+      if (e.key === 'Escape') { e.preventDefault(); done(false); }
+      else if (e.key === 'Enter' && e.target === inp) { e.preventDefault(); done(true); }
+    });
+    document.body.appendChild(ov);
+    if (inp) { inp.focus(); inp.select(); }
+    else ov.querySelector(danger ? '[data-r="0"]' : '[data-r="1"]').focus();
+  });
+}
+function uiConfirm(msg) { return _uiDialog(msg, null); }
+function uiPrompt(msg, value) { return _uiDialog(msg, { value: value == null ? '' : String(value) }); }
 
 function emptyState(title, sub) {
   return `<div class="empty"><div class="icon"><span class="msr">inbox</span></div><div style="font-weight: 500;">${title}</div><div style="font-size: 13px; margin-top: 4px;">${sub}</div></div>`;
@@ -13672,7 +13712,7 @@ function toggleDone(id) {
   toast(j.done?'✓ 已標記完成':'已改為進行中');
 }
 
-function togglePaid(id) {
+async function togglePaid(id) {
   const j = state.jobs.find(x => x.id === id); if (!j) return;
   if (j.cancelled) { toast('案件已取消，請先取消「已取消」狀態'); return; }
   if (jobIsFullyPaid(j)) {
@@ -13683,7 +13723,8 @@ function togglePaid(id) {
       editJob(id);
       return;
     }
-    if (!confirm('將清除這筆案件的收款紀錄。確定？')) return;
+    if (!await uiConfirm('將清除這筆案件的收款紀錄。確定？')) return;
+    if (!state.jobs.includes(j)) { toast('資料剛同步更新，請再操作一次', 4000); return; }  // 等確認期間同步換掉了 state → 不改舊物件
     j.payments = [];
     j.writeOff = 0;
     recomputePaidStatus(j);
@@ -14407,10 +14448,10 @@ function _markFieldError(id, msg) {
   toast(msg);
 }
 
-function closeJobModal(force) {
+async function closeJobModal(force) {
   // v3.27.1（R17）：有未儲存的變更 → 確認才關（儲存成功路徑傳 force=true 跳過）
   if (!force && _jobModalIsDirty()) {
-    if (!confirm('有未儲存的變更，確定放棄編輯？')) return;
+    if (!await uiConfirm('有未儲存的變更，確定放棄編輯？')) return;
   }
   _jobFormSnapshot = null;
   stopJobTimerOnClose();  // v2.6: 停止計時器
@@ -14526,9 +14567,9 @@ function saveJob() {
   save(); closeJobModal(true); render(); toast('已儲存');
 }
 
-function deleteJob() {
+async function deleteJob() {
   if (!editingJobId) return;
-  if (!confirm('確定要刪除這筆案件？')) return;
+  if (!await uiConfirm('確定要刪除這筆案件？')) return;
   const j = state.jobs.find(x => x.id === editingJobId);
   const c = j ? getClient(j.clientId) : null;
   // v3.15.0：先 snapshot 再執行
@@ -14740,11 +14781,11 @@ function saveClient() {
   save(); closeClientModal(); render(); toast('已儲存');
 }
 
-function deleteClient() {
+async function deleteClient() {
   if (!editingClientId) return;
   const c = getClient(editingClientId);
   const cnt = state.jobs.filter(j => j.clientId === editingClientId).length;
-  if (!confirm(`確定要刪除業主「${c.name}」？這將同時刪除 ${cnt} 筆案件${c.quoteSheet ? '和專屬報價單' : ''}。`)) return;  // v3.32.0
+  if (!await uiConfirm(`確定要刪除業主「${c.name}」？這將同時刪除 ${cnt} 筆案件${c.quoteSheet ? '和專屬報價單' : ''}。`)) return;  // v3.32.0
   // v3.15.0：snapshot for undo
   pushUndoSnapshot(`已刪除業主「${c.name}」+ ${cnt} 筆案件`);
   state.jobs = state.jobs.filter(j => j.clientId !== editingClientId);
@@ -15117,7 +15158,7 @@ function importData(e) {
   const f = e.target.files[0]; if (!f) return;
   e.target.value = '';
   const r = new FileReader();
-  r.onload = () => {
+  r.onload = async () => {
     try {
       const d = JSON.parse(r.result);
 
@@ -15171,10 +15212,10 @@ function importData(e) {
         willImport.join('\n') + `\n\n` + warningMsg + `\n\n` +
         `⚠️ 匯入會覆蓋現有資料。確定？`;
 
-      if (!confirm(confirmMsg)) return;
+      if (!await uiConfirm(confirmMsg)) return;
 
       if (localAt && importedAt && new Date(localAt) > new Date(importedAt) && localCnt > 0) {
-        if (!confirm('再次確認：你的現有資料較新，匯入後會被舊版覆蓋。\n\n真的要繼續？')) return;
+        if (!await uiConfirm('再次確認：你的現有資料較新，匯入後會被舊版覆蓋。\n\n真的要繼續？')) return;
       }
 
       // ===== v3.22.1：完整 import — clients / jobs / config / paymentAccounts =====
@@ -15326,14 +15367,14 @@ function importData(e) {
   r.readAsText(f);
 }
 
-function loadDemo() {
+async function loadDemo() {
   // 已有資料時：兩次警告
   if (state.clients.length > 0 || state.jobs.length > 0) {
     const msg = `⚠️ 警告：載入範例資料會清空現有資料！\n\n` +
       `現有：${state.clients.length} 位業主、${state.jobs.length} 筆案件\n\n` +
       `如果你不確定，先按取消，到「💾 資料備份」匯出備份。\n\n確定要繼續？`;
-    if (!confirm(msg)) return;
-    const verify = prompt('最後確認：請輸入「載入範例」四個字才會執行（避免誤觸）');
+    if (!await uiConfirm(msg)) return;
+    const verify = await uiPrompt('最後確認：請輸入「載入範例」四個字才會執行（避免誤觸）');
     if (verify !== '載入範例') {
       toast('已取消（輸入文字不符）');
       return;
@@ -15623,7 +15664,7 @@ function loadDemo() {
 }
 
 // v3.24.19：clearAll 加 skipPrompt 參數 — 從「⚠️ 危險區」card 內 inline 確認後呼叫，跳過原本的 prompt
-function clearAll(skipPrompt) {
+async function clearAll(skipPrompt) {
   const cnt = state.jobs.length;
   if (cnt === 0 && state.clients.length === 0) {
     toast('資料已經是空的');
@@ -15631,8 +15672,8 @@ function clearAll(skipPrompt) {
   }
   if (!skipPrompt) {
     // 舊路徑（保留以防其他地方呼叫）：confirm + prompt 二段確認
-    if (!confirm(`⚠️ 即將清空所有資料！\n\n業主：${state.clients.length} 位\n案件：${cnt} 筆\n\n操作不可復原。確定？`)) return;
-    const verify = prompt('最後確認：請輸入「確認清空」四個字才會執行（避免誤觸）');
+    if (!await uiConfirm(`⚠️ 即將清空所有資料！\n\n業主：${state.clients.length} 位\n案件：${cnt} 筆\n\n操作不可復原。確定？`)) return;
+    const verify = await uiPrompt('最後確認：請輸入「確認清空」四個字才會執行（避免誤觸）');
     if (verify !== '確認清空') {
       toast('已取消（輸入文字不符）');
       return;
@@ -16077,8 +16118,8 @@ function openActionLogModal() {
   document.getElementById('action-log-modal').classList.add('open');
 }
 
-function clearActionLog() {
-  if (!confirm('確定清空所有操作日誌？（無法復原，但不影響業主/案件資料）')) return;
+async function clearActionLog() {
+  if (!await uiConfirm('確定清空所有操作日誌？（無法復原，但不影響業主/案件資料）')) return;
   actionLog = [];
   saveActionLog();
   renderActionLog();
@@ -16380,7 +16421,7 @@ async function pollAppVersion() {
 //       → 使用者必須選「Drive 快照備份」或「下載 JSON 備份」其中一個
 //       → 完成備份才呼叫 hardReload() 更新
 
-function showUpdateConfirmModal() {
+async function showUpdateConfirmModal() {
   // v3.27.1（R17 / 更新流程 A 案）：編輯中有未儲存變更 → 先擋，避免 reload 把表單輸入蒸發
   // （備份備的是 state，編輯中的欄位還在 DOM、不在 state — 備了也救不到）
   if (typeof _jobModalIsDirty === 'function' && _jobModalIsDirty()) {
@@ -16390,7 +16431,7 @@ function showUpdateConfirmModal() {
   const modal = document.getElementById('update-confirm-modal');
   if (!modal) {
     // modal 還沒載入（極罕見）→ fallback 給原本流程
-    if (confirm(`偵測到新版 ${serverAppVersion}。建議先到設定頁手動建立備份再更新。\n\n要立刻強制更新嗎？（不建議）`)) {
+    if (await uiConfirm(`偵測到新版 ${serverAppVersion}。建議先到設定頁手動建立備份再更新。\n\n要立刻強制更新嗎？（不建議）`)) {
       hardReload();
     }
     return;
@@ -16513,13 +16554,13 @@ function cancelUpdate() {
 }
 
 // v3.24.14：版號 badge 點擊行為 — 有新版走「強制備份」modal，沒新版走清快取重整
-function onVersionBadgeClick() {
+async function onVersionBadgeClick() {
   if (serverAppVersion && (typeof compareAppVersion === 'function')
       && compareAppVersion(serverAppVersion, APP_VERSION) > 0) {
     showUpdateConfirmModal();
   } else {
     // 沒新版 → 原本的強制刷新（清 cache）— 但加個確認免得使用者誤點
-    if (confirm('目前已是最新版。\n\n要強制清除快取並重新載入嗎？\n（資料不會遺失，只是清瀏覽器快取）')) {
+    if (await uiConfirm('目前已是最新版。\n\n要強制清除快取並重新載入嗎？\n（資料不會遺失，只是清瀏覽器快取）')) {
       hardReload();
     }
   }

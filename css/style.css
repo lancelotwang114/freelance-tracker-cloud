@@ -4512,3 +4512,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [role="button"]:fo
 .stat-hero-year .value { font-size: 15px !important; font-weight: 700; color: var(--text); letter-spacing: 0 !important; margin: 0 !important; display: inline; }
 .stat-hero-year:hover .value { color: var(--primary); }
 .stat-hero-spark { width: 55%; max-width: 260px; height: 56px; flex-shrink: 1; }
+
+/* v3.43.0：站內確認 / 輸入對話框（沿用 .ui-alert 外觀） */
+.ui-dialog-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.ui-dialog-btns .btn { min-width: 88px; }
+.ui-dialog-btns .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.ui-dialog-input { width: 100%; }
