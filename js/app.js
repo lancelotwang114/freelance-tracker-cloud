@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-12-v3.39.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-12-v3.40.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -11425,9 +11425,10 @@ async function captureInvoiceCanvas() {
   toastProgress('🎨 渲染中...');
   await loadScript(HTML2CANVAS_CDN);
   // 用較高 scale 提升解析度（不會太糊）
-  const canvas = await html2canvas(view, {
+  // v3.40.0：只截紙面（紙寬固定 794px 置中，截整個預覽欄在窄螢幕會多兩側空白）
+  const canvas = await html2canvas(view.querySelector('#invoice-print') || view, {
     scale: 2,
-    backgroundColor: getComputedStyle(document.body).getPropertyValue('--card').trim() || '#ffffff',
+    backgroundColor: '#ffffff',
     useCORS: true,
     logging: false
   });
@@ -11656,6 +11657,7 @@ function renderQuoteTarget() {
   sel.innerHTML = `<option value="">📋 公版（預設價目表）</option>` +
     sortedClientsForPicker().map(c => `<option value="${escapeHtml(c.id)}"${c.id === quoteTarget ? ' selected' : ''}>${escapeHtml(c.name)}${c.quoteSheet ? '' : '（尚未建立）'}</option>`).join('');
   sel.value = quoteTarget;
+  _renderQuoteChips();
   const c = quoteTarget ? getClient(quoteTarget) : null;
   const hint = document.getElementById('quote-target-hint');
   if (hint) hint.textContent = (quoteTarget && !c) ? '⚠️ 這個業主已被刪除，開始編輯前請改選對象。'
@@ -11667,6 +11669,23 @@ function renderQuoteTarget() {
     rb.textContent = c ? '↺ 重設為公版' : '↺ 還原預設';
     rb.classList.toggle('hidden', !!c && !c.quoteSheet);
   }
+}
+
+// v3.40.0：報價對象按鈕 — 只列公版 + 已建立的業主；其餘收進「＋ 幫業主建立…」
+function _docChip(label, active, onclick, extraCls, sub) {
+  return `<button type="button" class="doc-chip${active ? ' active' : ''}${extraCls || ''}" onclick="${onclick}">${escapeHtml(label)}${sub ? `<span class="doc-chip-sub">${escapeHtml(sub)}</span>` : ''}</button>`;
+}
+function _renderQuoteChips() {
+  const box = document.getElementById('quote-chips');
+  if (!box) return;
+  const all = sortedClientsForPicker();
+  const cur = quoteTarget ? getClient(quoteTarget) : null;
+  const built = all.filter(c => c.quoteSheet);
+  const rest = all.filter(c => !c.quoteSheet && c.id !== quoteTarget);
+  box.innerHTML = _docChip('公版', !quoteTarget, "setQuoteTarget('')") +
+    built.map(c => _docChip(c.name, c.id === quoteTarget, `setQuoteTarget('${escapeHtml(c.id)}')`)).join('') +
+    (cur && !cur.quoteSheet ? _docChip(cur.name, true, '', ' draft', '未建立') : '') +
+    (rest.length ? `<select class="doc-chip-more" onchange="if (this.value) setQuoteTarget(this.value)"><option value="">＋ 幫業主建立…</option>${rest.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('')}</select>` : '');
 }
 
 function getQuotePayAccount(q) {
@@ -12397,6 +12416,12 @@ function renderInvoice() {
   const curM = mSel.value;
   mSel.innerHTML = allMonths.map(m => `<option value="${m}">${m}</option>`).join('');
   if (curM && allMonths.includes(curM)) mSel.value = curM; else mSel.value = thisMonth();
+  // v3.40.0：第一次打開 → 預設選本月待收最多（其次案件最多）的業主，而不是清單第一個
+  if (!curC) {
+    const st = _invClientStats(mSel.value + '-01', mSel.value + '-31');
+    const best = Object.keys(st).filter(id => getClient(id)).sort((a, b) => (st[b].unpaid - st[a].unpaid) || (st[b].n - st[a].n))[0];
+    if (best) sel.value = best;
+  }
 
   const mEnd = document.getElementById('inv-month-end');
   if (mEnd) {
@@ -13005,6 +13030,44 @@ function clearInvoiceWholeDiscount() {
   toast('已清除整單折扣');
 }
 
+// v3.40.0：請款對象按鈕 — 只列本期有案件的業主（待收多的在前，標待收金額）；其餘收進「更多業主…」
+function pickInvClient(cid) {
+  const sel = document.getElementById('inv-client');
+  if (!sel || sel.disabled || !cid) return;
+  sel.value = cid;
+  drawInvoice();
+}
+function _invClientStats(rangeStart, rangeEnd) {
+  const stat = {};
+  state.jobs.forEach(j => {
+    if (j.cancelled || !j.clientId) return;
+    const d = j.date || '';
+    if (d < rangeStart || d > rangeEnd) return;
+    const s = stat[j.clientId] || (stat[j.clientId] = { n: 0, unpaid: 0 });
+    s.n++;
+    if (j.done) s.unpaid += jobUnpaidAmount(j);
+  });
+  return stat;
+}
+function _renderInvChips(cid, rangeStart, rangeEnd) {
+  const box = document.getElementById('inv-chips');
+  if (!box) return;
+  const sel = document.getElementById('inv-client');
+  const cur = getClient(cid);
+  if (sel && sel.disabled) { box.innerHTML = cur ? _docChip(cur.name, true, '') : ''; return; }  // 業主唯讀模式：只顯示自己
+  const stat = _invClientStats(rangeStart, rangeEnd);
+  const all = sortedClientsForPicker();
+  const active = all.filter(c => stat[c.id]).sort((a, b) => (stat[b.id].unpaid - stat[a.id].unpaid) || (stat[b.id].n - stat[a.id].n));
+  if (cur && !stat[cid]) active.push(cur);  // 目前選的業主本期沒案件也要看得到
+  const rest = all.filter(c => !active.includes(c));
+  box.innerHTML = active.map(c => {
+    const s = stat[c.id];
+    const sub = !s ? '本期無案件' : s.unpaid > 0 ? `待收 ${fmt(s.unpaid)}` : `${s.n} 筆`;
+    return _docChip(c.name, c.id === cid, `pickInvClient('${escapeHtml(c.id)}')`, '', sub);
+  }).join('') +
+    (rest.length ? `<select class="doc-chip-more" onchange="pickInvClient(this.value)"><option value="">更多業主…</option>${rest.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('')}</select>` : '');
+}
+
 function drawInvoice() {
   _ensureSheetFont();  // v3.39.0：請款單紙面改報價單風格（襯線標題）
   const cid = document.getElementById('inv-client').value;
@@ -13037,6 +13100,8 @@ function drawInvoice() {
     rangeEnd = mm + '-' + String(lastDay).padStart(2, '0');
     periodLabel = mm;
   }
+
+  _renderInvChips(cid, rangeStart, rangeEnd);
 
   // 套用日期過濾（已從 per-month 改成 per-day，兩種模式都統一）
   // 注意：這裡用 state.jobs（不 activeJobs，因為「自訂」可能想包含取消的）
@@ -13124,12 +13189,13 @@ function drawInvoice() {
         ${brandLogoImg('invoice-logo')}
         <h2 class="invoice-title">請款單</h2>
         <div class="invoice-title-en">INVOICE</div>
-        <div class="meta">業主：${escapeHtml(c.name)}</div>
+        <div class="meta">${escapeHtml(c.name)}</div>
       </div>
-      <div style="text-align: right;">
-        <div class="meta">請款日：${todayStr()}</div>
-        <div class="meta">請款期間：${escapeHtml(periodLabel)}</div>
-        <div class="meta">共 ${jobs.length} 筆 · ${fmt(finalTotal)}</div>
+      <div class="qs-meta">
+        <span>請款日</span><b>${todayStr()}</b>
+        <span>請款期間</span><b>${escapeHtml(periodLabel)}</b>
+        <span>筆數</span><b>${jobs.length} 筆</b>
+        <span>合計</span><b>${fmt(finalTotal)}</b>
       </div>
     </div>
     ${jobs.length ? `<table>

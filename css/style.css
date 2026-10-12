@@ -4027,14 +4027,15 @@ body.view-board #jobs-group-control {
 }
 
 /* ==================== v3.39.0：請款單左右排版（同報價單） ==================== */
-.invoice-layout { display: grid; grid-template-columns: minmax(340px, 400px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.invoice-layout { display: grid; grid-template-columns: minmax(340px, 1fr) 794px; gap: 14px; align-items: start; margin-top: 14px; }  /* v3.40.0：與 .quote-layout 同欄寬 */
 @media (min-width: 1240px) {
   #tab-invoice { position: relative; left: 50%; width: min(1500px, calc(100vw - 48px)); transform: translateX(-50%); }
 }
 .invoice-side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; display: grid; gap: 12px; align-content: start; padding-bottom: 4px; }
 .invoice-side > .card { margin: 0; }
 .invoice-main { min-width: 0; }
-.invoice-main .invoice { margin-top: 0; max-width: 820px; }  /* 接近 A4 紙寬，避免寬螢幕把表格撐出大片空白 */
+.invoice-main { overflow-x: auto; }
+.invoice-main .invoice { margin: 0 auto; width: 794px; max-width: none; }  /* v3.40.0：與報價單紙寬一致（A4 794px） */
 /* 欄位依內容：日期 / 數字 / 狀態不換行，剩下寬度給項目 */
 .invoice td.inv-nowrap, .invoice td.num, .invoice th.num, .invoice .badge-status { white-space: nowrap; }
 .invoice .inv-detail { font-size: 12px; color: #6b7280; margin-top: 2px; }
@@ -4043,7 +4044,7 @@ body.view-board #jobs-group-control {
 .invoice-side #inv-pay-account { min-width: 0 !important; flex: 1 1 0 !important; }
 .invoice-side #inv-month, .invoice-side #inv-date-start, .invoice-side #inv-date-end { min-width: 0 !important; }
 .invoice-side .btn { padding-inline: 10px; }
-@media (max-width: 1100px) {
+@media (max-width: 1239px) {
   .invoice-layout { grid-template-columns: 1fr; }
   .invoice-side { position: static; max-height: none; overflow: visible; }
 }
@@ -4440,3 +4441,25 @@ html[data-theme="dark"] .tb-new-caret { color: #08211d; border-left-color: rgba(
 body.doc-tab .mascot-container { width: 48px; height: 48px; left: -12px; bottom: 6px; opacity: .85; transition: left .2s, width .2s, height .2s, opacity .2s, transform .2s; }
 body.doc-tab .mascot-container:hover { left: 12px; width: 96px; height: 96px; opacity: 1; }
 body.doc-tab .quote-editor, body.doc-tab .invoice-side { padding-bottom: 64px; }
+
+/* ==================== v3.40.0：請款單 / 報價單共用工具列（對象按鈕 + 輸出）與紙面統一 ==================== */
+.doc-toolbar { padding: 12px 14px; display: grid; gap: 10px; }
+.doc-target-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.doc-label { font-size: 12px; color: var(--muted); flex: 0 0 auto; }
+.doc-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 0; min-width: 0; align-items: center; }
+.doc-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; transition: border-color .15s, background .15s; }
+.doc-chip:hover { border-color: var(--primary); }
+.doc-chip.active { background: var(--primary); border-color: var(--primary); color: var(--on-primary, #fff); cursor: default; }
+.doc-chip.draft { border-style: dashed; }
+.doc-chip-sub { font-size: 11px; opacity: .75; }
+select.doc-chip-more { width: auto; padding: 5px 10px; font-size: 13px; border-radius: 999px; color: var(--muted); }
+.doc-link { font-size: 12px; color: var(--primary); text-decoration: none; flex: 0 0 auto; }
+.doc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.doc-hint { display: block; font-size: 12px; color: var(--muted); margin: 0; }
+.doc-hint:empty { display: none; }
+/* 紙面：與 .qs-sheet 同陰影 / 直角 / 字級 / 列距 */
+.invoice { border-radius: 0; box-shadow: 0 4px 24px rgba(0, 0, 0, .12); }
+.invoice td { font-size: 12.5px; padding: 8px; }
+.invoice th { padding: 7px 8px; }
+.invoice .invoice-payment-title { font-size: 14px; }
+.invoice .invoice-header .qs-meta { text-align: left; }
