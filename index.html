@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-12-v3.40.1">
+<meta name="app-version" content="2026-10-12-v3.40.2">
 <meta name="theme-color" content="#c4567f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -661,9 +661,9 @@
         <span style="font-size: 11px; color: var(--muted);">收款帳號（含個人 / 發票資訊）</span>
         <div style="display: flex; gap: 4px; margin-top: 2px; align-items: center; flex-wrap: wrap;">
           <select id="inv-pay-account" onchange="onInvPayAccountChange()" style="width: auto; flex: 1 1 200px; min-width: 200px;"></select>
-          <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId())" title="編輯目前選定的收款帳號">📝</button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(null)" title="新增一筆收款帳號身分">➕</button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="deleteSelectedPaymentAccount()" title="刪除目前選定的收款帳號" style="color: var(--danger);">🗑️</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId())" title="編輯目前選定的收款帳號"><span class="msr">edit</span>編輯</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(null)" title="新增一筆收款帳號身分"><span class="msr">add</span>新增</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="deleteSelectedPaymentAccount()" title="刪除目前選定的收款帳號" style="color: var(--danger);"><span class="msr">delete</span>刪除</button>
         </div>
       </div>
 
@@ -1259,15 +1259,18 @@
     <div id="template-picker" class="hidden" style="background: var(--bg); border-radius: 8px; padding: 8px; margin-top: -4px; margin-bottom: 8px; max-height: 200px; overflow-y: auto;"></div>
       </div>
     <!-- v3.2.0：金額拆成 單價 × 數量；amount 仍是「總金額」自動算 -->
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+    <!-- v3.40.2：數量窄欄 + × / = 符號，單價與總金額放寬 -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1.3fr) auto 84px auto minmax(0, 1.3fr); gap: 8px; align-items: start;">
       <div>
         <label for="job-unit-price">單價</label>
         <input type="number" id="job-unit-price" placeholder="0" oninput="onJobUnitOrQtyChange()">
       </div>
+      <span class="job-amt-op">×</span>
       <div>
         <label for="job-quantity">數量</label>
         <input type="number" id="job-quantity" placeholder="1" min="1" step="1" value="1" oninput="onJobUnitOrQtyChange()">
       </div>
+      <span class="job-amt-op">=</span>
       <div>
         <label for="job-amount">總金額</label>
         <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">

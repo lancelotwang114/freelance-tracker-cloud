@@ -4475,3 +4475,8 @@ select.doc-chip-more { width: auto; padding: 5px 10px; font-size: 13px; border-r
 #report-month { width: auto; flex: 0 0 auto; min-width: 120px; }
 #job-discount-value, #job-write-off { max-width: 160px; }
 #client-unpaid-override { max-width: 200px; }
+
+/* v3.40.2：案件金額列的 × / = 符號（對齊輸入框中線）；收款帳號按鈕圖示 + 文字 */
+.job-amt-op { padding-top: 30px; color: var(--muted); font-size: 16px; }
+.invoice-side #inv-pay-account ~ .btn .msr { font-size: 16px; }
+@media (max-width: 640px) { .invoice-side #inv-pay-account { flex-basis: 100% !important; } }  /* 手機：帳號選單獨占一行，按鈕換到下一行 */
