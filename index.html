@@ -15,16 +15,27 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-10-v3.38.2">
-<meta name="theme-color" content="#0f766e">
+<meta name="app-version" content="2026-10-12-v3.39.0">
+<meta name="theme-color" content="#c4567f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Freelance">
 <meta name="author" content="lancelotwang114">
 <meta name="copyright" content="Copyright (c) 2026 lancelotwang114. Licensed under PolyForm Noncommercial 1.0.0">
 <meta name="license" content="https://polyformproject.org/licenses/noncommercial/1.0.0/">
-<title>外包收益與排程管理</title>
+<title>收工 Shougong</title>
 <link rel="manifest" href="manifest.json">
+<script>
+  // v3.39.0：配色（candy / rose / tiffany / lemon）— 純 UI 偏好存本機；載入前套用避免閃色
+  (function () {
+    var p = 'candy';
+    try { p = localStorage.getItem('cloud-ftPalette_v1') || 'candy'; } catch (_) {}
+    if (['candy', 'rose', 'tiffany', 'lemon'].indexOf(p) < 0) p = 'candy';  // 舊版配色名稱（forest 等）一律回預設
+    document.documentElement.dataset.palette = p;
+  })();
+</script>
+<!-- v3.39.0：線條圖示（Material Symbols Rounded，Google Fonts） -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,400,0,0&display=block">
 <link rel="apple-touch-icon" href="icons/icon.svg">
 <script>
   // v2.9.6: CSS 也加 cache buster（必須在 link 出現前用 document.write）
@@ -60,7 +71,21 @@
   <header>
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
       <div style="flex: 1; min-width: 0;">
-        <h1 id="page-title">外包收益與排程管理</h1>
+        <!-- v3.39.0：品牌「收工 Shougong」— 打勾＋上升箭頭（簡單幾何標誌，漸層跟配色走） -->
+        <div class="tb-brand">
+          <span class="tb-brand-mark" id="tb-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" width="34" height="34">
+              <defs><linearGradient id="sgMark" x1="0" y1="1" x2="1" y2="0"><stop offset="0" style="stop-color: var(--brand-from)"/><stop offset="1" style="stop-color: var(--brand-to)"/></linearGradient></defs>
+              <circle cx="20" cy="20" r="15.5" fill="none" stroke="url(#sgMark)" stroke-width="3" stroke-linecap="round" stroke-dasharray="66 32" transform="rotate(118 20 20)"/>
+              <path d="M12.5 20.5l5 5 10.5-11.5" fill="none" stroke="url(#sgMark)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22.8 13.8H28.4V19.4" fill="none" stroke="url(#sgMark)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <div class="tb-brand-text">
+            <h1 id="page-title">收工</h1>
+            <span class="tb-brand-en">Shougong</span>
+          </div>
+        </div>
         <div class="sub" id="page-sub">
           個人自由工作者工具 ·
           <span id="app-version-badge" onclick="onVersionBadgeClick()" style="font-family: monospace; font-size: 11px; padding: 1px 6px; background: var(--bg); border-radius: 4px; cursor: pointer;" title="點擊更新或強制刷新">載入中…</span>
@@ -75,21 +100,46 @@
           <button id="active-timer-toggle-btn" onclick="event.stopPropagation(); onActiveTimerToggleBtn()" class="active-timer-btn" title="暫停 / 繼續">⏸</button>
           <button onclick="event.stopPropagation(); finishActiveTimer()" class="active-timer-btn" title="結束計時並加到工時欄">✓</button>
         </div>
-        <!-- v3.24.39：↻ 重新整理 + 📜 操作日誌 拉回常駐（使用者明確要求不要塞進 ⋮ menu） -->
-        <button id="global-search-toggle-btn" onclick="toggleGlobalSearch()" title="全域搜尋（業主 / 案件 / 備註）" class="topbar-icon-btn" aria-label="搜尋">🔍</button>
-        <button id="hard-reload-btn" onclick="hardReload()" title="重新整理（清除所有快取、Service Worker、Cookie）" class="topbar-icon-btn" aria-label="重新整理">↻</button>
-        <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" class="topbar-icon-btn" aria-label="操作日誌">📜</button>
-        <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" class="topbar-icon-btn" aria-label="切換主題">🌓</button>
-        <!-- v3.24.38：sync-info chip — 講「雲端資料狀態」（版本 + 時間），點擊重新檢查雲端 -->
-        <div id="sync-info-chip" class="sync-info-chip hidden" onclick="onSyncInfoChipClick()" title="雲端版本（點擊重新檢查）">
-          <span id="sync-info-chip-text">☁️ —</span>
+        <!-- v3.39.0：舊的 4 顆圖示 / sync chip / 帳號 pill 改收進頭像選單；元素保留（既有程式仍會更新它們），只是不顯示
+             （v3.24.39 曾要求重新整理、操作日誌常駐；2026-10-12 james 改決定收進選單） -->
+        <div class="tb-legacy" aria-hidden="true">
+          <button id="global-search-toggle-btn" onclick="toggleGlobalSearch()" title="全域搜尋（業主 / 案件 / 備註）" class="topbar-icon-btn" aria-label="搜尋" tabindex="-1">🔍</button>
+          <button id="hard-reload-btn" onclick="hardReload()" title="重新整理（清除所有快取、Service Worker、Cookie）" class="topbar-icon-btn" aria-label="重新整理" tabindex="-1">↻</button>
+          <button id="action-log-btn" onclick="openActionLogModal()" title="操作日誌（最近 500 筆）" class="topbar-icon-btn" aria-label="操作日誌" tabindex="-1">📜</button>
+          <button id="theme-toggle-btn" onclick="cycleTheme()" title="切換深淺色模式" class="topbar-icon-btn" aria-label="切換主題" tabindex="-1">🌓</button>
+          <div id="sync-info-chip" class="sync-info-chip hidden" onclick="onSyncInfoChipClick()" title="雲端版本（點擊重新檢查）">
+            <span id="sync-info-chip-text">☁️ —</span>
+          </div>
+          <div id="cloud-account-pill" class="cloud-account-pill status-idle" onclick="toggleAccountDropdown(undefined, this)" title="尚未登入 Google Drive（點擊登入）">
+            <span class="pill-icon">＋</span><span class="pill-name">登入</span>
+          </div>
+          <div class="account-dropdown-menu hidden" id="account-dropdown-menu"></div>
         </div>
-        <!-- v3.24.38：Google 帳號 pill → dropdown menu（帳號 / 雲端版本 / 重新檢查 / 設定 / 登出）
-             v3.24.39：dropdown 改 position:fixed 跳脫 .top-bar stacking context（修「dropdown 看不到」bug） -->
-        <div id="cloud-account-pill" class="cloud-account-pill status-idle" onclick="toggleAccountDropdown(undefined, this)" title="尚未登入 Google Drive（點擊登入）">
-          <span class="pill-icon">＋</span><span class="pill-name">登入</span>
+
+        <!-- v3.39.0：新頂部列右側 — 搜尋 / 同步雲朵 / 新增案件 / 頭像選單 -->
+        <!-- v3.39.0：搜尋直接在頂部列打字（沿用 #global-search / onGlobalSearch，結果從輸入框下方展開） -->
+        <div class="tb-search" id="tb-search">
+          <span class="msr">search</span>
+          <input type="search" id="global-search" placeholder="搜尋案件、業主" oninput="onGlobalSearch()" onfocus="onGlobalSearch()" onkeydown="tbSearchKey(event)" autocomplete="off" aria-label="搜尋案件、業主">
+          <kbd>/</kbd>
+          <div id="global-search-results" class="global-search-results hidden"></div>
         </div>
-        <div class="account-dropdown-menu hidden" id="account-dropdown-menu"></div>
+        <button type="button" class="tb-icon" id="tb-sync" onclick="tbToggleMenu(true)" aria-label="雲端同步狀態">
+          <span class="msr" id="tb-sync-icon">cloud_off</span><span class="tb-sync-dot" id="tb-sync-dot"></span>
+        </button>
+        <!-- v3.39.0：電腦版「新增」只留這裡（右下浮動按鈕改只在手機顯示）；▾ 收新增業主 / 編輯最近一筆 -->
+        <div class="tb-new-group">
+          <button type="button" class="tb-new" onclick="quickAddJob()" title="新增案件（快捷鍵 N）"><span class="msr">add</span><span class="tb-new-lbl">新增案件</span></button>
+          <button type="button" class="tb-new-caret" id="tb-new-caret" onclick="tbToggleNewMenu()" aria-haspopup="menu" aria-expanded="false" aria-label="更多新增"><span class="msr">expand_more</span></button>
+          <div class="tb-new-menu" id="tb-new-menu" role="menu" hidden>
+            <button type="button" class="tb-mi" role="menuitem" onclick="tbToggleNewMenu(false); quickAddClient()"><span class="msr">person_add</span>新增業主</button>
+            <button type="button" class="tb-mi" role="menuitem" onclick="tbToggleNewMenu(false); quickOpenLastJob()"><span class="msr">edit_note</span>編輯最近一筆</button>
+          </div>
+        </div>
+        <button type="button" class="tb-avatar-btn" id="tb-avatar-btn" onclick="tbToggleMenu()" aria-haspopup="menu" aria-expanded="false" aria-controls="tb-menu" aria-label="帳號選單">
+          <span class="tb-avatar" id="tb-avatar"><span class="msr">person</span></span>
+        </button>
+        <div class="tb-menu" id="tb-menu" role="menu" aria-label="帳號選單" hidden></div>
       </div>
     </div>
   </header>
@@ -104,14 +154,13 @@
     <button data-tab="clients" class="hidden">業主</button>
     <!-- v3.30.0：請款單 + 報價單合併為「單據」，內部仍是 invoice / quote 兩個 tab，靠 #doc-switch 切換 -->
     <button data-tab="invoice">單據</button>
-    <button data-tab="settings">設定</button>
+    <!-- v3.39.0：設定改從頭像選單進入（快捷鍵 6 仍可用） -->
+    <button data-tab="settings" class="hidden">設定</button>
   </nav>
 
   <!-- 全域搜尋列（v3.6.0：預設收起，點 top bar 🔍 才展開）-->
-  <div class="global-search-bar hidden" id="global-search-bar">
-    <input type="search" id="global-search" placeholder="搜尋業主、案件、備註…（Esc 關閉）" oninput="onGlobalSearch()" onkeydown="if(event.key==='Escape')toggleGlobalSearch(false)" autocomplete="off">
-    <div id="global-search-results" class="global-search-results hidden"></div>
-  </div>
+  <!-- v3.39.0：搜尋輸入框已搬到頂部列 #tb-search，這條展開列不再使用（保留空殼避免舊程式找不到元素） -->
+  <div class="global-search-bar hidden" id="global-search-bar"></div>
 </div>
 
 <main>
@@ -151,14 +200,14 @@
     </div>
     <!-- v3.24.37：年度收益降為次行 caption（單行小字），跟「本月」3 卡並列會混淆 -->
     <div class="stat-year-caption clickable" onclick="dashStatJump('year')" title="點擊查看年度已收款的案件">
-      📊 <span class="label">年度累積</span>
+      <span class="msr">insights</span> <span class="label">年度累積</span>
       <span class="value" id="stat-year">NT$0</span>
       <span class="delta" id="stat-year-sub"></span>
     </div>
 
     <!-- v3.24.18：今天該做什麼（v3.26.0 設計C：移到 hero 數字之後） -->
     <div class="card today-todo-card" id="today-todo-card">
-      <h3 style="margin: 0 0 8px 0; font-size: 14px;">⚡ 今天的重點</h3>
+      <h3 style="margin: 0 0 8px 0; font-size: 14px;"><span class="msr">bolt</span> 今天的重點</h3>
       <div id="today-todo-list"></div>
     </div>
 
@@ -168,7 +217,7 @@
     <div class="card">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <h3 style="margin: 0;">待完成案件</h3>
-        <button class="btn btn-outline btn-sm" id="dash-bulk-btn" onclick="toggleDashBulkMode()">☑️ 批次操作</button>
+        <button class="btn btn-outline btn-sm" id="dash-bulk-btn" onclick="toggleDashBulkMode()"><span class="msr">checklist</span>批次操作</button>
       </div>
       <div id="recent-jobs"></div>
     </div>
@@ -213,7 +262,7 @@
             </select>
           </label>
         </div>
-        <button class="btn btn-outline btn-sm" id="bulk-toggle" onclick="toggleBulkMode()">☑️ 批次操作</button>
+        <button class="btn btn-outline btn-sm" id="bulk-toggle" onclick="toggleBulkMode()"><span class="msr">checklist</span>批次操作</button>
       </div>
       <div id="bulk-bar" class="bulk-bar hidden">
         <span class="bulk-count" id="bulk-count">已選 0 筆</span>
@@ -221,7 +270,7 @@
         <button class="btn btn-outline btn-sm" onclick="bulkInvert()">反選</button>
         <button class="btn btn-primary btn-sm" onclick="bulkMarkDone()">✓ 標記完成</button>
         <button class="btn btn-primary btn-sm" onclick="bulkMarkPaid()">$ 標記已收</button>
-        <button class="btn btn-outline btn-sm" onclick="jobsBulkToggleLabor()" title="選的全部已是勞報 → 取消；否則全部標勞報">🧾 勞報</button>
+        <button class="btn btn-outline btn-sm" onclick="jobsBulkToggleLabor()" title="選的全部已是勞報 → 取消；否則全部標勞報"><span class="msr">receipt</span>勞報</button>
         <button class="btn btn-danger btn-sm" onclick="bulkDelete()">🗑️ 刪除</button>
       </div>
       <!-- 列表視圖（現況） -->
@@ -460,8 +509,8 @@
         <div class="client-detail-actions">
           <button class="btn btn-outline btn-sm" id="client-detail-edit-btn" onclick="editCurrentDetailClient()">編輯</button>
           <!-- v3.32.0：業主專屬單據入口 -->
-          <button class="btn btn-outline btn-sm" onclick="gotoInvoice(detailClientId)">🧾 請款單</button>
-          <button class="btn btn-outline btn-sm" onclick="openClientQuote(detailClientId)">📄 報價單</button>
+          <button class="btn btn-outline btn-sm" onclick="gotoInvoice(detailClientId)"><span class="msr">receipt_long</span>請款單</button>
+          <button class="btn btn-outline btn-sm" onclick="openClientQuote(detailClientId)"><span class="msr">request_quote</span>報價單</button>
           <button class="btn btn-primary btn-sm" id="client-detail-add-job-btn" onclick="addJobForCurrentClient()">＋ 新增案件</button>
         </div>
       </div>
@@ -552,18 +601,21 @@
   <!-- v3.30.0：單據 — 請款單 / 報價單切換（switchTab 在 invoice / quote 時顯示） -->
   <div id="doc-switch" class="hidden no-print" style="margin-bottom: 10px;">
     <div class="revenue-toggle">
-      <button data-doc="invoice" onclick="switchTab('invoice')">🧾 請款單</button>
-      <button data-doc="quote" onclick="switchTab('quote')">📄 報價單</button>
+      <button data-doc="invoice" onclick="switchTab('invoice')"><span class="msr">receipt_long</span>請款單</button>
+      <button data-doc="quote" onclick="switchTab('quote')"><span class="msr">request_quote</span>報價單</button>
     </div>
   </div>
 
   <!-- Invoice -->
   <section id="tab-invoice" class="hidden">
-    <div class="card no-print" style="padding: 12px;">
+    <!-- v3.39.0：請款單左右排版（同報價單）— 左：控制 / 對帳 / 歷史；右：請款單預覽 -->
+    <div class="invoice-layout">
+    <div class="invoice-side no-print">
+    <div class="card no-print inv-controls" style="padding: 12px;">
 
       <!-- v3.2.0-ui：第 1 列 — 業主 + 請款範圍（兩欄並排，請款範圍 wrap 到第二行避免擠壓） -->
       <!-- 修：select 全域 width:100% 在 flex 內會 overflow，用 flex-wrap + explicit min-width 解決 -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end;">
+      <div class="inv-row-client" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end;">
         <div style="min-width: 0;">
           <span style="font-size: 11px; color: var(--muted); display: flex; justify-content: space-between;">業主
             <a href="#" onclick="event.preventDefault(); viewClientDetail(document.getElementById('inv-client').value)" style="color: var(--primary); text-decoration: none;">業主資料 ›</a></span>
@@ -646,18 +698,17 @@
       </details>
 
       <div style="display:flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;">
-        <button class="btn btn-primary" onclick="exportInvoicePDF()">📄 下載 PDF</button>
-        <button class="btn btn-primary" onclick="exportInvoicePNG()">🖼️ 下載圖片</button>
-        <button class="btn btn-outline" onclick="copyInvoiceImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email">📋 複製圖片</button>
-        <button class="btn btn-outline" onclick="printInvoice()">🖨️ 列印</button>
-        <button class="btn btn-outline" onclick="copyInvoiceText()">📋 複製純文字</button>
+        <button class="btn btn-primary" onclick="exportInvoicePDF()"><span class="msr">picture_as_pdf</span>下載 PDF</button>
+        <button class="btn btn-outline" onclick="exportInvoicePNG()"><span class="msr">image</span>下載圖片</button>
+        <button class="btn btn-outline" onclick="copyInvoiceImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email"><span class="msr">content_copy</span>複製圖片</button>
+        <button class="btn btn-outline" onclick="printInvoice()"><span class="msr">print</span>列印</button>
+        <button class="btn btn-outline" onclick="copyInvoiceText()"><span class="msr">notes</span>複製純文字</button>
       </div>
     </div>
-    <div id="invoice-view"></div>
 
     <!-- v3.24.1：請款單對帳區（業主看不到，匯出 PDF/PNG 不會包含） -->
     <div class="card no-print" id="invoice-net-breakdown" style="margin-top: 14px;">
-      <h3 style="font-size: 15px; margin-bottom: 8px;">💰 我的對帳（業主看不到）</h3>
+      <h3 style="font-size: 15px; margin-bottom: 8px;"><span class="msr">account_balance_wallet</span> 我的對帳（業主看不到）</h3>
       <div style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
         本次請款的實收試算（扣稅 / 分潤 / 外包）。此區只在頁面顯示，匯出 PDF / PNG 不會包含。
       </div>
@@ -667,7 +718,7 @@
     <!-- v3.12.0：請款單歷史（每次匯出留紀錄、可改 status / 重發 / 刪除） -->
     <div class="card collapsible collapsed no-print" id="card-invoice-history">
       <div class="card-head" onclick="toggleCard('card-invoice-history'); renderInvoiceHistory();">
-        <h3>📦 請款單歷史 <span id="invoice-history-count" class="reminder-hint" style="font-weight: 400;"></span></h3>
+        <h3><span class="msr">history</span> 請款單歷史 <span id="invoice-history-count" class="reminder-hint" style="font-weight: 400;"></span></h3>
         <span class="card-status">紀錄每次匯出的請款單</span>
         <span class="toggle-arrow">▼</span>
       </div>
@@ -678,6 +729,9 @@
         <div id="invoice-history-list"></div>
       </div>
     </div>
+    </div><!-- /.invoice-side -->
+    <div class="invoice-main"><div id="invoice-view"></div></div>
+    </div><!-- /.invoice-layout -->
   </section>
 
   <!-- v3.29.0：報價單（公版價目表）— 資料存 config.quoteSheet，跟其他設定一起同步 Drive -->
@@ -690,11 +744,11 @@
         <span id="quote-target-hint" style="display: block; font-size: 12px; color: var(--muted); margin-top: 4px;"></span>
       </label>
       <div style="display:flex; gap: 8px; flex-wrap: wrap;">
-        <button class="btn btn-primary" onclick="exportQuotePDF()">📄 下載 PDF</button>
-        <button class="btn btn-primary" onclick="exportQuotePNG()">🖼️ 下載圖片</button>
-        <button class="btn btn-outline" onclick="copyQuoteImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email">📋 複製圖片</button>
-        <button class="btn btn-outline" onclick="window.print()">🖨️ 列印</button>
-        <button class="btn btn-outline" id="quote-reset-btn" onclick="resetQuoteSheet()">↺ 還原預設</button>
+        <button class="btn btn-primary" onclick="exportQuotePDF()"><span class="msr">picture_as_pdf</span>下載 PDF</button>
+        <button class="btn btn-outline" onclick="exportQuotePNG()"><span class="msr">image</span>下載圖片</button>
+        <button class="btn btn-outline" onclick="copyQuoteImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email"><span class="msr">content_copy</span>複製圖片</button>
+        <button class="btn btn-outline" onclick="window.print()"><span class="msr">print</span>列印</button>
+        <button class="btn btn-outline" id="quote-reset-btn" onclick="resetQuoteSheet()"><span class="msr">restart_alt</span>還原預設</button>
       </div>
       <p style="font-size: 12px; color: var(--muted); margin: 8px 0 0;">單價留空 = 顯示「另報價」；欄位留空 = 報價單上不顯示。改動會自動存檔並同步到雲端。</p>
     </div>
@@ -713,13 +767,13 @@
     <!-- v3.38.0：個人資訊 / 收款帳號入口 + Logo（印在請款單、報價單） -->
     <div class="card">
       <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-        <div><b>👤 個人資訊與收款帳號</b><div style="font-size: 12px; color: var(--muted);">姓名、電話、Email、銀行帳號（請款單 / 報價單會帶入）</div></div>
+        <div><b><span class="msr">badge</span> 個人資訊與收款帳號</b><div style="font-size: 12px; color: var(--muted);">姓名、電話、Email、銀行帳號（請款單 / 報價單會帶入）</div></div>
         <button class="btn btn-outline btn-sm" onclick="openPaymentAccountEditor(getInvSelectedAcctId ? getInvSelectedAcctId() : null)">編輯 ›</button>
       </div>
       <div style="border-top: 1px solid var(--border); margin: 12px 0 0; padding-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
         <div id="brand-logo-preview" class="brand-logo-preview">尚未上傳</div>
         <div style="flex: 1; min-width: 180px;">
-          <b>🖼️ Logo</b>
+          <b><span class="msr">image</span> Logo</b>
           <div style="font-size: 12px; color: var(--muted); margin: 2px 0 6px;">顯示在請款單、報價單左上角（建議去背 PNG，會自動縮小）</div>
           <label class="btn btn-outline btn-sm" style="cursor: pointer; margin: 0;">上傳 Logo<input type="file" accept="image/*" onchange="onBrandLogoFile(this)" hidden></label>
           <button type="button" class="btn btn-ghost btn-sm hidden" id="brand-logo-remove" onclick="removeBrandLogo()">移除</button>
@@ -729,7 +783,7 @@
 
     <!-- v3.30.0：業主分頁按鈕隱藏後的列表入口 -->
     <div class="card" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-      <div><b>👥 業主管理</b><div style="font-size: 12px; color: var(--muted);">業主列表、聯絡資訊、個別統計</div></div>
+      <div><b><span class="msr">groups</span> 業主管理</b><div style="font-size: 12px; color: var(--muted);">業主列表、聯絡資訊、個別統計</div></div>
       <button class="btn btn-outline btn-sm" onclick="switchTab('clients')">開啟 ›</button>
     </div>
 
@@ -739,7 +793,7 @@
     <!-- v3.24.16：原「🔐 Google Drive 同步」改名「☁️ 雲端同步」，並把「💾 資料備份（離線）」+「📦 雲端備份歷史」併進來當 sub-section -->
     <div class="card card-cloud-auth" id="card-cloud-auth">
       <div class="card-head" style="cursor: default;">
-        <h3>☁️ 雲端同步</h3>
+        <h3><span class="msr">cloud</span> 雲端同步</h3>
         <span class="card-status" id="cloud-auth-status">未登入</span>
       </div>
       <div class="card-body">
@@ -834,7 +888,7 @@
     <!-- v3.22.8：顯示偏好（加新功能 toggle 都放這） -->
     <div class="card collapsible collapsed" id="card-display-pref">
       <div class="card-head" onclick="toggleCard('card-display-pref'); renderTagColorSettings();">
-        <h3>🎨 顯示偏好</h3>
+        <h3><span class="msr">tune</span> 顯示偏好</h3>
         <span class="toggle-arrow">▼</span>
       </div>
       <div class="card-body">
@@ -852,7 +906,7 @@
         <div class="section-divider"></div>
 
         <!-- 🤖 小幫手 sub-section（v3.24.16 從原獨立 card 搬來；v3.24.37 預設關閉 + 砍 dev tool 預覽） -->
-        <h4 style="margin: 4px 0 8px; font-size: 14px; font-weight: 600;">🐱 貓咪小幫手</h4>
+        <h4 style="margin: 4px 0 8px; font-size: 14px; font-weight: 600;"><span class="msr">pets</span> 貓咪小幫手</h4>
         <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 4px 0;">
           <input type="checkbox" id="pref-mascot-enabled" onchange="onMascotEnabledChange(this.checked)" style="margin-top: 3px;">
           <div>
@@ -894,7 +948,7 @@
     <!-- 📅 Google Calendar 同步（v3.1.0 重做：直接打 Calendar API、不再經過 Apps Script） -->
     <div class="card collapsible collapsed" id="card-calendar">
       <div class="card-head" onclick="toggleCard('card-calendar'); cloudRenderCalendarUI();">
-        <h3>📅 Google 行事曆同步</h3>
+        <h3><span class="msr">calendar_month</span> Google 行事曆同步</h3>
         <span class="card-status" id="cloud-cal-status">未設定</span>
         <span class="toggle-arrow">▼</span>
       </div>
@@ -965,7 +1019,7 @@
     <!-- v3.24.19：⚠️ 危險區（獨立卡，放設定頁最下面） -->
     <div class="card collapsible collapsed card-danger" id="card-danger">
       <div class="card-head" onclick="toggleCard('card-danger')">
-        <h3 style="color: var(--danger);">⚠️ 危險區</h3>
+        <h3 style="color: var(--danger);"><span class="msr">warning</span> 危險區</h3>
         <span class="card-status" style="color: var(--danger);">不可逆操作</span>
         <span class="toggle-arrow">▼</span>
       </div>
@@ -1012,7 +1066,7 @@
   </div>
   <div class="fab-stack">
     <button class="fab-mini" onclick="toggleFabMenu()" aria-label="更多動作" title="更多動作">⋯</button>
-    <button class="fab-sub" onclick="quickAddClient()" aria-label="新增業主" title="新增業主">👤<span class="fab-label">新增業主</span></button>
+    <button class="fab-sub" onclick="quickAddClient()" aria-label="新增業主" title="新增業主"><span class="msr">person_add</span><span class="fab-label">新增業主</span></button>
     <button class="fab" id="fab-add" onclick="quickAddJob()" aria-label="新增案件" title="新增案件（快捷鍵 N）">＋<span class="fab-label">新增案件</span></button>
   </div>
 </div>
@@ -1122,7 +1176,7 @@
       <h2 id="job-modal-title">新增案件</h2>
       <label class="estimate-toggle" title="估價單為草稿狀態，不計入收益統計">
         <input type="checkbox" id="job-estimate" onchange="onJobEstimateToggle()">
-        <span>📄 估價單</span>
+        <span><span class="msr">description</span> 估價單</span>
       </label>
     </div>
 
@@ -1161,7 +1215,7 @@
     <div style="display: flex; justify-content: space-between; align-items: center;">
       <label for="job-title" style="margin: 0;">案件名稱</label>
       <!-- v3.37.0：從該業主報價單（沒有專屬則公版）挑項目 → 帶入名稱 / 單價 / 類別標籤，帶入後仍可自行修改 -->
-      <button type="button" class="btn btn-ghost btn-sm" onclick="toggleJobQuotePicker()" style="font-size: 12px;">📋 從報價單帶入</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="toggleJobQuotePicker()" style="font-size: 12px;"><span class="msr">playlist_add</span>從報價單帶入</button>
     </div>
     <input type="text" id="job-title" placeholder="例：首頁 banner 設計">
     <div id="job-quote-picker" class="hidden job-quote-picker"></div>

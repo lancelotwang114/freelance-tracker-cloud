@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-10-v3.38.2';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-12-v3.39.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1242,6 +1242,7 @@ function cloudUpdateSyncIndicator() {
   cloudRenderAccountPill();
   // v3.24.38：sync-info chip 也跟著更新
   if (typeof renderSyncInfoChip === 'function') renderSyncInfoChip();
+  if (typeof tbRender === 'function') tbRender();  // v3.39.0：新頂部列雲朵 / 頭像
   // v3.24.20：行事曆 master toggle 隨登入狀態切換 disabled / 提示
   if (typeof cloudUpdateCalSigninGate === 'function') cloudUpdateCalSigninGate();
   // v3.24.34：app-version-badge 也隨 sync 狀態更新（資料時間相對值會變）
@@ -1491,6 +1492,235 @@ function confirmCloudSignOut() {
   const ok = confirm('登出 Google？\n\n本機資料會保留，但不會再跟 Drive 同步。\n下次登入會自動拉雲端最新版本。');
   if (ok && typeof cloudSignOut === 'function') cloudSignOut();
 }
+
+// ============== v3.39.0：全站 emoji → 線條圖示（Material Symbols Rounded） ==============
+// 程式裡約 435 行帶 emoji（提示 / 樣板 / 貓咪台詞…），不逐行改：監看 DOM，新出現的文字節點把 emoji 換成圖示 span。
+// 不轉：輸入元件、下拉、匯出用的請款單 / 報價單紙面（#invoice-print / #quote-view，保匯出一致）、已是圖示的 .msr
+const EMOJI_ICON = {
+  '✓': 'check', '✔': 'check', '✅': 'check_circle', '☑': 'check_box', '✕': 'close', '✗': 'close', '❌': 'cancel',
+  '⚠': ['warning', 'var(--warning)'], '🚫': 'block', '💡': 'lightbulb', '⚡': 'bolt', '✨': 'auto_awesome', '🔥': 'local_fire_department',
+  '📅': 'calendar_month', '⏰': 'alarm', '⏱': 'timer', '⏳': 'hourglass_top', '⌛': 'hourglass_empty', '🕐': 'schedule', '🐢': 'hourglass_bottom',
+  '☁': 'cloud', '🔄': 'sync', '🔀': 'merge', '🌐': 'language', '📵': 'signal_wifi_off', '📶': 'network_check',
+  '📋': 'assignment', '📝': 'edit_note', '✏': 'edit', '📄': 'description', '🧾': 'receipt_long', '📇': 'contact_page', '📜': 'history',
+  '💰': 'payments', '💳': 'credit_card', '💎': 'diamond', '🏷': 'sell', '📊': 'bar_chart', '📈': 'trending_up', '📉': 'trending_down', '🎯': 'flag',
+  '🗑': 'delete', '📦': 'inventory_2', '💾': 'save', '📥': 'download', '📤': 'upload', '🗂': 'folder_open', '📌': 'push_pin',
+  '👤': 'person', '🤝': 'handshake', '👋': 'waving_hand', '👉': 'arrow_forward', '➡': 'arrow_forward', '⬆': 'arrow_upward', '↩': 'undo', '➕': 'add',
+  '🔍': 'search', '🖼': 'image', '📸': 'photo_camera', '📷': 'photo_camera', '🖨': 'print', '📨': 'mail', '✉': 'mail', '📞': 'call',
+  '⏸': 'pause', '🎨': 'palette', '⚙': 'settings', '🔧': 'build', '🧹': 'cleaning_services', '⌨': 'keyboard', '🪄': 'auto_fix_high',
+  '💼': 'work', '☕': 'coffee', '🐾': 'pets', '💪': 'fitness_center', '🎲': 'casino', '🚀': 'rocket_launch', '🚪': 'logout',
+  '🔐': 'lock', '🔓': 'lock_open', '💤': 'bedtime', '😴': 'bedtime', '🌙': 'dark_mode', '☀': 'light_mode', '🌓': 'contrast',
+  '😺': 'sentiment_satisfied', '😸': 'sentiment_very_satisfied', '😐': 'sentiment_neutral', '😿': 'sentiment_dissatisfied', '🙀': 'sentiment_stressed',
+  '🔴': ['circle', 'var(--danger)'], '🟠': ['circle', 'var(--orange)'], '🟡': ['circle', 'var(--warning)'], '🟢': ['circle', 'var(--success)'],
+  '🔵': ['circle', 'var(--primary)'], '🟣': ['circle', 'var(--primary)'], '⚫': ['circle', 'var(--text)'], '⚪': ['circle', 'var(--muted)'], '🔶': ['change_history', 'var(--warning)'],
+};
+const _EMOJI_RE = new RegExp('(' + Object.keys(EMOJI_ICON).sort((a, b) => b.length - a.length)
+  .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\uFE0F?', 'g');
+const _ICONIZE_SKIP = 'textarea, input, select, option, script, style, title, [contenteditable="true"], #invoice-print, #quote-view, .qs-sheet, .msr, .no-iconize';
+
+function _iconizeTextNode(tn) {
+  const s = tn.nodeValue;
+  _EMOJI_RE.lastIndex = 0;
+  if (!s || !_EMOJI_RE.test(s)) return;
+  const p = tn.parentElement;
+  if (!p || p.closest(_ICONIZE_SKIP)) return;
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  s.replace(_EMOJI_RE, (m, key, idx) => {
+    if (idx > last) frag.appendChild(document.createTextNode(s.slice(last, idx)));
+    const def = EMOJI_ICON[key];
+    const span = document.createElement('span');
+    span.className = 'msr msr-inline';
+    span.setAttribute('aria-hidden', 'true');
+    span.textContent = Array.isArray(def) ? def[0] : def;
+    if (Array.isArray(def)) span.style.color = def[1];
+    frag.appendChild(span);
+    last = idx + m.length;
+    return m;
+  });
+  if (last < s.length) frag.appendChild(document.createTextNode(s.slice(last)));
+  tn.replaceWith(frag);
+}
+
+function iconizeTree(root) {
+  if (!root) return;
+  if (root.nodeType === 3) { _iconizeTextNode(root); return; }
+  if (root.nodeType !== 1 || root.closest?.(_ICONIZE_SKIP)) return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (w.nextNode()) nodes.push(w.currentNode);
+  nodes.forEach(_iconizeTextNode);
+}
+
+(function initIconize() {
+  iconizeTree(document.body);
+  new MutationObserver(muts => {
+    for (const m of muts) {
+      if (m.type === 'characterData') _iconizeTextNode(m.target);
+      else m.addedNodes.forEach(iconizeTree);
+    }
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+})();
+
+// ============== v3.39.0：頭像選單 + 新頂部列（切換帳號未開放：要先做不同帳號資料隔離） ==============
+// 取代：🔍 / ↻ / 📜 / 🌓 四顆圖示、sync-info chip、帳號 pill（舊元素保留但隱藏，既有程式仍會更新它們）
+// 同步狀態一顆雲朵（右下角狀態點）；頭像 = Google 照片（沒有照片用名字第一個字）
+function _tbSyncInfo() {
+  const signed = isCloudSignedIn() && !!cloudAuthState.user;
+  const meta = (typeof cloudGetMeta === 'function') ? cloudGetMeta() : {};
+  const rel = meta.lastSyncedAt ? cloudFormatRelativeTime(meta.lastSyncedAt) : '';
+  if (!signed) return { icon: 'cloud_off', tone: '', title: '尚未登入', sub: '資料只存在這台電腦' };
+  if (!navigator.onLine || (cloudSyncStatus === 'error' && _isNetworkErrMsg(cloudLastSyncError))) {
+    return { icon: 'cloud_off', tone: 'warn', title: '離線中', sub: '改動已存本機，恢復連線後自動同步' };
+  }
+  if (cloudSyncStatus === 'error') return { icon: 'error', tone: 'danger', title: '同步失敗', sub: cloudLastSyncError || '請重新登入 Google' };
+  if (cloudSyncStatus === 'syncing') return { icon: 'cloud_sync', tone: 'accent', title: '同步中…', sub: '正在上傳到 Google Drive', spin: true };
+  if (cloudSyncStatus === 'pending') return { icon: 'cloud_upload', tone: 'warn', title: '有改動待同步', sub: '幾秒內自動上傳' };
+  return { icon: 'cloud_done', tone: 'ok', title: '已同步到 Google Drive', sub: (rel ? rel + '同步' : '') + (meta.lastSyncedVersion ? `　雲端版本 #${meta.lastSyncedVersion}` : '') };
+}
+
+function _tbAvatarHtml(size) {
+  const u = (isCloudSignedIn() && cloudAuthState.user) || null;
+  if (!u) return '<span class="msr">person</span>';
+  const name = u.name || (u.email || '').split('@')[0] || '';
+  if (u.picture && /^https:\/\//.test(u.picture)) {
+    return `<img src="${escapeHtml(u.picture)}" alt="" referrerpolicy="no-referrer" width="${size}" height="${size}">`;
+  }
+  return escapeHtml((name[0] || '?').toUpperCase());
+}
+
+// 狀態變動時更新頂部列（cloudUpdateSyncIndicator / renderAll 會呼叫）
+function tbRender() {
+  const s = _tbSyncInfo();
+  const icon = document.getElementById('tb-sync-icon');
+  const dot = document.getElementById('tb-sync-dot');
+  const btn = document.getElementById('tb-sync');
+  if (icon) { icon.textContent = s.icon; icon.classList.toggle('tb-spin', !!s.spin); }
+  if (dot) dot.className = 'tb-sync-dot' + (s.tone ? ' tone-' + s.tone : '');
+  if (btn) { btn.title = `${s.title}${s.sub ? '\n' + s.sub : ''}`; btn.setAttribute('aria-label', `雲端同步狀態：${s.title}`); }
+  const av = document.getElementById('tb-avatar');
+  if (av) av.innerHTML = _tbAvatarHtml(34);
+  // 左上角固定是產品品牌「收工」；使用者上傳的 Logo 只用在請款單 / 報價單
+  const menu = document.getElementById('tb-menu');
+  if (menu && !menu.hidden) tbRenderMenu();
+}
+
+function tbRenderMenu() {
+  const menu = document.getElementById('tb-menu');
+  if (!menu) return;
+  const u = (isCloudSignedIn() && cloudAuthState.user) || null;
+  const s = _tbSyncInfo();
+  const theme = localStorage.getItem(THEME_KEY) || 'auto';
+  const seg = (v, label) => `<button type="button" data-theme-set="${v}" aria-pressed="${theme === v}">${label}</button>`;
+  const item = (act, ic, label, extra = '') => `<button type="button" class="tb-mi${extra}" role="menuitem" data-tb="${act}"><span class="msr">${ic}</span>${label}</button>`;
+  menu.innerHTML = `
+    <div class="tb-menu-head">
+      <span class="tb-avatar tb-avatar-lg">${_tbAvatarHtml(44)}</span>
+      <div class="tb-who"><b>${escapeHtml(u ? (u.name || '已登入') : '尚未登入')}</b><span>${escapeHtml(u ? (u.email || '') : '登入 Google 後兩台電腦自動同步')}</span></div>
+    </div>
+    <div class="tb-sync-card tone-${s.tone || 'muted'}">
+      <span class="msr${s.spin ? ' tb-spin' : ''}">${s.icon}</span>
+      <div class="tb-grow"><b>${escapeHtml(s.title)}</b><span>${escapeHtml(s.sub || '')}</span></div>
+      ${u ? '<button type="button" role="menuitem" data-tb="sync">立即同步</button>' : '<button type="button" role="menuitem" data-tb="signin">登入 Google</button>'}
+    </div>
+    ${item('profile', 'badge', '個人資訊與收款帳號')}
+    ${item('settings', 'settings', '設定')}
+    <div class="tb-appearance"><span class="msr">contrast</span>外觀
+      <div class="tb-seg" role="group" aria-label="外觀">${seg('light', '淺色')}${seg('dark', '深色')}${seg('auto', '系統')}</div>
+    </div>
+    <div class="tb-appearance"><span class="msr">palette</span>配色
+      <div class="tb-swatches" role="group" aria-label="配色">${TB_PALETTES.map(([k, label, bg, ac]) =>
+        `<button type="button" data-palette-set="${k}" aria-pressed="${(document.documentElement.dataset.palette || 'candy') === k}" title="${label}" aria-label="${label}"><span style="background:${bg}"><i style="background:${ac}"></i></span>${label}</button>`).join('')}</div>
+    </div>
+    ${item('shortcuts', 'keyboard', '鍵盤快捷鍵<span class="tb-hint">?</span>')}
+    ${item('log', 'history', '操作日誌')}
+    ${item('reload', 'refresh', '重新整理（清除快取）')}
+    ${u ? `<hr>${item('signout', 'logout', '登出', ' tb-danger')}` : ''}
+    <hr>
+    ${item('about', 'info', `關於收工<span class="tb-hint">${escapeHtml((document.getElementById('app-version-badge')?.textContent || '').trim())}</span>`)}
+  `;
+}
+
+const _TB_ACTIONS = {
+  sync: () => { if (cloudPendingChangesCount > 0 && typeof cloudPushNow === 'function') cloudPushNow().catch(() => {}); else onSyncInfoChipClick(); },
+  signin: () => cloudSignIn(),
+  profile: () => openPaymentAccountEditor(typeof getInvSelectedAcctId === 'function' ? getInvSelectedAcctId() : null),
+  settings: () => switchTab('settings'),
+  shortcuts: () => _kbShowHelp(),
+  log: () => openActionLogModal(),
+  reload: () => hardReload(),
+  signout: () => confirmCloudSignOut(),
+  about: () => onVersionBadgeClick(),  // 原標題下方版本標籤的行為（有新版 → 先備份再更新）
+};
+
+// v3.39.0：「新增案件」旁 ▾ 的小選單
+function tbToggleNewMenu(force) {
+  const m = document.getElementById('tb-new-menu');
+  const b = document.getElementById('tb-new-caret');
+  if (!m || !b) return;
+  const show = force !== undefined ? force : m.hidden;
+  m.hidden = !show;
+  b.setAttribute('aria-expanded', String(show));
+  if (show) m.querySelector('[role="menuitem"]')?.focus();
+}
+document.addEventListener('click', e => { if (!e.target.closest('.tb-new-group')) tbToggleNewMenu(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !document.getElementById('tb-new-menu')?.hidden) tbToggleNewMenu(false); });
+
+// v3.39.0：配色 — 純 UI 偏好，存本機
+// 粉嫩糖果色系（2026-10-12 james：要像報價單那種粉粉的、淡黃、Tiffany 綠）；[key, 名稱, 色票底, 色票點]
+const TB_PALETTES = [['candy', '糖果', '#fde8ef', '#c4567f'], ['rose', '玫瑰', '#f6ece8', '#b0646b'], ['tiffany', '蒂芬妮', '#e3f6f4', '#2a9d96'], ['lemon', '檸檬', '#fff4cf', '#2a8466']];
+function tbSetPalette(p) {
+  document.documentElement.dataset.palette = p;
+  try { localStorage.setItem('cloud-ftPalette_v1', p); } catch (_) {}
+  tbRenderMenu();
+}
+
+function tbToggleMenu(force) {
+  const menu = document.getElementById('tb-menu');
+  const btn = document.getElementById('tb-avatar-btn');
+  if (!menu || !btn) return;
+  const show = force !== undefined ? force : menu.hidden;
+  if (show) {
+    tbRenderMenu();
+    menu.hidden = false;
+    menu.classList.remove('tb-anim'); void menu.offsetWidth; menu.classList.add('tb-anim');
+    btn.setAttribute('aria-expanded', 'true');
+    menu.querySelector('[role="menuitem"]')?.focus();
+  } else {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+(function tbInitMenuEvents() {
+  const menu = document.getElementById('tb-menu');
+  if (!menu) return;
+  menu.addEventListener('click', e => {
+    e.stopPropagation();
+    const t = e.target.closest('[data-theme-set]');
+    if (t) { setTheme(t.dataset.themeSet); tbRenderMenu(); return; }
+    const p = e.target.closest('[data-palette-set]');
+    if (p) { tbSetPalette(p.dataset.paletteSet); return; }
+    const a = e.target.closest('[data-tb]');
+    if (!a) return;
+    tbToggleMenu(false);
+    document.getElementById('tb-avatar-btn')?.focus();
+    (_TB_ACTIONS[a.dataset.tb] || (() => {}))();
+  });
+  menu.addEventListener('keydown', e => {
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); tbToggleMenu(false); document.getElementById('tb-avatar-btn')?.focus(); }
+    else if (e.key === 'Tab') tbToggleMenu(false);
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#tb-menu') && !e.target.closest('#tb-avatar-btn') && !e.target.closest('#tb-sync')) tbToggleMenu(false);
+  });
+  window.addEventListener('online', tbRender);
+  window.addEventListener('offline', tbRender);
+})();
 
 // v3.24.37：top-bar overflow menu 開關
 function toggleTopbarOverflow(forceState) {
@@ -3694,7 +3924,7 @@ function _cloudStatsRow(label, current, snap, formatter) {
   let diffHtml = '';
   if (current !== snap) {
     const delta = snap - current;
-    if (delta > 0) diffHtml = ` <span style="color:#10b981;font-size:11px;">(+${fmt(delta).replace('NT$ ', '')})</span>`;
+    if (delta > 0) diffHtml = ` <span style="color:var(--success);font-size:11px;">(+${fmt(delta).replace('NT$ ', '')})</span>`;
     else diffHtml = ` <span style="color:#ef4444;font-size:11px;">(${fmt(delta).replace('NT$ ', '-NT$ ').replace('--', '-')})</span>`;
   }
   return `
@@ -5962,12 +6192,15 @@ let currentTab = 'dashboard';
 
 function switchTab(tab) {
   currentTab = tab;
+  _animOnOpen = true;   // v3.39.0：切到分頁 = 一次「打開」→ 下一次 renderActiveTab 播開啟動畫
+  _tabEnterAnim(tab);
   // v3.25.3（R25）：唯讀行為進 usage counter（logAction 只記 mutation，補熱區盲點）
   if (typeof bumpUsage === 'function') bumpUsage('tab:' + tab);
   // v3.30.0：「單據」nav 按鈕（data-tab=invoice）在 invoice / quote 都亮；#doc-switch 只在這兩個 tab 顯示
   const isDoc = tab === 'invoice' || tab === 'quote';
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (isDoc && b.dataset.tab === 'invoice')));
   document.getElementById('doc-switch')?.classList.toggle('hidden', !isDoc);
+  document.getElementById('tb-avatar-btn')?.classList.toggle('tb-current', tab === 'settings');  // v3.39.0：設定從頭像進入 → 頭像亮框當定位
   document.querySelectorAll('#doc-switch button').forEach(b => b.classList.toggle('active', b.dataset.doc === tab));
   ['dashboard','jobs','calendar','revenue','clients','invoice','quote','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.toggle('hidden', t !== tab);
@@ -6028,6 +6261,59 @@ function renderActiveTab() {
     case 'quote':     renderQuote();     break;  // v3.29.0
     // settings 不需要 render（純靜態）
   }
+  // v3.39.0：開啟動畫只在「載入 / 切到這個分頁」那一次播（存檔等一般重畫不播）
+  if (_animOnOpen) { _animOnOpen = false; _playOpenAnim(currentTab); }
+}
+
+// ============== v3.39.0：開啟動畫（數字捲動、長條長出來、卡片依序浮現、分頁淡入） ==============
+let _animOnOpen = true;  // 頁面載入算一次「打開」
+const _reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 把元素裡的數字從 0 捲到目前值（保留 NT$ 前綴、千分位、小數位數）
+function animateNumber(el, dur = 900) {
+  if (!el) return;
+  const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let tn = null;
+  while (w.nextNode()) { if (/\d/.test(w.currentNode.nodeValue)) { tn = w.currentNode; break; } }
+  if (!tn) return;
+  const text = tn.nodeValue;
+  if (/\d[-/]\d/.test(text)) return;  // 日期 / 月份（如 2026-07）不是金額，不捲
+  const m = text.match(/-?[\d,]+(\.\d+)?/);
+  if (!m) return;
+  const target = parseFloat(m[0].replace(/,/g, ''));
+  if (!target) return;
+  const dec = m[1] ? m[1].length - 1 : 0;
+  const pre = text.slice(0, m.index), post = text.slice(m.index + m[0].length);
+  const t0 = performance.now();
+  const step = now => {
+    if (!tn.isConnected) return;  // 中途被重畫 → 停
+    const t = Math.min((now - t0) / dur, 1);
+    const v = target * (1 - Math.pow(1 - t, 3));
+    tn.nodeValue = pre + v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }) + post;
+    if (t < 1) requestAnimationFrame(step);
+  };
+  tn.nodeValue = pre + (0).toFixed(dec) + post;
+  requestAnimationFrame(step);
+}
+
+function _playOpenAnim(tab) {
+  if (_reduceMotion()) return;
+  const sec = document.getElementById('tab-' + tab);
+  if (!sec || (tab !== 'dashboard' && tab !== 'revenue')) return;
+  sec.classList.remove('open-anim'); void sec.offsetWidth; sec.classList.add('open-anim');
+  clearTimeout(sec._openAnimT);
+  sec._openAnimT = setTimeout(() => sec.classList.remove('open-anim'), 1600);
+  // 總覽的金額由 countUpStat 自己從 0 捲（見 fromZero）；收益頁的摘要數字原本沒動畫 → 這裡捲
+  if (tab === 'revenue') sec.querySelectorAll('.summary-card .value').forEach(el => animateNumber(el));
+}
+
+function _tabEnterAnim(tab) {
+  if (_reduceMotion()) return;
+  const sec = document.getElementById('tab-' + tab);
+  if (!sec) return;
+  sec.classList.remove('tab-enter'); void sec.offsetWidth; sec.classList.add('tab-enter');
+  clearTimeout(sec._enterT);
+  sec._enterT = setTimeout(() => sec.classList.remove('tab-enter'), 700);
 }
 
 // 強制全部重畫（特殊場景：例如 import / restore / 切換主題）
@@ -6041,6 +6327,7 @@ function renderAll() {
   renderInvoice();
   if (currentTab === 'quote') renderQuote();  // v3.29.0：pull/merge 進來的 quoteSheet 要即時反映（隱藏時量不到標籤寬，切過去再畫）
   renderBrandLogoPreview();  // v3.38.0：另一台換了 Logo → 設定頁預覽同步
+  if (typeof tbRender === 'function') tbRender();  // v3.39.0：品牌標誌跟著 Logo
   renderBadge();
   renderBackupStatus();
   // v3.0.0-alpha.3：把存摺照片 placeholder 換成實際 <img>（fire-and-forget；cache 命中秒出）
@@ -6190,7 +6477,7 @@ function dashBulkMarkCancelled() {
 function toggleBulkMode() {
   bulkMode = !bulkMode;
   bulkSelected.clear();
-  document.getElementById('bulk-toggle').textContent = bulkMode ? '✕ 退出批次' : '☑️ 批次操作';
+  document.getElementById('bulk-toggle').innerHTML = bulkMode ? '<span class="msr">close</span>退出批次' : '<span class="msr">checklist</span>批次操作';
   document.getElementById('bulk-bar').classList.toggle('hidden', !bulkMode);
   renderJobs();
 }
@@ -6729,7 +7016,7 @@ function renderDashboard() {
   }
   // 標題旁的批次按鈕（render 後再更新文字）
   const dashBulkBtn = document.getElementById('dash-bulk-btn');
-  if (dashBulkBtn) dashBulkBtn.textContent = dashBulkMode ? '✕ 退出批次' : '☑️ 批次操作';
+  if (dashBulkBtn) dashBulkBtn.innerHTML = dashBulkMode ? '<span class="msr">close</span>退出批次' : '<span class="msr">checklist</span>批次操作';
 
   // 月度圖：最近 6 個「日曆月份」
   // v3.27.0（設計F）：長條改業主色堆疊 —「誰餵飽這個月」一眼看出；已收/待收數字留在文字行
@@ -8150,12 +8437,12 @@ function renderClientMiniChart(c, aJobs) {
     if (d.paid > 0) {
       const h = d.paid / niceMax * chartH;
       y -= h;
-      parts.push(`<rect x="${bx}" y="${y}" width="${barW}" height="${h}" fill="#10b981" rx="2"><title>${d.label}　已收 ${fmt(d.paid)}</title></rect>`);
+      parts.push(`<rect x="${bx}" y="${y}" width="${barW}" height="${h}" style="fill:var(--success)" rx="2"><title>${d.label}　已收 ${fmt(d.paid)}</title></rect>`);
     }
     if (d.unpaid > 0) {
       const h = d.unpaid / niceMax * chartH;
       y -= h;
-      parts.push(`<rect x="${bx}" y="${y}" width="${barW}" height="${h}" fill="#f59e0b" rx="2"><title>${d.label}　待收 ${fmt(d.unpaid)}</title></rect>`);
+      parts.push(`<rect x="${bx}" y="${y}" width="${barW}" height="${h}" style="fill:var(--warning)" rx="2"><title>${d.label}　待收 ${fmt(d.unpaid)}</title></rect>`);
     }
     // 每隔 2 個月顯示一次月份標籤（避免擠）
     if (i % 2 === 0 || i === data.length - 1) {
@@ -8363,6 +8650,7 @@ function switchRevenueSubtab(key) {
     // v3.24.0：外包對帳子分頁
     if (typeof renderOutsourceReport === 'function') renderOutsourceReport();
   }
+  _playOpenAnim('revenue');  // v3.39.0：子頁籤切換也重播數字捲動 / 長條上長
 }
 
 // ============== v3.24.0：外包對帳子分頁 ==============
@@ -9878,7 +10166,7 @@ function renderTagPie() {
 
   const total = entries.reduce((s, [_,v]) => s + v, 0);
   const cx = 90, cy = 90, r = 78;
-  const colors = ['#2563eb','#10b981','#f59e0b','#ec4899','#8b5cf6','#14b8a6','#ef4444','#eab308','#0891b2','#7c3aed','#92400e','#64748b'];
+  const colors = ['#e8789f','#a78bdb','#f2a65e','#6fb6d6','#e9c45a','#d38fcf','#f08a8a','#8fa8e8','#f5b8a0','#b49ad6','#c9917a','#a39aa8'];  // v3.39.0：糖果色系
 
   let startAngle = -Math.PI / 2;
   const slices = entries.map(([tag, amt], i) => {
@@ -9946,7 +10234,7 @@ function renderHeatmap() {
   while (start.getDay() !== 0) start.setDate(start.getDate() - 1);
 
   const max = Math.max(...Object.values(byDay), 1);
-  const colors = ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
+  const colors = ['var(--border)', 'color-mix(in srgb, var(--primary) 25%, var(--card))', 'color-mix(in srgb, var(--primary) 50%, var(--card))', 'color-mix(in srgb, var(--primary) 75%, var(--card))', 'var(--primary)'];
 
   const cells = [];
   const monthLabels = [];
@@ -9964,7 +10252,7 @@ function renderHeatmap() {
       const x = w * (cell+gap) + 22;
       const y = d * (cell+gap) + 18;
       const isToday = ds === todayStrV;
-      cells.push(`<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" fill="${colors[intensity]}" ${isToday?'stroke="var(--primary)" stroke-width="1.5"':''}><title>${ds}　${fmt(amt)}</title></rect>`);
+      cells.push(`<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" style="fill:${colors[intensity]}" ${isToday?'stroke="var(--primary)" stroke-width="1.5"':''}><title>${ds}　${fmt(amt)}</title></rect>`);
     }
     // 月份 label（每個月的第一個出現）
     const cur = new Date(start);
@@ -11385,15 +11673,18 @@ function getQuotePayAccount(q) {
   return (q.payAccountId && list.find(a => a.id === q.payAccountId)) || getActivePaymentAccount();
 }
 
+// 襯線字只有報價單 / 請款單用 → 第一次開才載（v3.39.0：請款單改報價單風格後共用）
+function _ensureSheetFont(onload) {
+  if (document.getElementById('quote-font')) return;
+  const l = document.createElement('link');
+  l.id = 'quote-font'; l.rel = 'stylesheet';
+  l.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&display=swap';
+  if (onload) l.onload = () => document.fonts.ready.then(onload);
+  document.head.appendChild(l);
+}
+
 function renderQuote() {
-  // 襯線字只有報價單用 → 第一次開分頁才載
-  if (!document.getElementById('quote-font')) {
-    const l = document.createElement('link');
-    l.id = 'quote-font'; l.rel = 'stylesheet';
-    l.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&display=swap';
-    l.onload = () => document.fonts.ready.then(renderQuoteSheet);  // 字檔下載完再重量標籤寬
-    document.head.appendChild(l);
-  }
+  _ensureSheetFont(renderQuoteSheet);  // 字檔下載完再重量標籤寬
   // 正在編輯欄位時不重畫編輯區（pull 進來會搶走游標），只更新右邊報價單
   const ed = document.getElementById('quote-editor');
   if (ed && !ed.contains(document.activeElement)) { renderQuoteEditor(); _quoteEditorStale = false; }
@@ -12714,6 +13005,7 @@ function clearInvoiceWholeDiscount() {
 }
 
 function drawInvoice() {
+  _ensureSheetFont();  // v3.39.0：請款單紙面改報價單風格（襯線標題）
   const cid = document.getElementById('inv-client').value;
   const mode = document.getElementById('inv-mode')?.value || 'single';
   const c = getClient(cid);
@@ -12788,6 +13080,8 @@ function drawInvoice() {
   const indivDiscTotal = jobs.filter(j => !isWholeDisc(j)).reduce((s,j) => s + jobDiscountAmount(j), 0);
   const wholeDiscLabel = [...new Set(jobs.filter(isWholeDisc).map(j => j.discountNote))].join('、');
   const showDiscount = indivDiscTotal > 0;  // v2.9.8: 沒有（個別）折扣 → 隱藏整欄
+  // v3.39.0：說明改成項目下方的灰色小字，不再獨立一欄（大多數案件沒說明，獨立欄 = 無意義空白）；lead = 合計列左側合併欄數
+  const lead = 4;
 
   const u = config.userInfo || {};
   // v3.2.0：個人資訊優先用 active paymentAccount 的（per-account），fallback 到 top-level userInfo
@@ -12838,7 +13132,7 @@ function drawInvoice() {
       </div>
     </div>
     ${jobs.length ? `<table>
-      <thead><tr><th>日期</th><th>項目</th><th>說明</th><th class="num">單價</th><th class="num">數量</th>${showDiscount ? '<th class="num">折扣</th>' : ''}<th class="num">應收</th><th class="num">已收</th>${showStatusCol ? '<th>狀態</th>' : ''}</tr></thead>
+      <thead><tr><th>日期</th><th>項目</th><th class="num">單價</th><th class="num">數量</th>${showDiscount ? '<th class="num">折扣</th>' : ''}<th class="num">應收</th><th class="num">已收</th>${showStatusCol ? '<th>狀態</th>' : ''}</tr></thead>
       <tbody>
         ${jobs.map(j => {
           // v3.31.0：整單折扣的案件每列顯示原價，折扣集中到底部一行
@@ -12860,9 +13154,8 @@ function drawInvoice() {
             else stLabel = '<span class="badge-status pending">進行中</span>';
           }
           return `<tr>
-            <td>${j.date||'-'}</td>
-            <td>${escapeHtml(j.title||'-')}</td>
-            <td style="color:var(--muted); font-size: 13px;">${escapeHtml(j.details||'')}</td>
+            <td class="inv-nowrap">${j.date||'-'}</td>
+            <td>${escapeHtml(j.title||'-')}${(j.details || '').trim() ? `<div class="inv-detail">${escapeHtml(j.details)}</div>` : ''}</td>
             <td class="num">${fmt(unit)}</td>
             <td class="num">${qty}</td>
             ${showDiscount ? `<td class="num" style="color: ${disc>0?'var(--warning)':'var(--muted)'};">${disc>0 ? '−' + fmt(disc).replace('NT$','').trim() : '—'}</td>` : ''}
@@ -12874,15 +13167,15 @@ function drawInvoice() {
       </tbody>
       <tfoot>
         ${wholeDiscTotal > 0 ? `<tr style="border-top: 2px solid var(--text);">
-          <td colspan="${showDiscount ? 6 : 5}" style="text-align: right;">小計</td>
+          <td colspan="${lead + (showDiscount ? 1 : 0)}" style="text-align: right;">小計</td>
           <td class="num">${fmt(finalTotal + wholeDiscTotal)}</td><td></td>${showStatusCol ? '<td></td>' : ''}
         </tr>
         <tr>
-          <td colspan="${showDiscount ? 6 : 5}" style="text-align: right; color: var(--warning);">${escapeHtml(wholeDiscLabel)}</td>
+          <td colspan="${lead + (showDiscount ? 1 : 0)}" style="text-align: right; color: var(--warning);">${escapeHtml(wholeDiscLabel)}</td>
           <td class="num" style="color: var(--warning);">−${fmt(wholeDiscTotal).replace('NT$','').trim()}</td><td></td>${showStatusCol ? '<td></td>' : ''}
         </tr>` : ''}
         <tr style="${wholeDiscTotal > 0 ? '' : 'border-top: 2px solid var(--text); '}font-weight: 600;">
-          <td colspan="5" style="text-align: right;">合計</td>
+          <td colspan="${lead}" style="text-align: right;">合計</td>
           ${showDiscount ? `<td class="num" style="color: var(--warning);">−${fmt(indivDiscTotal).replace('NT$','').trim()}</td>` : ''}
           <td class="num">${fmt(finalTotal)}</td>
           <td class="num" style="color: var(--success);">${fmt(paidTotal)}</td>
@@ -13035,7 +13328,7 @@ function renderInvoiceNetBreakdown() {
 }
 
 function emptyState(title, sub) {
-  return `<div class="empty"><div class="icon">📋</div><div style="font-weight: 500;">${title}</div><div style="font-size: 13px; margin-top: 4px;">${sub}</div></div>`;
+  return `<div class="empty"><div class="icon"><span class="msr">inbox</span></div><div style="font-weight: 500;">${title}</div><div style="font-size: 13px; margin-top: 4px;">${sub}</div></div>`;
 }
 
 // ============== Actions ==============
@@ -13172,7 +13465,9 @@ function countUpStat(elementId, target) {
   const el = document.getElementById(elementId);
   if (!el) return;
   const targetN = +target || 0;
-  const startN = _countUpLastValues[elementId] ?? 0;
+  // v3.39.0：總覽「打開」（載入 / 切回總覽）→ 一律從 0 捲到目前值；一般重畫照舊從上一個值接續
+  const fromZero = typeof _animOnOpen !== 'undefined' && _animOnOpen && currentTab === 'dashboard';
+  const startN = fromZero ? 0 : (_countUpLastValues[elementId] ?? 0);
   // 偏好減動效 → 直接 set
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     el.innerHTML = fmtM(targetN);  // v3.26.0（設計A）：NT$ 縮小
@@ -13185,7 +13480,7 @@ function countUpStat(elementId, target) {
     _countUpLastValues[elementId] = targetN;
     return;
   }
-  const DURATION_MS = 280;
+  const DURATION_MS = fromZero ? 900 : 280;  // v3.39.0：打開時捲久一點
   const startTime = performance.now();
   function tick(now) {
     const elapsed = now - startTime;
@@ -15257,7 +15552,7 @@ function applyTheme() {
   document.documentElement.setAttribute('data-theme', theme);
   // 更新 theme-color meta（手機網址列顏色跟著變）
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'dark' ? '#1c1a15' : '#0f766e');  // v3.27.0（E1）
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#1d1720' : '#c4567f');  // v3.27.0（E1）；v3.39.0 糖果色
 }
 
 function setTheme(mode) {
@@ -15335,24 +15630,42 @@ function dashStatJump(kind) {
 
 // v3.6.0：全域搜尋列改 collapsible（top bar 🔍 按鈕 toggle、Esc 關閉）
 function toggleGlobalSearch(forceState) {
-  const bar = document.getElementById('global-search-bar');
+  // v3.39.0：輸入框常駐在頂部列（#tb-search），「開啟」= 聚焦輸入框、「關閉」= 清空收起結果；不再展開下方搜尋列
   const input = document.getElementById('global-search');
   const results = document.getElementById('global-search-results');
-  if (!bar) return;
-  const willOpen = (typeof forceState === 'boolean') ? forceState : bar.classList.contains('hidden');
+  if (!input) return;
+  const willOpen = (typeof forceState === 'boolean') ? forceState : document.activeElement !== input;
   if (willOpen) {
-    bar.classList.remove('hidden');
-    setTimeout(() => input?.focus(), 30);  // wait for layout
+    input.focus();
+    input.select();
     // v3.23.3：mascot 搜尋中
     if (typeof mascotSay === 'function') mascotSay('search-open');
   } else {
-    bar.classList.add('hidden');
-    if (input) input.value = '';
+    input.value = '';
+    input.blur();
     if (results) results.classList.add('hidden');
     // v3.23.3：搜尋關閉 → 回 idle
     if (typeof mascotSetState === 'function' && mascotState && mascotState.current === 'searching') {
       mascotSetState('idle');
     }
+  }
+}
+
+// v3.39.0：頂部列搜尋鍵盤 — Esc 收起、↓↑ 移動、Enter 開啟反白（沒反白就第一筆）
+function tbSearchKey(e) {
+  const rows = [...document.querySelectorAll('#global-search-results .gs-row')];
+  let i = rows.findIndex(r => r.classList.contains('gs-active'));
+  if (e.key === 'Escape') { e.preventDefault(); toggleGlobalSearch(false); return; }
+  if (!rows.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    rows[i]?.classList.remove('gs-active');
+    i = e.key === 'ArrowDown' ? (i + 1) % rows.length : (i - 1 + rows.length) % rows.length;
+    rows[i].classList.add('gs-active');
+    rows[i].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    (rows[i] || rows[0]).click();
   }
 }
 
@@ -15440,7 +15753,7 @@ function closeGlobalSearch() {
 
 // 點擊外部關閉搜尋下拉
 document.addEventListener('click', (e) => {
-  const bar = document.querySelector('.global-search-bar');
+  const bar = document.getElementById('tb-search');  // v3.39.0：搜尋已搬到頂部列
   if (bar && !bar.contains(e.target)) {
     document.getElementById('global-search-results')?.classList.add('hidden');
   }
