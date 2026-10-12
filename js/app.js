@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-12-v3.39.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-12-v3.39.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -6198,6 +6198,7 @@ function switchTab(tab) {
   if (typeof bumpUsage === 'function') bumpUsage('tab:' + tab);
   // v3.30.0：「單據」nav 按鈕（data-tab=invoice）在 invoice / quote 都亮；#doc-switch 只在這兩個 tab 顯示
   const isDoc = tab === 'invoice' || tab === 'quote';
+  document.body.classList.toggle('doc-tab', isDoc);  // v3.39.1：單據頁貓咪縮成探頭，不擋編輯格
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab || (isDoc && b.dataset.tab === 'invoice')));
   document.getElementById('doc-switch')?.classList.toggle('hidden', !isDoc);
   document.getElementById('tb-avatar-btn')?.classList.toggle('tb-current', tab === 'settings');  // v3.39.0：設定從頭像進入 → 頭像亮框當定位
@@ -9314,7 +9315,7 @@ function mascotInit() {
   if (mascotInited) return;
   mascotInited = true;
   // v3.24.37：預設 false（首次使用不被打擾），既有使用者 config.mascotEnabled === true 仍維持開啟
-  mascotState.enabled = config.mascotEnabled === true;
+  mascotState.enabled = config.mascotEnabled !== false;  // v3.39.1：改預設開（明確關過的仍關）
   mascotState.name = config.mascotName || '';
   const c = document.getElementById('mascot-container');
   if (c) {
@@ -9565,10 +9566,10 @@ function mascotTestSay() {
 // 把 #pref-show-goals checkbox 的當前狀態同步到畫面（app 啟動時呼叫一次）
 function loadDisplayPrefUI() {
   const cb = document.getElementById('pref-show-goals');
-  if (cb) cb.checked = !!config.showGoalsCard;
+  if (cb) cb.checked = config.showGoalsCard !== false;  // v3.39.1：沒設定過 = 開
   // v3.24.18：啟動時也立即同步 card 的 hidden 狀態，避免 prefShowGoals=false 但首次載入時 card 還顯示
   const card = document.getElementById('rev-goals-card');
-  if (card) card.classList.toggle('hidden', !config.showGoalsCard);
+  if (card) card.classList.toggle('hidden', config.showGoalsCard === false);
 }
 
 // 設定頁 toggle 的 onchange handler
@@ -9600,7 +9601,7 @@ function onGoalChange(period, value) {
 function renderRevenueGoals() {
   // v3.22.8：依 config.showGoalsCard 決定要不要顯示整張 card（預設 false 隱藏）
   const card = document.getElementById('rev-goals-card');
-  const show = !!config.showGoalsCard;
+  const show = config.showGoalsCard !== false;
   if (card) card.classList.toggle('hidden', !show);
   if (!show) return;
 
@@ -9683,7 +9684,7 @@ function renderRevenueInsights() {
   const box = document.getElementById('rev-insights');
   if (!box) return;
   // v3.22.8：跟 #rev-goals-card 同卡片，被 hidden 時就不需要算了
-  if (!config.showGoalsCard) { box.innerHTML = ''; return; }
+  if (config.showGoalsCard === false) { box.innerHTML = ''; return; }
   const insights = [];
   const m = thisMonth();
   const yr = String(new Date().getFullYear());

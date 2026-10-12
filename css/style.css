@@ -683,21 +683,7 @@ html[data-theme="dark"] .alert-chip.sev-pu { background: #2f2440; color: #c084fc
   .pulse-success, .pulse-paid { animation: none; }
 }
 
-/* v3.24.17：設定頁卡片視覺順序（用 order 屬性，避免直接 swap HTML 範圍太大）
-   實際 DOM 順序：cloud-auth → display-pref → calendar → about
-   視覺順序：cloud-auth → calendar → display-pref → about
-   理由：「同步」相關（雲端 + 行事曆）放一起，個人化偏好放後面 */
-#tab-settings {
-  display: flex;
-  flex-direction: column;
-}
-#tab-settings > #card-cloud-auth { order: 1; }
-#tab-settings > #card-calendar { order: 2; }
-#tab-settings > #card-display-pref { order: 3; }
-#tab-settings > #card-danger { order: 90; }      /* v3.24.19：危險區放在「關於」之前最後 */
-#tab-settings > .settings-about { order: 99; }
-/* 註解 / 空白 div / placeholder 都用 order: 50 排其他 card 之後（顯示為間距） */
-#tab-settings > *:not(#card-cloud-auth):not(#card-calendar):not(#card-display-pref):not(#card-danger):not(.settings-about) { order: 50; }
+/* v3.39.1：移除 v3.24.17 的 order 重排 — 跟 v3.38.0 分組標題衝突（標題全被排到最下面），改照 DOM 順序 */
 
 /* v3.24.19：危險區卡 — 紅色左 border 視覺警示 */
 .card-danger {
@@ -1473,6 +1459,7 @@ input, select, textarea {
   background: var(--card);
   color: var(--text);
 }
+input[type="checkbox"], input[type="radio"] { width: auto; }  /* v3.39.1：勾選框不撐滿（設定頁顯示偏好被擠成半寬） */
 textarea { resize: vertical; min-height: 60px; }
 input:focus, select:focus, textarea:focus {
   outline: 2px solid var(--primary);
@@ -4448,3 +4435,8 @@ html[data-theme="dark"] .tb-new-caret { color: #08211d; border-left-color: rgba(
   header { padding-inline: 16px; }
   nav.tabs { padding-inline: 12px; gap: 20px; }
 }
+
+/* v3.39.1：單據頁（請款單 / 報價單）貓咪縮成左下角探頭，滑過才完整出現；左欄底部留空讓最後幾格捲得到貓上方 */
+body.doc-tab .mascot-container { width: 48px; height: 48px; left: -12px; bottom: 6px; opacity: .85; transition: left .2s, width .2s, height .2s, opacity .2s, transform .2s; }
+body.doc-tab .mascot-container:hover { left: 12px; width: 96px; height: 96px; opacity: 1; }
+body.doc-tab .quote-editor, body.doc-tab .invoice-side { padding-bottom: 64px; }
