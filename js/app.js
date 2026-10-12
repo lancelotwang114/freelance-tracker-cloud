@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-12-v3.40.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-12-v3.40.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -11758,8 +11758,7 @@ function renderQuoteEditor() {
     <div class="qe-grid2">${inp('contactName', q.contactName, '聯絡人')}${inp('phone', q.phone, '電話')}${inp('email', q.email, 'Email')}${inp('date', q.date, '', 'date')}</div>
     <h4>價目</h4>
     ${q.cats.map((c, ci) => `<div class="qe-cat"><div class="qe-ch">${inp(`cats.${ci}.name`, c.name, '類別')}${ops('cat', ci, '')}</div>
-      <div class="qe-it qe-hdr"><span>項目</span><span>細項</span><span>數量</span><span>單價</span><span></span></div>
-      ${c.items.map((r, ii) => `<div class="qe-it">${inp(`cats.${ci}.items.${ii}.item`, r.item)}${inp(`cats.${ci}.items.${ii}.detail`, r.detail)}${inp(`cats.${ci}.items.${ii}.qty`, r.qty)}${inp(`cats.${ci}.items.${ii}.price`, r.price, '另報價', 'number')}${ops('it', ci, ii)}</div>`).join('')}
+      ${c.items.map((r, ii) => `<div class="qe-it">${inp(`cats.${ci}.items.${ii}.item`, r.item, '項目')}${inp(`cats.${ci}.items.${ii}.detail`, r.detail, '細項')}${inp(`cats.${ci}.items.${ii}.qty`, r.qty, '數量（例：一張）')}${inp(`cats.${ci}.items.${ii}.price`, r.price, '另報價', 'number')}${ops('it', ci, ii)}</div>`).join('')}
       <button type="button" class="qe-add" data-qa="itAdd" data-c="${ci}">＋ 項目</button></div>`).join('')}
     <button type="button" class="qe-add" data-qa="catAdd">＋ 類別</button>
     <h4>急件費</h4>

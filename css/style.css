@@ -3975,7 +3975,6 @@ body.view-board #jobs-group-control {
 .qe-ch { display: flex; gap: 4px; align-items: center; margin-bottom: 6px; }
 .qe-ch input { font-weight: 700; }
 .qe-it { display: grid; grid-template-columns: 1.2fr 1.2fr .9fr 72px auto; gap: 4px; align-items: center; margin-top: 3px; }
-.qe-hdr { font-size: 11px; color: var(--muted); }
 .qe-rush { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; margin-top: 3px; }
 .qe-ops { display: flex; gap: 2px; }
 .qe-ops button, .qe-rush > button { border: 1px solid var(--border); background: var(--card); color: var(--muted); border-radius: 5px; padding: 2px 6px; font-size: 12px; cursor: pointer; }
@@ -4463,3 +4462,16 @@ select.doc-chip-more { width: auto; padding: 5px 10px; font-size: 13px; border-r
 .invoice th { padding: 7px 8px; }
 .invoice .invoice-payment-title { font-size: 14px; }
 .invoice .invoice-header .qs-meta { text-align: left; }
+
+/* ==================== v3.40.1：欄位寬度依內容 ==================== */
+/* 報價單價目：一列塞 5 欄每格只剩 73px → 拆兩行（項目＋細項 / 數量＋單價＋排序刪除），表頭改 placeholder */
+.qe-it { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) auto; gap: 4px; padding: 6px 0; border-top: 1px dashed var(--border); margin-top: 0; }
+.qe-it > :nth-child(1) { grid-column: 1; grid-row: 1; }
+.qe-it > :nth-child(2) { grid-column: 2 / 4; grid-row: 1; }
+.qe-it > :nth-child(3) { grid-column: 1; grid-row: 2; }
+.qe-it > :nth-child(4) { grid-column: 2; grid-row: 2; }
+.qe-it > :nth-child(5) { grid-column: 3; grid-row: 2; }
+.qe-ch input { flex: 0 1 160px; }  /* 分類 / 分組名稱多是 2~4 字 */
+#report-month { width: auto; flex: 0 0 auto; min-width: 120px; }
+#job-discount-value, #job-write-off { max-width: 160px; }
+#client-unpaid-override { max-width: 200px; }
