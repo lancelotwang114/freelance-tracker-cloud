@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-13-v3.43.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-13-v3.44.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -1668,7 +1668,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !document.
 
 // v3.39.0：配色 — 純 UI 偏好，存本機
 // 粉嫩糖果色系（2026-10-12 james：要像報價單那種粉粉的、淡黃、Tiffany 綠）；[key, 名稱, 色票底, 色票點]
-const TB_PALETTES = [['candy', '糖果', '#fde8ef', '#c4567f'], ['rose', '玫瑰', '#f6ece8', '#b0646b'], ['tiffany', '蒂芬妮', '#e3f6f4', '#2a9d96'], ['lemon', '檸檬', '#fff4cf', '#2a8466']];
+const TB_PALETTES = [['candy', '糖果', '#fde8ef', '#b24e73'], ['rose', '玫瑰', '#f6ece8', '#b0646b'], ['tiffany', '蒂芬妮', '#e3f6f4', '#2a9d96'], ['lemon', '檸檬', '#fff4cf', '#2a8466']];
 function tbSetPalette(p) {
   document.documentElement.dataset.palette = p;
   try { localStorage.setItem('cloud-ftPalette_v1', p); } catch (_) {}
@@ -8472,8 +8472,8 @@ function renderClientMiniChart(c, aJobs) {
   // baseline
   parts.push(`<line x1="${margin.left}" y1="${margin.top + chartH}" x2="${W - margin.right}" y2="${margin.top + chartH}" stroke="#e4e6eb" stroke-width="1"/>`);
   // y-axis 一個 max 刻度
-  parts.push(`<text x="${margin.left - 4}" y="${margin.top + 8}" text-anchor="end" fill="#8a8f98" font-size="9">${fmtShort(niceMax)}</text>`);
-  parts.push(`<text x="${margin.left - 4}" y="${margin.top + chartH + 4}" text-anchor="end" fill="#8a8f98" font-size="9">0</text>`);
+  parts.push(`<text x="${margin.left - 4}" y="${margin.top + 8}" text-anchor="end" style="fill: var(--muted)" font-size="10.5">${fmtShort(niceMax)}</text>`);
+  parts.push(`<text x="${margin.left - 4}" y="${margin.top + chartH + 4}" text-anchor="end" style="fill: var(--muted)" font-size="10.5">0</text>`);
   data.forEach((d, i) => {
     const cx = margin.left + i * barGroupW + barGroupW / 2;
     const bx = cx - barW / 2;
@@ -8490,7 +8490,7 @@ function renderClientMiniChart(c, aJobs) {
     }
     // 每隔 2 個月顯示一次月份標籤（避免擠）
     if (i % 2 === 0 || i === data.length - 1) {
-      parts.push(`<text x="${cx}" y="${H - 8}" text-anchor="middle" fill="#8a8f98" font-size="9">${d.label.slice(5)}</text>`);
+      parts.push(`<text x="${cx}" y="${H - 8}" text-anchor="middle" style="fill: var(--muted)" font-size="10.5">${d.label.slice(5)}</text>`);
     }
   });
   svg.innerHTML = parts.join('');
@@ -8653,14 +8653,14 @@ function renderClients() {
         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); viewClientDetail('${c.id}')">詳細 →</button>
       </div>
       <div style="font-size: 13px; color: var(--muted); margin-bottom: 4px; padding-left: 24px;">
-        本月已收 ${fmt(mPaid)} · 待收 ${fmt(mUnpaid)} · 累計 ${clientJobs.length} 筆
+        ${mPaid || mUnpaid ? `本月已收 ${fmt(mPaid)} · 待收 ${fmt(mUnpaid)}` : '本月沒有往來'} · 累計 ${clientJobs.length} 筆
       </div>
       ${timelineHtml}
       ${expandedJobsHtml}
-      <div style="display:flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+      ${isExpanded ? `<div style="display:flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding-left: 24px;">
         <button class="btn btn-outline btn-sm" onclick="setFilter('clientId','${c.id}'); switchTab('jobs')">查看案件</button>
         <button class="btn btn-outline btn-sm" onclick="gotoInvoice('${c.id}')">產生請款單</button>
-      </div>
+      </div>` : ''}
     </div>`;
   }).join('');
 }
@@ -10060,7 +10060,7 @@ function drawRevChart(data) {
     if (d.pending > 0) {
       const h = d.pending / niceMax * chartH;
       yCursor -= h;
-      parts.push(`<rect x="${bx}" y="${yCursor}" width="${barW}" height="${h}" fill="#8a8f98" opacity="0.3" rx="2"><title>${d.label}　進行中 ${fmt(d.pending)}</title></rect>`);
+      parts.push(`<rect x="${bx}" y="${yCursor}" width="${barW}" height="${h}" style="fill: var(--muted)" opacity="0.3" rx="2"><title>${d.label}　進行中 ${fmt(d.pending)}</title></rect>`);
     }
 
     // 趨勢線點
@@ -10303,14 +10303,14 @@ function renderHeatmap() {
     cur.setDate(start.getDate() + w*7);
     if (cur.getMonth() !== lastMonth) {
       lastMonth = cur.getMonth();
-      monthLabels.push(`<text x="${w * (cell+gap) + 22}" y="14" fill="#8a8f98" font-size="10">${cur.getMonth()+1}月</text>`);
+      monthLabels.push(`<text x="${w * (cell+gap) + 22}" y="14" style="fill: var(--muted)" font-size="10">${cur.getMonth()+1}月</text>`);
     }
   }
 
   // 星期 label
   const dowLabels = [];
   ['', '一', '', '三', '', '五', ''].forEach((d, i) => {
-    if (d) dowLabels.push(`<text x="0" y="${i*(cell+gap)+27}" fill="#8a8f98" font-size="9">${d}</text>`);
+    if (d) dowLabels.push(`<text x="0" y="${i*(cell+gap)+27}" style="fill: var(--muted)" font-size="10.5">${d}</text>`);
   });
 
   // 圖例
@@ -12262,9 +12262,9 @@ function renderPaymentTimeline() {
     const isCurrent = m === months[months.length - 1];
     const yymm = m.slice(2);  // 26-04
     return `<div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;" title="${m}：${fmt(data.total)} (${data.count} 筆)">
-      <div style="font-size: 10px; color: var(--muted);">${data.total>0 ? Math.round(data.total/1000)+'k' : ''}</div>
-      <div style="height: ${h}px; width: 70%; background: ${isCurrent?'var(--primary)':'var(--success)'}; border-radius: 3px; opacity: ${data.total>0?1:0.3};"></div>
-      <div style="font-size: 10px; color: var(--muted); white-space: nowrap;">${yymm}</div>
+      <div style="font-size: 11px; color: var(--muted);">${data.total>0 ? fmtShort(data.total) : ''}</div>
+      <div style="height: ${h}px; width: 70%; background: ${isCurrent?'var(--primary)':'color-mix(in srgb, var(--success) 60%, var(--card))'}; border-radius: 6px 6px 3px 3px; opacity: ${data.total>0?1:0.3};"></div>
+      <div style="font-size: 11px; color: var(--muted); white-space: nowrap;">${yymm}</div>
     </div>`;
   }).join('');
 
@@ -15736,7 +15736,7 @@ function applyTheme() {
   document.documentElement.setAttribute('data-theme', theme);
   // 更新 theme-color meta（手機網址列顏色跟著變）
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'dark' ? '#1d1720' : '#c4567f');  // v3.27.0（E1）；v3.39.0 糖果色
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#1d1720' : '#b24e73');  // v3.27.0（E1）；v3.39.0 糖果色
 }
 
 function setTheme(mode) {

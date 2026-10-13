@@ -4168,10 +4168,10 @@ body.view-board #jobs-group-control {
 /* 粉嫩糖果色系 4 組（每組淺 / 深）。--on-primary = 主按鈕文字色（粉嫩色底配白字常不到 4.5:1，各組自訂）
    --tint = 淡黃點綴底（今天的重點 / 年度卡），糖果組才明顯 */
 html[data-palette="candy"] {
-  --bg: #fff6f8; --card: #ffffff; --text: #3b2a34; --muted: #86707d; --border: #f3dfe6;
-  --primary: #c4567f; --primary-dark: #a8446a; --primary-light: #fce4ec; --on-primary: #ffffff;
-  --success: #8a62b8; --success-light: #efe6f8; --warning: #c0782a; --warning-light: #fdeedd; --danger: #c93a3a; --danger-light: #fbe3e1;
-  --orange: #c56a3a; --orange-light: #fde8dc; --gold: #c0782a; --tint: #fff3ea;
+  --bg: #fff6f8; --card: #ffffff; --text: #3b2a34; --muted: #7f6a76; --border: #f3dfe6;
+  --primary: #b24e73; --primary-dark: #9a4062; --primary-light: #fce4ec; --on-primary: #ffffff;
+  --success: #855fb2; --success-light: #efe6f8; --warning: #9d6222; --warning-light: #fdeedd; --danger: #c93a3a; --danger-light: #fbe3e1;
+  --orange: #c56a3a; --orange-light: #fde8dc; --gold: #9d6222; --tint: #fff3ea;
   --brand-from: #f5a3bd; --brand-to: #b79be0; --input-bg: #ffffff;
   --shadow: 0 1px 2px rgba(120, 60, 90, .05), 0 4px 14px -6px rgba(120, 60, 90, .12);
 }
@@ -4518,3 +4518,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [role="button"]:fo
 .ui-dialog-btns .btn { min-width: 88px; }
 .ui-dialog-btns .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .ui-dialog-input { width: 100%; }
+
+/* ==================== v3.44.0：可用性（觸控字級 / 點擊區 / 對比）與業主頁 ==================== */
+/* iPhone 點小於 16px 的輸入框會自動放大畫面 → 觸控裝置一律 16px（電腦版不變） */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px !important; }
+  .chip, .doc-chip, select.doc-chip-more, .btn-sm, .alert-chip, nav.tabs button { min-height: 40px; }
+  .qe-ops button, .qe-rush > button { min-width: 32px; min-height: 32px; }
+  .qe-add { min-height: 40px; }
+}
+.client-chip { text-shadow: 0 0 2px rgba(0, 0, 0, .45); }  /* 白字壓在淺業主色上仍看得清 */
+.client-header .dot { filter: saturate(.6) brightness(1.06); border-radius: 4px; }
