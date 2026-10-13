@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-13-v3.45.0">
+<meta name="app-version" content="2026-10-13-v3.46.0">
 <meta name="theme-color" content="#b24e73">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -148,17 +148,17 @@
   </header>
 
   <nav class="tabs">
-    <button data-tab="dashboard" class="active">總覽<span class="badge hidden" id="dash-badge"></span></button>
-    <button data-tab="jobs">案件</button>
+    <button data-tab="dashboard" class="active"><span class="msr nav-ic">space_dashboard</span>總覽<span class="badge hidden" id="dash-badge"></span></button>
+    <button data-tab="jobs"><span class="msr nav-ic">list_alt</span>案件</button>
     <!-- v3.29.1：行事曆分頁使用量 0 → 先隱藏（功能與 renderCalendar 保留，移除 hidden 即復原） -->
     <button data-tab="calendar" class="hidden">行事曆</button>
-    <button data-tab="revenue">收益</button>
+    <button data-tab="revenue"><span class="msr nav-ic">payments</span>收益</button>
     <!-- v3.30.0：請款單 + 報價單合併為「單據」，內部仍是 invoice / quote 兩個 tab，靠 #doc-switch 切換 -->
-    <button data-tab="invoice">單據</button>
+    <button data-tab="invoice"><span class="msr nav-ic">receipt_long</span>單據</button>
     <!-- v3.45.0：業主頁籤放回（頂部列改版後空間夠；偶爾用 → 放最後），設定頁入口拿掉 -->
-    <button data-tab="clients">業主</button>
+    <button data-tab="clients"><span class="msr nav-ic">groups</span>業主</button>
     <!-- v3.39.0：設定改從頭像選單進入（快捷鍵 6 仍可用） -->
-    <button data-tab="settings" class="hidden">設定</button>
+    <button data-tab="settings" class="nav-mobile-only"><span class="msr nav-ic">settings</span>設定</button>
   </nav>
 
   <!-- 全域搜尋列（v3.6.0：預設收起，點 top bar 🔍 才展開）-->
@@ -212,23 +212,26 @@
       </div>
     </div>
 
-    <!-- v3.24.18：今天該做什麼（v3.26.0 設計C：移到 hero 數字之後） -->
-    <div class="card today-todo-card" id="today-todo-card">
-      <h3 style="margin: 0 0 8px 0; font-size: 14px;"><span class="msr">bolt</span> 今天的重點</h3>
-      <div id="today-todo-list"></div>
-    </div>
-
-    <!-- v3.26.0（設計C）：警示聚合卡（renderAlerts 改 chips + 單一展開） -->
-    <div class="alerts" id="alerts"></div>
-
-    <div class="card">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <h3 style="margin: 0;">待完成案件</h3>
+    <!-- 改版：今天的重點 / 警示 / 待完成 三張卡合成「需要處理」，分頁切換；原本的元素 id 都保留（renderTodayTodo / renderAlerts / 待完成列表照舊運作） -->
+    <div class="card dash-queue" id="dash-queue">
+      <div class="dq-head">
+        <h3>需要處理</h3>
         <button class="btn btn-outline btn-sm" id="dash-bulk-btn" onclick="toggleDashBulkMode()"><span class="msr">checklist</span>批次操作</button>
       </div>
-      <div id="recent-jobs"></div>
+      <div class="dq-tabs" id="dq-tabs"></div>
+      <div class="dq-pane" data-dq="todo"><div id="recent-jobs"></div></div>
+      <div class="dq-pane hidden" data-dq="unpaid"></div>
+      <div class="dq-pane hidden" data-dq="overdue"></div>
+      <div class="dq-pane hidden" data-dq="remind">
+        <div class="today-todo-card" id="today-todo-card">
+          <div class="dq-sub"><span class="msr">bolt</span> 今天的重點</div>
+          <div id="today-todo-list"></div>
+        </div>
+        <div class="alerts" id="alerts"></div>
+      </div>
     </div>
-    <div class="card">
+    <!-- 改版：月度趨勢與主角卡的趨勢線重複 → 總覽不顯示（收益分頁有完整趨勢）；元素保留，render 照舊 -->
+    <div class="card hidden">
       <h3>月度趨勢（最近 6 個月）</h3>
       <div id="month-chart"></div>
     </div>
@@ -246,6 +249,15 @@
   <!-- Jobs -->
   <section id="tab-jobs" class="hidden">
     <div class="filter-bar" id="job-filter"></div>
+    <!-- 改版：快速新增列 — 走原本的新增流程；業主預設最近一筆、日期預設今天 -->
+    <div class="quick-row" id="quick-row">
+      <select id="qr-client" aria-label="業主"></select>
+      <input type="date" id="qr-date" aria-label="日期">
+      <input type="text" id="qr-title" placeholder="快速新增：案件名稱，Enter 送出" onkeydown="if(event.key==='Enter'){event.preventDefault();quickRowAdd();}">
+      <input type="number" id="qr-price" placeholder="單價" min="0" inputmode="numeric" onkeydown="if(event.key==='Enter'){event.preventDefault();quickRowAdd();}">
+      <input type="number" id="qr-qty" value="1" min="1" step="1" inputmode="numeric" aria-label="數量" onkeydown="if(event.key==='Enter'){event.preventDefault();quickRowAdd();}">
+      <button type="button" class="btn btn-primary" onclick="quickRowAdd()"><span class="msr">add</span>新增</button>
+    </div>
     <div class="card">
       <!-- v3.21.0：視圖切換 / v3.24.37：5 → 3 視圖（comfort 跟 card 視圖砍掉，跟 compact/board 重疊）
            保留：列表（compact，一行一筆，預設）/ 報表（table）/ 看板（board，看板拖曳）
@@ -262,7 +274,8 @@
             <span class="rev-control-label">分組</span>
             <select id="jobs-group-by" onchange="onJobsGroupChange()" style="margin: 0;">
               <option value="none">不分組</option>
-              <option value="date">依日期（年-月）</option>
+              <option value="day">依日</option>
+              <option value="date">依月（年-月）</option>
               <option value="client">依業主</option>
               <option value="status">依狀態</option>
               <option value="tag">依主標籤</option>
@@ -614,15 +627,17 @@
   </div>
 
   <!-- Invoice -->
-  <section id="tab-invoice" class="hidden">
+  <section id="tab-invoice" class="hidden" data-mstep="1">
+    <!-- 改版：手機版月底請款步驟條（只切換下面既有區塊的顯示，桌面版隱藏） -->
+    <div class="inv-mstepper no-print" id="inv-mstepper"></div>
     <!-- v3.40.0：上方工具列（對象按鈕 + 輸出）與報價單同一套結構 -->
     <div class="card no-print doc-toolbar">
-      <div class="doc-target-row">
+      <div class="doc-target-row ms-1">
         <span class="doc-label">請款對象</span>
         <div class="doc-chips" id="inv-chips"></div>
         <a href="#" class="doc-link" onclick="event.preventDefault(); viewClientDetail(document.getElementById('inv-client').value)">業主資料 ›</a>
       </div>
-      <div class="doc-actions">
+      <div class="doc-actions ms-3">
         <button class="btn btn-primary" onclick="exportInvoicePDF()"><span class="msr">picture_as_pdf</span>下載 PDF</button>
         <button class="btn btn-outline" onclick="exportInvoicePNG()"><span class="msr">image</span>下載圖片</button>
         <button class="btn btn-outline" onclick="copyInvoiceImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email"><span class="msr">content_copy</span>複製圖片</button>
@@ -637,7 +652,7 @@
 
       <!-- v3.2.0-ui：第 1 列 — 業主 + 請款範圍（兩欄並排，請款範圍 wrap 到第二行避免擠壓） -->
       <!-- 修：select 全域 width:100% 在 flex 內會 overflow，用 flex-wrap + explicit min-width 解決 -->
-      <div class="inv-row-client" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end;">
+      <div class="inv-row-client ms-1" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end;">
         <!-- v3.40.0：業主改由上方對象按鈕選；select 保留隱藏當資料來源（既有程式都讀它） -->
         <div class="hidden" style="min-width: 0;">
           <span style="font-size: 11px; color: var(--muted); display: flex; justify-content: space-between;">業主
@@ -664,7 +679,7 @@
       </div>
 
       <!-- v3.2.0-ui：第 2 列 — 收款帳號（獨立一排，含 CRUD 按鈕） -->
-      <div style="margin-top: 8px; min-width: 0;">
+      <div class="ms-1" style="margin-top: 8px; min-width: 0;">
         <span style="font-size: 11px; color: var(--muted);">收款帳號（含個人 / 發票資訊）</span>
         <div style="display: flex; gap: 4px; margin-top: 2px; align-items: center; flex-wrap: wrap;">
           <select id="inv-pay-account" onchange="onInvPayAccountChange()" style="width: auto; flex: 1 1 200px; min-width: 200px;"></select>
@@ -675,7 +690,7 @@
       </div>
 
       <!-- 顯示狀態 preset（高頻：月底請款↔對帳切換，留在主行；細項收進下方 ⚙） -->
-      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
+      <div class="ms-2" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
         <span style="color: var(--muted); font-size: 12px;">顯示狀態：</span>
         <button class="btn btn-outline btn-sm" type="button" data-preset="pending" onclick="applyInvoicePreset('pending')" title="只顯示已完成待收 + 部分收款">📋 請款</button>
         <button class="btn btn-outline btn-sm" type="button" data-preset="reconcile" onclick="applyInvoicePreset('reconcile')" title="所有已完成（含已收款）；會顯示狀態欄方便對帳">✅ 對帳</button>
@@ -685,10 +700,10 @@
       </div>
 
       <!-- v3.31.0：工作明細勾選 + 整單折扣（drawInvoice → renderInvoicePick 填入） -->
-      <div id="inv-pick"></div>
+      <div id="inv-pick" class="ms-2"></div>
 
       <!-- v3.27.3（R7）：低頻控制收進 ⚙ 顯示設定（個資 toggle + 狀態細項），控制區 6 行 → 3 行 -->
-      <details class="inv-settings" id="inv-settings">
+      <details class="inv-settings ms-3" id="inv-settings">
         <summary>⚙ 顯示設定（個人資訊 / 狀態細項）</summary>
         <div class="inv-settings-body">
           <!-- v3.2.0-ui：請款單顯示 toggle（個人 + 發票） -->
@@ -723,7 +738,7 @@
     </div>
 
     <!-- v3.24.1：請款單對帳區（業主看不到，匯出 PDF/PNG 不會包含） -->
-    <div class="card no-print" id="invoice-net-breakdown" style="margin-top: 14px;">
+    <div class="card no-print ms-4" id="invoice-net-breakdown" style="margin-top: 14px;">
       <h3 style="font-size: 15px; margin-bottom: 8px;"><span class="msr">account_balance_wallet</span> 我的對帳（業主看不到）</h3>
       <div style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">
         本次請款的實收試算（扣稅 / 分潤 / 外包）。此區只在頁面顯示，匯出 PDF / PNG 不會包含。
@@ -732,7 +747,7 @@
     </div>
 
     <!-- v3.12.0：請款單歷史（每次匯出留紀錄、可改 status / 重發 / 刪除） -->
-    <div class="card collapsible collapsed no-print" id="card-invoice-history">
+    <div class="card collapsible collapsed no-print ms-4" id="card-invoice-history">
       <div class="card-head" onclick="toggleCard('card-invoice-history'); renderInvoiceHistory();">
         <h3><span class="msr">history</span> 請款單歷史 <span id="invoice-history-count" class="reminder-hint" style="font-weight: 400;"></span></h3>
         <span class="card-status">紀錄每次匯出的請款單</span>
@@ -745,8 +760,9 @@
         <div id="invoice-history-list"></div>
       </div>
     </div>
+    <div class="card no-print ms-5 inv-mpay" id="inv-mstep-pay"></div>
     </div><!-- /.invoice-side -->
-    <div class="invoice-main"><div id="invoice-view"></div></div>
+    <div class="invoice-main ms-3"><div id="invoice-view"></div></div>
     </div><!-- /.invoice-layout -->
   </section>
 
@@ -1190,7 +1206,10 @@
         <input type="checkbox" id="job-estimate" onchange="onJobEstimateToggle()">
         <span><span class="msr">description</span> 估價單</span>
       </label>
+      <button type="button" class="btn btn-ghost btn-sm job-drawer-close" onclick="closeJobModal()" aria-label="關閉"><span class="msr">close</span></button>
     </div>
+    <!-- 改版：進度條（接案 → 完成 → 請款 → 收款） -->
+    <div class="job-progress" id="job-progress"></div>
 
     <!-- ===== 區 1：基本資訊 ===== -->
     <div class="job-section">
@@ -1231,6 +1250,27 @@
     </div>
     <input type="text" id="job-title" placeholder="例：首頁 banner 設計">
     <div id="job-quote-picker" class="hidden job-quote-picker"></div>
+    <!-- 改版：金額搬到名稱正下方（最常改的四項集中在上方） -->
+    <!-- v3.2.0：金額拆成 單價 × 數量；amount 仍是「總金額」自動算 -->
+    <!-- v3.40.2：數量窄欄 + × / = 符號，單價與總金額放寬 -->
+    <div style="display: grid; grid-template-columns: minmax(0, 1.3fr) auto 84px auto minmax(0, 1.3fr); gap: 8px; align-items: start;">
+      <div>
+        <label for="job-unit-price">單價</label>
+        <input type="number" id="job-unit-price" placeholder="0" oninput="onJobUnitOrQtyChange()">
+      </div>
+      <span class="job-amt-op">×</span>
+      <div>
+        <label for="job-quantity">數量</label>
+        <input type="number" id="job-quantity" placeholder="1" min="1" step="1" value="1" oninput="onJobUnitOrQtyChange()">
+      </div>
+      <span class="job-amt-op">=</span>
+      <div>
+        <label for="job-amount">總金額</label>
+        <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">
+        <!-- v3.24.18：千分位即時 hint，避免大數字眼花 -->
+        <div id="job-amount-formatted" class="num-hint" style="font-size: 11px; color: var(--muted); margin-top: 2px; min-height: 14px;"></div>
+      </div>
+    </div>
 
     <!-- v3.37.0：新增模式（.compact）收起的欄位一律標 .job-more -->
     <div class="job-more">
@@ -1260,26 +1300,6 @@
     <textarea id="job-details" placeholder="例：1280x400 banner x 2 張，含兩次修改"></textarea>
     <div id="template-picker" class="hidden" style="background: var(--bg); border-radius: 8px; padding: 8px; margin-top: -4px; margin-bottom: 8px; max-height: 200px; overflow-y: auto;"></div>
       </div>
-    <!-- v3.2.0：金額拆成 單價 × 數量；amount 仍是「總金額」自動算 -->
-    <!-- v3.40.2：數量窄欄 + × / = 符號，單價與總金額放寬 -->
-    <div style="display: grid; grid-template-columns: minmax(0, 1.3fr) auto 84px auto minmax(0, 1.3fr); gap: 8px; align-items: start;">
-      <div>
-        <label for="job-unit-price">單價</label>
-        <input type="number" id="job-unit-price" placeholder="0" oninput="onJobUnitOrQtyChange()">
-      </div>
-      <span class="job-amt-op">×</span>
-      <div>
-        <label for="job-quantity">數量</label>
-        <input type="number" id="job-quantity" placeholder="1" min="1" step="1" value="1" oninput="onJobUnitOrQtyChange()">
-      </div>
-      <span class="job-amt-op">=</span>
-      <div>
-        <label for="job-amount">總金額</label>
-        <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">
-        <!-- v3.24.18：千分位即時 hint，避免大數字眼花 -->
-        <div id="job-amount-formatted" class="num-hint" style="font-size: 11px; color: var(--muted); margin-top: 2px; min-height: 14px;"></div>
-      </div>
-    </div>
     <!-- v3.6.3：工時 + 計時器合併成一行 -->
     <!-- v3.24.9：計時器 4 個 element 暫時隱藏（工時 input 保留可手動輸入；計時器 JS 函式仍保留） -->
     <!-- v3.33.0：工時欄位隱藏（input 保留：editJob 照填、saveJob 照存原值，既有工時資料不會被清掉） -->

@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-13-v3.45.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-13-v3.46.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5209,7 +5209,7 @@ let jobsView = (function () {
 // v3.18.0：列表分組模式（none / date / client / status / tag）
 const JOBS_GROUP_KEY = 'cloud-ftJobsGroupBy_v1';
 let jobsGroupBy = (function () {
-  try { return localStorage.getItem(JOBS_GROUP_KEY) || 'none'; } catch (_) { return 'none'; }
+  try { return localStorage.getItem(JOBS_GROUP_KEY) || 'day'; } catch (_) { return 'day'; }  // 改版：預設依日分組
 })();
 
 // 收益頁模式
@@ -6361,6 +6361,35 @@ function toggleDashBulkSelect(id) {
 // v3.28.5：dashboard「待完成案件」清單（原「近期案件」最新 10 筆）— 使用者核定
 // 篩選：未完成且未取消、非估價單（「已收待做」也算待完成）；排序：日期舊→新（逾期浮頂）；全部不截斷
 // render 跟批次全選共用這一個來源（原本兩處各自複製查詢，是不同步 bug 源）
+// 改版：「需要處理」— 待完成（原列表＋批次）/ 待收 / 逾期 / 提醒（原今天的重點＋警示）
+let _dqTab = null;  // null = 還沒手動選 → 停在第一個有東西的分頁
+function setDashQueueTab(k) { _dqTab = k; renderDashQueue(); }
+function renderDashQueue() {
+  const tabsEl = document.getElementById('dq-tabs');
+  if (!tabsEl) return;
+  const today = todayStr();
+  const act = activeJobs();
+  const todo = dashPendingJobs();
+  const unpaid = act.filter(j => j.done && jobUnpaidAmount(j) > 0).sort((a, b) => (a.doneAt || a.date || '').localeCompare(b.doneAt || b.date || ''));
+  const overdue = config.enableOverdueAlert !== false ? act.filter(j => !j.done && j.date && j.date < today).sort((a, b) => (a.date || '').localeCompare(b.date || '')) : [];  // 與 computeAlerts 逾期規則相同
+  const alertsN = computeAlerts().length;
+  const T = [['todo', '待完成', todo.length], ['unpaid', '待收', unpaid.length], ['overdue', '逾期', overdue.length], ['remind', '提醒', alertsN]];
+  if (!_dqTab) _dqTab = (T.find(t => t[2] > 0) || T[0])[0];
+  tabsEl.innerHTML = T.map(([k, l, n]) => `<button class="${_dqTab === k ? 'on' : ''}${k === 'overdue' && n ? ' warn' : ''}" onclick="setDashQueueTab('${k}')">${l}<span class="cnt">${n}</span></button>`).join('');
+  document.querySelectorAll('#dash-queue .dq-pane').forEach(p => p.classList.toggle('hidden', p.dataset.dq !== _dqTab));
+  const bulkBtn = document.getElementById('dash-bulk-btn');
+  if (bulkBtn) bulkBtn.classList.toggle('hidden', _dqTab !== 'todo');
+  const list = (rows, foot) => { _rowShowDate = true; const h = rows.slice(0, 50).map(j => jobRowCompact(j)).join(''); _rowShowDate = false; return h + foot; };
+  const up = document.querySelector('#dash-queue [data-dq="unpaid"]');
+  if (up) up.innerHTML = unpaid.length
+    ? list(unpaid, `<div class="dq-foot"><span>共 ${unpaid.length} 筆 · 待收 ${fmt(unpaid.reduce((s, j) => s + jobUnpaidAmount(j), 0))}</span><button class="btn btn-ghost btn-sm" onclick="setFilter('month','all'); setFilter('status','done-unpaid'); switchTab('jobs')">到案件頁看全部 →</button></div>`)
+    : emptyState('沒有待收款', '完成的案件都收齊了');
+  const od = document.querySelector('#dash-queue [data-dq="overdue"]');
+  if (od) od.innerHTML = overdue.length
+    ? list(overdue, `<div class="dq-foot"><span>共 ${overdue.length} 筆逾期未完成</span><button class="btn btn-ghost btn-sm" onclick="lockJobsToIds(${JSON.stringify(overdue.map(j => j.id)).replace(/"/g, "'")}, '逾期未完成（${overdue.length} 筆）'); switchTab('jobs')">到案件頁處理 →</button></div>`)
+    : emptyState('沒有逾期案件', '進度都跟上了');
+}
+
 function dashPendingJobs() {
   return state.jobs
     .filter(j => !j.done && !j.cancelled && !j.isEstimate)
@@ -7055,12 +7084,15 @@ function renderDashboard() {
         <button class="btn btn-outline btn-sm" onclick="toggleDashBulkMode()">✕ 退出</button>
       </div>`;
     }
-    html += recent.map(j => jobRow(j, 'dash')).join('');
+    // 改版：一般模式用新版案件列（顯示日期）；批次模式維持原本的勾選列
+    if (dashBulkMode) html += recent.map(j => jobRow(j, 'dash')).join('');
+    else { _rowShowDate = true; html += recent.map(j => jobRowCompact(j)).join(''); _rowShowDate = false; }
     recentBox.innerHTML = html;
   }
   // 標題旁的批次按鈕（render 後再更新文字）
   const dashBulkBtn = document.getElementById('dash-bulk-btn');
   if (dashBulkBtn) dashBulkBtn.innerHTML = dashBulkMode ? '<span class="msr">close</span>退出批次' : '<span class="msr">checklist</span>批次操作';
+  renderDashQueue();  // 改版：需要處理分頁
 
   // 月度圖：最近 6 個「日曆月份」
   // v3.27.0（設計F）：長條改業主色堆疊 —「誰餵飽這個月」一眼看出；已收/待收數字留在文字行
@@ -7322,29 +7354,7 @@ function startInlineAmountEdit(el, id) {
 }
 
 // ============== Jobs Tab ==============
-// v3.28.2（R1）：手機篩選牆收合 — 業主/類型 chips 超過上限只顯示前 N + 更多▾
-// 展開狀態只存 session 內（模組變數），每次進來預設收合
-const FILTER_CHIP_MAX = 6;
-let _filterRowExpanded = { client: false, tag: false };
-function toggleFilterRowExpand(key) {
-  _filterRowExpanded[key] = !_filterRowExpanded[key];
-  renderJobs();
-}
-// chipHtmlList：各 chip 的 HTML；activeIdx：目前篩選中的 chip index（-1 = 無）
-function collapseChipRow(chipHtmlList, activeIdx, key) {
-  const n = chipHtmlList.length;
-  if (n <= FILTER_CHIP_MAX) return chipHtmlList.join('');
-  if (_filterRowExpanded[key]) {
-    return chipHtmlList.join('') +
-      `<button class="chip" onclick="toggleFilterRowExpand('${key}')">收合 ▴</button>`;
-  }
-  // active chip 必入前 N（不能把目前篩選狀態藏進摺疊區）
-  const shown = chipHtmlList.slice(0, FILTER_CHIP_MAX);
-  if (activeIdx >= FILTER_CHIP_MAX) shown[FILTER_CHIP_MAX - 1] = chipHtmlList[activeIdx];
-  return shown.join('') +
-    `<button class="chip" onclick="toggleFilterRowExpand('${key}')">更多 ▾ (${n - FILTER_CHIP_MAX})</button>`;
-}
-
+let _jfMoreOpen = false;  // 改版：「更多篩選」面板展開（只存 session）
 function renderJobs() {
   const fb = document.getElementById('job-filter');
   // 年/月階層式篩選：列出最近 5 年，點開後展開該年的月份
@@ -7355,124 +7365,71 @@ function renderJobs() {
   // 月份篩選 chips（依展開年份顯示）
   const monthChips = expandedY ? allMonths.filter(m => m.startsWith(expandedY + '-')) : [];
 
-  const statusOptions = [
-    { v: 'all', label: '全部狀態' },
-    { v: 'pending', label: '未完成' },
-    { v: 'prepaid', label: '已收·待做' },
-    { v: 'done-unpaid', label: '完成待收款' },
-    { v: 'partial', label: '🔶 部分收款' },   // v2.9
-    { v: 'paid', label: '已完成已收款' },
-    { v: 'cancelled', label: '🚫 已取消' },
-    { v: 'estimate', label: '📄 估價單' }
-  ];
   const usedTags = getUsedTags();
-  // 第一排：本月、全部、各年份
-  const yearChips = `<button class="chip ${state.filters.month==='current'?'active':''}" onclick="setFilter('month','current')">本月</button>` +
-    `<button class="chip ${state.filters.month==='all'?'active':''}" onclick="setFilter('month','all')">全部</button>` +
-    recentYears.map(y => {
-      const isExpanded = expandedY === y;
-      const isActive = state.filters.month?.startsWith(y);
-      return `<button class="chip ${isActive?'active':''}" onclick="toggleYearExpand('${y}')">${y} ${isExpanded?'▼':'▶'}</button>`;
-    }).join('') +
-    `<button class="chip ${state.filters.month==='custom-range'?'active':''}" onclick="openCustomMonthFilter()">📌 自訂範圍</button>`;
+  const f = state.filters;
+  const prevM = (() => { const [y, m] = thisMonth().split('-').map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
 
-  // 第二排：展開的年份顯示其月份
-  const monthSubChips = expandedY
-    ? '<div style="display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 0 0 24px;">' +
-      monthChips.map(m => `<button class="chip ${state.filters.month===m?'active':''}" onclick="setFilter('month','${m}')">${m.slice(5)}月</button>`).join('') +
-      '</div>'
-    : '';
-
-  // 自訂範圍 inline picker
-  const customRangeUI = state.filters.month === 'custom-range'
-    ? '<div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 0 0 24px; font-size: 13px;">' +
-      '<span style="color: var(--muted);">範圍：</span>' +
-      `<input type="month" id="filter-month-from" value="${state.filters.monthFrom || ''}" onchange="applyMonthRangeFromInputs()" style="max-width: 140px;">` +
-      '<span style="color: var(--muted);">~</span>' +
-      `<input type="month" id="filter-month-to" value="${state.filters.monthTo || ''}" onchange="applyMonthRangeFromInputs()" style="max-width: 140px;">` +
-      '</div>'
-    : '';
-
-  fb.innerHTML =
-    '<div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">' +
-      '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">' +
-        '<span class="filter-bar-label">月份</span>' + yearChips +
-      '</div>' +
-      monthSubChips +
-      customRangeUI +
-      '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px;">' +
-        '<span class="filter-bar-label">狀態</span>' +
-        statusOptions.map(s => `<button class="chip ${state.filters.status===s.v?'active':''}" onclick="setFilter('status','${s.v}')">${s.label}</button>`).join('') +
-        // v3.28.1（R12）：勞報三態篩選 chip（全部 → 只看勞報 → 非勞報）
-        `<button class="chip ${state.filters.labor === 'only' || state.filters.labor === 'non' ? 'active' : ''}" onclick="cycleLaborFilter()" title="勞報標記篩選：點擊循環 全部 → 只看勞報 → 非勞報">🧾 ${state.filters.labor === 'only' ? '只看勞報' : state.filters.labor === 'non' ? '非勞報' : '勞報'}</button>` +
-      '</div>' +
-      '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px;">' +
-        '<span class="filter-bar-label">業主</span>' +
-        `<button class="chip ${state.filters.clientId==='all'?'active':''}" onclick="setFilter('clientId','all')">全部</button>` +
-        // v3.28.2（R1）：> N 顆收合成 更多▾
-        collapseChipRow(
-          state.clients.map(c => `<button class="chip ${state.filters.clientId===c.id?'active':''}" onclick="setFilter('clientId','${c.id}')" ><span class="chip-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}</button>`),
-          state.clients.findIndex(c => c.id === state.filters.clientId),
-          'client') +
-      '</div>' +
-      (usedTags.length
-        ? '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px;">' +
-          '<span class="filter-bar-label">類型</span>' +
-          `<button class="chip ${state.filters.tag==='all'?'active':''}" onclick="setFilter('tag','all')">全部</button>` +
-          collapseChipRow(
-            usedTags.map(t => `<button class="chip ${state.filters.tag===t?'active':''}" onclick="setFilter('tag','${escapeHtml(t)}')" ${tagChipStyle(t, state.filters.tag===t)}>${escapeHtml(t)}</button>`),
-            usedTags.indexOf(state.filters.tag),
-            'tag') +
-          '</div>'
-        : '') +
-    '</div>';
-
-  // v2.6: 估價單模式單獨檢視；其他狀態自動排除估價單
-  let jobs;
-  if (state.filters.status === 'estimate') {
-    jobs = state.jobs.filter(j => j.isEstimate && !j.cancelled);
-  } else {
-    jobs = state.jobs.filter(j => !j.isEstimate);
-  }
-
-  // 提醒卡片帶來的鎖定篩選（最高優先）
-  if (state.filters.jobIdsOnly) {
-    jobs = jobs.filter(j => state.filters.jobIdsOnly.has(j.id));
-  }
-
-  const fm = state.filters.month;
-  if (fm === 'current') jobs = jobs.filter(j => jobBelongMonth(j) === thisMonth());
+  // ---- 套用篩選（狀態以外）：與改版前同一套規則，只是先算出 base 才能替每個狀態算筆數 ----
+  let base = state.jobs.slice();
+  if (f.jobIdsOnly) base = base.filter(j => f.jobIdsOnly.has(j.id));  // 提醒卡片帶來的鎖定篩選（最高優先）
+  const fm = f.month;
+  if (fm === 'current') base = base.filter(j => jobBelongMonth(j) === thisMonth());
   else if (fm === 'all') {/* 不過濾 */}
-  else if (fm === 'custom-range' && state.filters.monthFrom && state.filters.monthTo) {
-    const lo = state.filters.monthFrom, hi = state.filters.monthTo;
-    jobs = jobs.filter(j => {
-      const m = jobBelongMonth(j);
-      return m >= lo && m <= hi;
-    });
-  }
-  else if (fm && /^\d{4}$/.test(fm)) {
-    // 整年
-    jobs = jobs.filter(j => jobBelongMonth(j).startsWith(fm + '-'));
-  }
-  else if (fm) jobs = jobs.filter(j => jobBelongMonth(j) === fm);
-  if (state.filters.clientId !== 'all') jobs = jobs.filter(j => j.clientId === state.filters.clientId);
-  // 'estimate' 狀態已在前面用 isEstimate 篩過了，'partial' 用 paymentTotal 判斷
-  if (state.filters.status === 'partial') {
-    jobs = jobs.filter(j => !j.cancelled && !j.isEstimate && jobPaidTotal(j) > 0 && !jobIsFullyPaid(j));
-  } else if (state.filters.status !== 'all' && state.filters.status !== 'estimate') {
-    jobs = jobs.filter(j => jobStatus(j) === state.filters.status);
-  }
-  // v3.14.0：filter.tag 比對 j.tags[] 跟舊 j.tag 字串都算 hit
-  if (state.filters.tag && state.filters.tag !== 'all') {
-    const ft = state.filters.tag;
-    jobs = jobs.filter(j => {
-      const t = Array.isArray(j.tags) ? j.tags : [];
-      return t.includes(ft) || j.tag === ft;
-    });
-  }
-  // v3.28.1（R12）：勞報標記三態篩選（undefined/'all' = 不過濾）
-  if (state.filters.labor === 'only') jobs = jobs.filter(j => !!j.laborReported);
-  else if (state.filters.labor === 'non') jobs = jobs.filter(j => !j.laborReported);
+  else if (fm === 'custom-range' && f.monthFrom && f.monthTo) base = base.filter(j => { const m = jobBelongMonth(j); return m >= f.monthFrom && m <= f.monthTo; });
+  else if (fm && /^\d{4}$/.test(fm)) base = base.filter(j => jobBelongMonth(j).startsWith(fm + '-'));
+  else if (fm && fm !== 'custom-range') base = base.filter(j => jobBelongMonth(j) === fm);
+  if (f.clientId !== 'all') base = base.filter(j => j.clientId === f.clientId);
+  if (f.tag && f.tag !== 'all') base = base.filter(j => { const t = Array.isArray(j.tags) ? j.tags : []; return t.includes(f.tag) || j.tag === f.tag; });
+  if (f.labor === 'only') base = base.filter(j => !!j.laborReported);
+  else if (f.labor === 'non') base = base.filter(j => !j.laborReported);
+  // 估價單只在「估價單」分頁出現；其他分頁排除估價單（v2.6 規則）
+  const byStatus = st => {
+    if (st === 'estimate') return base.filter(j => j.isEstimate && !j.cancelled);
+    const nonEst = base.filter(j => !j.isEstimate);
+    if (st === 'all') return nonEst;
+    if (st === 'partial') return nonEst.filter(j => !j.cancelled && jobPaidTotal(j) > 0 && !jobIsFullyPaid(j));
+    return nonEst.filter(j => jobStatus(j) === st);
+  };
+  let jobs = byStatus(f.status);
+
+  // ---- 篩選列 UI ----
+  const years = [...new Set(state.jobs.map(j => jobBelongMonth(j)).filter(Boolean).map(m => m.slice(0, 4)))].sort().reverse();
+  const monthsOf = y => [...new Set(state.jobs.map(j => jobBelongMonth(j)).filter(m => m && m.startsWith(y + '-')))].sort().reverse();
+  const segOn = v => (fm === v ? ' on' : '');
+  const pickVal = (fm && fm !== 'current' && fm !== 'all' && fm !== prevM && fm !== 'custom-range') ? fm : '';
+  const monthPick = `<select class="jf-pick${pickVal ? ' on' : ''}" onchange="if (this.value) setFilter('month', this.value)" aria-label="選擇年份或月份">
+      <option value="">其他月份…</option>
+      ${years.map(y => `<optgroup label="${y}"><option value="${y}"${pickVal === y ? ' selected' : ''}>${y} 全年</option>${monthsOf(y).map(m => `<option value="${m}"${pickVal === m ? ' selected' : ''}>${y} 年 ${+m.slice(5)} 月</option>`).join('')}</optgroup>`).join('')}
+    </select>`;
+  const clientPick = `<select class="jf-pick${f.clientId !== 'all' ? ' on' : ''}" onchange="setFilter('clientId', this.value)" aria-label="業主">
+      <option value="all">全部業主</option>${sortedClientsForPicker().map(c => `<option value="${c.id}"${f.clientId === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+    </select>`;
+  const extraCnt = (f.tag && f.tag !== 'all' ? 1 : 0) + (f.labor === 'only' || f.labor === 'non' ? 1 : 0);
+  const morePanel = _jfMoreOpen ? `<div class="jf-more">
+      ${usedTags.length ? `<div class="jf-more-row"><span class="jf-more-lbl">類型</span><button class="chip ${f.tag === 'all' ? 'active' : ''}" onclick="setFilter('tag','all')">全部</button>${usedTags.map(t => `<button class="chip ${f.tag === t ? 'active' : ''}" onclick="setFilter('tag','${escapeHtml(t)}')" ${tagChipStyle(t, f.tag === t)}>${escapeHtml(t)}</button>`).join('')}</div>` : ''}
+      <div class="jf-more-row"><span class="jf-more-lbl">勞報</span>${[['all', '全部'], ['only', '只看勞報'], ['non', '非勞報']].map(([v, l]) => `<button class="chip ${(f.labor || 'all') === v ? 'active' : ''}" onclick="setFilter('labor','${v}')">${l}</button>`).join('')}</div>
+    </div>` : '';
+  const customRangeUI = fm === 'custom-range'
+    ? `<div class="jf-range"><span>範圍</span><input type="month" id="filter-month-from" value="${f.monthFrom || ''}" onchange="applyMonthRangeFromInputs()"><span>~</span><input type="month" id="filter-month-to" value="${f.monthTo || ''}" onchange="applyMonthRangeFromInputs()"></div>` : '';
+  const ST_TABS = [['all', '全部'], ['pending', '進行中'], ['done-unpaid', '待收'], ['partial', '部分收款'], ['paid', '已收'], ['prepaid', '已收·待做'], ['estimate', '估價單'], ['cancelled', '已取消']];
+  const statusTabs = ST_TABS.map(([v, l]) => { const n = byStatus(v).length; return (n || f.status === v || v === 'all') ? `<button class="${f.status === v ? 'on' : ''}" onclick="setFilter('status','${v}')">${l}<span class="cnt">${n}</span></button>` : ''; }).join('');
+  const chips = [];
+  if (f.clientId !== 'all') chips.push(['clientId', 'all', '業主：' + (getClient(f.clientId)?.name || '?')]);
+  if (f.tag && f.tag !== 'all') chips.push(['tag', 'all', '類型：' + f.tag]);
+  if (f.labor === 'only' || f.labor === 'non') chips.push(['labor', 'all', f.labor === 'only' ? '只看勞報' : '非勞報']);
+  if (f.status !== 'all') chips.push(['status', 'all', '狀態：' + (ST_TABS.find(x => x[0] === f.status) || [0, f.status])[1]]);
+  fb.innerHTML = `<div class="jf">
+      <div class="jf-row">
+        <div class="jf-seg"><button class="${segOn('current').trim()}" onclick="setFilter('month','current')">本月</button><button class="${segOn(prevM).trim()}" onclick="setFilter('month','${prevM}')">上月</button><button class="${segOn('all').trim()}" onclick="setFilter('month','all')">全部</button><button class="${segOn('custom-range').trim()}" onclick="openCustomMonthFilter()">自訂</button></div>
+        ${monthPick}${clientPick}
+        <button class="jf-more-btn${_jfMoreOpen || extraCnt ? ' on' : ''}" onclick="_jfMoreOpen = !_jfMoreOpen; renderJobs()"><span class="msr">tune</span>更多篩選${extraCnt ? `<span class="cnt">${extraCnt}</span>` : ''}</button>
+      </div>
+      ${customRangeUI}${morePanel}
+      <div class="jf-tabs">${statusTabs}</div>
+      ${chips.length ? `<div class="jf-chips">${chips.map(([k, v, l]) => `<span class="jf-chip">${escapeHtml(l)}<button onclick="setFilter('${k}','${v}')" aria-label="移除篩選"><span class="msr">close</span></button></span>`).join('')}</div>` : ''}
+    </div>`;
+  _fillQuickRow();
+
   jobs.sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
   const container = document.getElementById('jobs-list');
@@ -7524,6 +7481,7 @@ function renderJobs() {
 
   container.innerHTML = lockBanner + summaryHtml + jobsHtml;
   applyJobsView();
+  document.documentElement.style.setProperty('--topbar-h', (document.querySelector('.top-bar')?.offsetHeight || 0) + 'px');  // 改版：日期標題黏在頂部列下方
 }
 
 // v3.18.0：依 jobsGroupBy 把 jobs 分組顯示（含 group header 跟小計）
@@ -7533,7 +7491,10 @@ function renderJobsGrouped(jobs, density) {
   const groups = new Map();
   jobs.forEach(j => {
     let key, label;
-    if (jobsGroupBy === 'date') {
+    if (jobsGroupBy === 'day') {
+      key = j.date || '無日期';
+      label = _dayLabel(j.date);
+    } else if (jobsGroupBy === 'date') {
       key = (j.date || '').slice(0, 7) || '無日期';
       label = key;
     } else if (jobsGroupBy === 'client') {
@@ -7561,7 +7522,7 @@ function renderJobsGrouped(jobs, density) {
   });
   // 依 key 排序：日期模式用倒序（最新月在最上）
   let sortedKeys = [...groups.keys()];
-  if (jobsGroupBy === 'date') {
+  if (jobsGroupBy === 'date' || jobsGroupBy === 'day') {
     sortedKeys.sort((a, b) => (b || '').localeCompare(a || ''));
   } else if (jobsGroupBy === 'client') {
     sortedKeys.sort((a, b) => (groups.get(a).label || '').localeCompare(groups.get(b).label || '', 'zh-Hant'));
@@ -7593,6 +7554,177 @@ function onJobsGroupChange() {
   renderJobs();
 }
 
+// ============== 改版：統一狀態標籤 / 日期分組標題 / 快速新增列 ==============
+// 狀態判斷沿用既有規則（jobStatus / 部分收款 / 估價單），這裡只決定外觀；總覽、業主頁之後共用
+const STATUS_PILL = {
+  pending: ['進行中', 'schedule'], 'done-unpaid': ['待收', 'payments'], partial: ['部分收款', 'pie_chart'],
+  paid: ['已收', 'check_circle'], prepaid: ['已收·待做', 'savings'], cancelled: ['已取消', 'block'], estimate: ['估價單', 'request_quote']
+};
+let _rowShowDate = false;  // 改版：總覽清單沒有日期分組標題 → 列上顯示日期
+function _jobPillKey(j) {
+  if (j.isEstimate) return 'estimate';
+  if (!j.cancelled && jobPaidTotal(j) > 0 && !jobIsFullyPaid(j)) return 'partial';
+  return jobStatus(j);
+}
+function _statusPill(j) {
+  const k = _jobPillKey(j), p = STATUS_PILL[k];
+  return `<span class="st-pill st-${k}"><span class="msr">${p[1]}</span>${p[0]}</span>`;
+}
+function _dayLabel(d) {
+  if (!d) return '無日期';
+  const dt = new Date(d + 'T00:00:00');
+  if (isNaN(dt)) return d;
+  const t = todayStr();
+  const rel = d === t ? '今天 · ' : '';
+  return `${rel}${dt.getFullYear() !== new Date().getFullYear() ? dt.getFullYear() + ' 年 ' : ''}${dt.getMonth() + 1} 月 ${dt.getDate()} 日（${'日一二三四五六'[dt.getDay()]}）`;
+}
+// 快速新增列：業主預設＝最近新增的那筆案件的業主；日期預設今天（使用者改過就保留）
+function _fillQuickRow() {
+  const sel = document.getElementById('qr-client');
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = sortedClientsForPicker().map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  const last = state.jobs.length ? state.jobs[state.jobs.length - 1].clientId : '';
+  sel.value = getClient(keep) ? keep : (getClient(last) ? last : (sel.options[0]?.value || ''));
+  const d = document.getElementById('qr-date');
+  if (d && !d.value) d.value = todayStr();
+}
+// 走原本的新增流程（openJobModal → 填欄位 → saveJob），欄位 / 驗證 / 操作紀錄與用視窗新增完全一致
+async function quickRowAdd() {
+  const t = document.getElementById('qr-title');
+  const title = (t.value || '').trim();
+  if (!title) { t.focus(); toast('請輸入案件名稱'); return; }
+  const cid = document.getElementById('qr-client').value;
+  if (!getClient(cid)) { toast('請先選擇業主'); return; }
+  if (!(await openJobModal())) return;  // 抽屜有未存變更且使用者取消 → 不動
+  document.getElementById('job-client').value = cid;
+  onJobClientChange();
+  document.getElementById('job-date').value = document.getElementById('qr-date').value || todayStr();
+  document.getElementById('job-title').value = title;
+  document.getElementById('job-unit-price').value = document.getElementById('qr-price').value;
+  document.getElementById('job-quantity').value = Math.max(1, parseInt(document.getElementById('qr-qty').value, 10) || 1);
+  onJobUnitOrQtyChange();
+  _jobCreateVia = 'quick-row';
+  saveJob();
+  if (document.getElementById('job-modal').classList.contains('open')) return;  // 驗證沒過 → 抽屜留著顯示錯誤
+  t.value = ''; document.getElementById('qr-price').value = ''; document.getElementById('qr-qty').value = 1;
+  t.focus();
+}
+// 編輯抽屜頂部進度條：接案 → 完成 → 請款 → 收款（狀態從表單現有欄位讀，不另存資料）
+function renderJobProgress() {
+  const box = document.getElementById('job-progress');
+  if (!box) return;
+  if (document.getElementById('job-estimate')?.checked) { box.innerHTML = '<div class="jp-note"><span class="msr">request_quote</span>估價單（不計入收益）— 接案後才會開始追蹤進度</div>'; return; }
+  const v = id => document.getElementById(id)?.value || '';
+  const done = !!document.getElementById('job-done')?.checked;
+  const tmp = { amount: +v('job-amount') || 0, discountType: document.querySelector('input[name="job-discount-type"]:checked')?.value || 'none', discountValue: +v('job-discount-value') || 0, payments: modalPayments || [], writeOff: +v('job-write-off') || 0 };
+  const paidSum = jobPaidTotal(tmp), fully = jobIsFullyPaid(tmp);
+  const lastPay = [...(modalPayments || [])].sort((a, b) => (a.date || '').localeCompare(b.date || '')).slice(-1)[0];
+  const inv = editingJobId ? (state.invoiceHistory || []).filter(h => (h.jobIds || []).includes(editingJobId)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0] : null;
+  const md = d => d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : '—';
+  const steps = [
+    ['edit_note', '接案', md(v('job-date')), true, ''],
+    ['check', '完成', done ? md(v('job-done-at')) : '點此標完成', done, 'done'],
+    ['send', '已請款', inv ? md((inv.createdAt || '').slice(0, 10)) : '—', !!inv, ''],
+    ['attach_money', fully ? '收款' : (paidSum > 0 ? '部分收款' : '收款'), lastPay ? md(lastPay.date) : '點此記收款', fully || paidSum > 0, 'pay']
+  ];
+  box.innerHTML = `<div class="jp">${steps.map(([ic, l, d, on, act]) => `<button type="button" class="jp-step${on ? ' on' : ''}${act ? ' act' : ''}" ${act ? `onclick="_jobProgressClick('${act}')"` : 'tabindex="-1"'}><span class="jp-dot"><span class="msr">${ic}</span></span><span class="jp-l">${l}</span><span class="jp-d">${d}</span></button>`).join('')}</div>`;
+}
+// 改版：列表上標出抽屜正在編輯的那筆
+function _markEditingRow() {
+  const open = document.getElementById('job-modal').classList.contains('open');
+  document.querySelectorAll('.row-compact.jr').forEach(r => r.classList.toggle('jr-editing', open && r.dataset.jobId === editingJobId));
+}
+function _jobProgressClick(act) {
+  if (act === 'done') {
+    const cb = document.getElementById('job-done'); cb.checked = !cb.checked; onJobDoneChange();
+  } else if (act === 'pay') {
+    document.getElementById('job-modal').classList.remove('compact');
+    const d = document.getElementById('job-payments-details'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  }
+}
+
+// ============== 改版：手機版月底請款步驟條（桌面不顯示；只切換既有區塊，功能不變） ==============
+const INV_MSTEPS = ['對象與月份', '勾選與折扣', '預覽與匯出', '寄出紀錄', '收款'];
+let _invMStep = 1;
+function setInvMStep(n) { _invMStep = Math.max(1, Math.min(INV_MSTEPS.length, n)); renderInvMStepper(); window.scrollTo(0, 0); }
+function renderInvMStepper() {
+  const sec = document.getElementById('tab-invoice'), box = document.getElementById('inv-mstepper');
+  if (!sec || !box) return;
+  sec.dataset.mstep = _invMStep;
+  box.innerHTML = `<div class="ims-steps">${INV_MSTEPS.map((l, i) => `<button type="button" class="ims-step${i + 1 < _invMStep ? ' done' : ''}${i + 1 === _invMStep ? ' cur' : ''}" onclick="setInvMStep(${i + 1})"><span class="ims-n">${i + 1 < _invMStep ? '<span class="msr">check</span>' : i + 1}</span><span class="ims-l">${l}</span></button>`).join('')}</div>
+    <div class="ims-nav"><button type="button" class="btn btn-outline" onclick="setInvMStep(${_invMStep - 1})" ${_invMStep === 1 ? 'disabled' : ''}><span class="msr">arrow_back</span>上一步</button><button type="button" class="btn btn-primary" onclick="setInvMStep(${_invMStep + 1})" ${_invMStep === INV_MSTEPS.length ? 'disabled' : ''}>下一步<span class="msr">arrow_forward</span></button></div>`;
+  if (_invMStep === 4) { const c = document.getElementById('card-invoice-history'); if (c && c.classList.contains('collapsed')) { c.classList.remove('collapsed'); renderInvoiceHistory(); } }
+  if (_invMStep === 5) renderInvMPay();
+}
+function renderInvMPay() {
+  const box = document.getElementById('inv-mstep-pay');
+  if (!box) return;
+  const snap = getCurrentInvoiceSnapshot();
+  const unpaid = snap ? snap.jobs.filter(j => j.done && !j.cancelled && jobUnpaidAmount(j) > 0) : [];
+  const amt = unpaid.reduce((s, j) => s + jobUnpaidAmount(j), 0);
+  box.innerHTML = `<h3><span class="msr">attach_money</span> 收款</h3>` + (unpaid.length
+    ? `<p class="inv-mpay-sum">${escapeHtml(snap.client.name)} · ${escapeHtml(snap.periodLabel)}：${unpaid.length} 筆待收，共 <b>${fmt(amt)}</b></p><button type="button" class="btn btn-primary" onclick="openPaidDateModal(${JSON.stringify(unpaid.map(j => j.id)).replace(/"/g, "'")})">記錄收款（選日期）</button><p class="inv-mpay-hint">也可以之後從總覽「需要處理 → 待收」直接收款。</p>`
+    : `<p class="inv-mpay-sum">這張請款單的案件都收齊了。</p>`);
+}
+
+// ============== 改版：指令面板（Ctrl+K）— 搜尋業主 / 案件，或直接下指令 ==============
+let _cmdItems = [], _cmdSel = 0;
+function openCmdPalette() {
+  let ov = document.getElementById('cmd-palette');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'cmd-palette';
+    ov.className = 'cmd-ov';
+    ov.innerHTML = '<div class="cmd-box" role="dialog" aria-modal="true" aria-label="指令面板"><div class="cmd-in-wrap"><span class="msr">search</span><input id="cmd-in" placeholder="搜尋業主、案件，或輸入指令（新增、請款、報價單…）" autocomplete="off"><kbd>Esc</kbd></div><div class="cmd-list" id="cmd-list"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) closeCmdPalette(); });
+    const inp = ov.querySelector('#cmd-in');
+    inp.addEventListener('input', () => renderCmdList(inp.value));
+    inp.addEventListener('keydown', e => {
+      e.stopPropagation();  // 不讓全站快捷鍵穿透
+      if (e.key === 'Escape') { e.preventDefault(); closeCmdPalette(); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (!_cmdItems.length) return; _cmdSel = (_cmdSel + (e.key === 'ArrowDown' ? 1 : -1) + _cmdItems.length) % _cmdItems.length; _cmdHighlight(); }
+      else if (e.key === 'Enter') { e.preventDefault(); runCmdItem(_cmdSel); }
+    });
+  }
+  ov.classList.add('open');
+  const inp = ov.querySelector('#cmd-in');
+  inp.value = '';
+  renderCmdList('');
+  setTimeout(() => inp.focus(), 20);
+}
+function closeCmdPalette() { document.getElementById('cmd-palette')?.classList.remove('open'); }
+function renderCmdList(q) {
+  q = (q || '').trim().toLowerCase();
+  const has = t => !q || (t || '').toLowerCase().includes(q);
+  const items = [];
+  const clients = q ? sortedClientsForPicker().filter(c => has(c.name)).slice(0, 5) : [];
+  clients.forEach(c => {
+    items.push(['業主', 'receipt_long', `${c.name} · 本月請款單`, '', () => gotoInvoice(c.id)]);
+    items.push(['業主', 'list_alt', `${c.name} · 的案件`, '', () => { setFilter('clientId', c.id); switchTab('jobs'); }]);
+    items.push(['業主', 'person', `${c.name} · 業主頁`, '', () => viewClientDetail(c.id)]);
+  });
+  [['add', '新增案件', 'N', () => quickAddJob()], ['person_add', '新增業主', '', () => openClientModal()], ['receipt_long', '開啟請款單', '', () => switchTab('invoice')], ['request_quote', '開啟報價單', '', () => switchTab('quote')], ['download', '匯出備份（JSON）', '', () => exportData()]]
+    .forEach(([ic, l, k, fn]) => { if (has(l)) items.push(['動作', ic, l, k, fn]); });
+  [['space_dashboard', '總覽', 'dashboard', '1'], ['list_alt', '案件', 'jobs', '2'], ['payments', '收益', 'revenue', '3'], ['receipt_long', '單據', 'invoice', '4'], ['groups', '業主', 'clients', '5'], ['settings', '設定', 'settings', '6']]
+    .forEach(([ic, l, t, k]) => { if (has(l) || has('前往' + l)) items.push(['前往', ic, l, k, () => switchTab(t)]); });
+  if (q) state.jobs.filter(j => has(j.title) || has(getClient(j.clientId)?.name)).sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 8)
+    .forEach(j => items.push(['案件', 'description', `${j.title || '（無標題）'} · ${getClient(j.clientId)?.name || ''}`, `${(j.date || '').slice(5)} ${fmt(jobFinalAmount(j))}`, () => editJob(j.id)]));
+  _cmdItems = items; _cmdSel = 0;
+  let g = '';
+  const box = document.getElementById('cmd-list');
+  box.innerHTML = items.map((it, i) => (it[0] !== g ? `<div class="cmd-grp">${(g = it[0])}</div>` : '') +
+    `<div class="cmd-it" data-i="${i}"><span class="msr">${it[1]}</span><span class="cmd-l">${escapeHtml(it[2])}</span><span class="cmd-k">${escapeHtml(it[3])}</span></div>`).join('') || '<div class="cmd-grp">沒有符合的結果</div>';
+  box.querySelectorAll('.cmd-it').forEach(el => { el.addEventListener('click', () => runCmdItem(+el.dataset.i)); el.addEventListener('mousemove', () => { _cmdSel = +el.dataset.i; _cmdHighlight(); }); });
+  _cmdHighlight();
+}
+function _cmdHighlight() { document.querySelectorAll('#cmd-list .cmd-it').forEach((el, i) => { el.classList.toggle('on', i === _cmdSel); if (i === _cmdSel) el.scrollIntoView({ block: 'nearest' }); }); }
+function runCmdItem(i) { const it = _cmdItems[i]; if (!it) return; closeCmdPalette(); it[4](); }
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); openCmdPalette(); }
+}, true);
+
 // ============== v3.21.0：緊湊 row（一行解決，密度提升 3 倍）==============
 function jobRowCompact(j) {
   const c = getClient(j.clientId);
@@ -7623,22 +7755,23 @@ function jobRowCompact(j) {
     </div>`;
   }
 
-  return `<div class="row-compact state-${status}" data-job-id="${j.id}" style="border-left:3px solid ${color}"
+  // 改版：標題＋副標（業主 · 單價×數量），狀態用統一標籤，完成 / 收款常駐；依日分組時日期在分組標題
+  const qty = (j.quantity != null && j.quantity > 1) ? j.quantity : 1;
+  const sub = [escapeHtml(name), qty > 1 ? `${fmt(Math.round((+j.amount || 0) / qty))} × ${qty}` : '', (jobsGroupBy === 'day' && !_rowShowDate) ? '' : (dateShort || '')].filter(Boolean).join(' · ');
+  return `<div class="row-compact jr state-${status}${editingJobId === j.id && document.getElementById('job-modal')?.classList.contains('open') ? ' jr-editing' : ''}" data-job-id="${j.id}"
               onclick="editJob('${j.id}')"
               ontouchstart="onJobRowTouchStart(event, '${j.id}')"
               ontouchmove="onJobRowTouchMove(event)"
               ontouchend="onJobRowTouchEnd(event)"
               ontouchcancel="onJobRowTouchCancel()">
     <span class="client-chip" style="background:${color}" onclick="event.stopPropagation(); viewClientDetail('${j.clientId}')" title="跳到業主：${escapeHtml(name)}">${escapeHtml((name || '?').charAt(0))}</span>
-    <span class="row-compact-date">${dateShort || '-'}</span>
-    <span class="row-compact-title">${escapeHtml(j.title || '（無標題）')}${j.laborReported ? ' 🧾' : ''}</span>
-    <span class="row-compact-client">· ${escapeHtml(name)}</span>
-    <span class="row-compact-amount">${fmt(jobFinalAmount(j)).replace('NT$', '').trim()}</span>
-    <span class="row-compact-status">${statusIcon}</span>
-    <span class="row-quick-actions">
-      <button onclick="event.stopPropagation(); toggleDone('${j.id}')" title="標完成">✓</button>
-      <button onclick="event.stopPropagation(); togglePaid('${j.id}')" title="標收款">$</button>
-      <button onclick="event.stopPropagation(); duplicateJobFromRow('${j.id}')" title="複製為新案件">⧉</button>
+    <div class="jr-main"><div class="jr-title">${escapeHtml(j.title || '（無標題）')}${j.laborReported ? ' <span class="msr" title="勞報">receipt</span>' : ''}</div><div class="jr-sub">${sub}</div></div>
+    ${_statusPill(j)}
+    <span class="jr-amt">${fmt(jobFinalAmount(j))}</span>
+    <span class="row-quick-actions jr-act">
+      <button class="${j.done ? 'on-done' : ''}" onclick="event.stopPropagation(); toggleDone('${j.id}')" title="${j.done ? '取消完成' : '標完成'}"><span class="msr">check</span></button>
+      <button class="${jobIsFullyPaid(j) ? 'on-paid' : ''}" onclick="event.stopPropagation(); togglePaid('${j.id}')" title="${jobIsFullyPaid(j) ? '取消收款' : '標收款'}"><span class="msr">attach_money</span></button>
+      <button onclick="event.stopPropagation(); duplicateJobFromRow('${j.id}')" title="複製為新案件"><span class="msr">content_copy</span></button>
     </span>
   </div>`;
 }
@@ -8158,21 +8291,6 @@ function toggleClientExpand(cid) {
   if (expandedClients.has(cid)) expandedClients.delete(cid);
   else expandedClients.add(cid);
   renderClients();
-}
-
-// 案件分頁年度展開
-function toggleYearExpand(y) {
-  // 清除提醒/業主排行帶來的鎖定篩選
-  state.filters.jobIdsOnly = null;
-  state.filters.jobIdsOnlyLabel = '';
-  if (state.filters.expandedYear === y) {
-    state.filters.expandedYear = null;
-    if (state.filters.month?.startsWith(y)) state.filters.month = 'all';
-  } else {
-    state.filters.expandedYear = y;
-    state.filters.month = y;  // 預設選整年
-  }
-  render();
 }
 
 function openCustomMonthFilter() {
@@ -13116,6 +13234,7 @@ function _renderInvChips(cid, rangeStart, rangeEnd) {
 
 function drawInvoice() {
   _ensureSheetFont();  // v3.39.0：請款單紙面改報價單風格（襯線標題）
+  setTimeout(renderInvMStepper, 0);  // 改版：手機步驟條跟著刷新（第 5 步收款摘要）
   const cid = document.getElementById('inv-client').value;
   const mode = document.getElementById('inv-mode')?.value || 'single';
   const c = getClient(cid);
@@ -13522,12 +13641,6 @@ function setFilter(key, value) {
   render();
 }
 
-// v3.28.1（R12）：勞報篩選三態循環（全部 → 只看勞報 → 非勞報 → 全部）
-function cycleLaborFilter() {
-  const cur = state.filters.labor || 'all';
-  setFilter('labor', cur === 'all' ? 'only' : (cur === 'only' ? 'non' : 'all'));
-}
-
 // v2.3：只更新單一案件 row（避免 462 筆全重畫）
 function updateJobRow(id) {
   const j = state.jobs.find(x => x.id === id);
@@ -13594,7 +13707,7 @@ function renderTodayTodo() {
   if (items.length === 0) {
     box.innerHTML = `<div class="today-todo-item" style="opacity:.65;">
       <span class="today-todo-icon">☕</span>
-      <span class="today-todo-text">今天沒有月底 / 拖款提醒，其他待辦看上方紅黃橘提醒區</span>
+      <span class="today-todo-text">今天沒有月底 / 拖款提醒，其他提醒在下方</span>
     </div>`;
     return;
   }
@@ -13834,8 +13947,11 @@ function sortedClientsForPicker() {
   });
 }
 
-function openJobModal() {
-  if (!state.clients.length) { toast('請先新增業主'); switchTab('clients'); openClientModal(); return; }
+async function openJobModal() {
+  if (!state.clients.length) { toast('請先新增業主'); switchTab('clients'); openClientModal(); return false; }
+  if (document.getElementById('job-modal').classList.contains('open') && _jobModalIsDirty()) {
+    if (!await uiConfirm('編輯中的案件有未儲存的變更，確定放棄並新增？')) return false;
+  }
   // v3.0.0：移除 tryAcquireLockOrWarn（v2 Apps Script 編輯鎖已拆，v3 用 mergeStates 三方合併處理衝突）
   editingJobId = null;
   document.getElementById('job-modal-title').textContent = '新增案件';
@@ -13894,6 +14010,9 @@ function openJobModal() {
   // v3.27.1（R17）：記錄初始表單狀態（dirty-check 基準）+ focus 第一欄
   _jobFormSnapshot = _jobFormSig();
   document.getElementById('job-title')?.focus();
+  renderJobProgress();
+  _markEditingRow();
+  return true;
 }
 
 // v3.37.0：業主下拉（常用排前）+ 最後一項「＋ 新增業主…」（選了開業主 modal，存檔後自動選回新業主）
@@ -14051,6 +14170,7 @@ function onJobAmountManualEdit() {
 function updateJobAmountSummary() {
   const summary = document.getElementById('job-amount-summary');
   if (!summary) return;
+  renderJobProgress();  // 改版：金額 / 折扣 / 呆帳變動 → 進度條收款狀態跟著更新
   const base = +document.getElementById('job-amount').value || 0;
   // v3.24.18：千分位即時 hint（讓使用者輸入大數字時看得清楚）
   const fmtHint = document.getElementById('job-amount-formatted');
@@ -14125,6 +14245,7 @@ function updateJobNetBreakdown() {
 }
 
 function renderJobPayments() {
+  setTimeout(renderJobProgress, 0);  // 改版：收款增刪後更新進度條
   const list = document.getElementById('job-payments-list');
   if (!list) return;
   if (!modalPayments.length) {
@@ -14285,8 +14406,13 @@ function onJobClientChange() {
   }
 }
 
-function editJob(id) {
+async function editJob(id) {
   const j = state.jobs.find(x => x.id === id); if (!j) return;
+  // 改版：抽屜開著時可直接點列表下一筆 → 先確認未存變更，不默默蓋掉表單
+  if (document.getElementById('job-modal').classList.contains('open') && editingJobId !== id && _jobModalIsDirty()) {
+    if (!await uiConfirm('有未儲存的變更，確定放棄編輯？')) return;
+  }
+  if (!state.jobs.includes(j)) return;  // 確認期間被同步換掉 → 不開舊物件
   editingJobId = id;
   document.getElementById('job-modal-title').textContent = '編輯案件';
   document.getElementById('job-delete-btn').classList.remove('hidden');
@@ -14348,6 +14474,9 @@ function editJob(id) {
   // v3.27.1（R17）：記錄初始表單狀態（dirty-check 基準）+ focus 第一欄
   _jobFormSnapshot = _jobFormSig();
   document.getElementById('job-title')?.focus();
+  renderJobProgress();
+  _markEditingRow();
+  return true;
 }
 
 // v3.25.3（R25）：job-create 的來源路徑（fab=一般新增 / duplicate=複製），存進 log 的 via 欄位
@@ -14399,6 +14528,7 @@ function onJobDoneChange() {
   const dateEl = document.getElementById('job-done-at');
   if (checked && !dateEl.value) dateEl.value = todayStr();
   if (!checked) dateEl.value = '';
+  renderJobProgress();
 }
 // v3.29.1：新增模式「✓ 存為已完成」— 勾完成（自動填完成日）後走一般 saveJob
 function saveJobAsDone() {
@@ -14456,6 +14586,7 @@ async function closeJobModal(force) {
   _jobFormSnapshot = null;
   stopJobTimerOnClose();  // v2.6: 停止計時器
   document.getElementById('job-modal').classList.remove('open');
+  _markEditingRow();
   document.getElementById('job-date').value = '';
   // v3.0.0：移除 releaseEditLock（v2 編輯鎖已拆）
 }
@@ -16764,6 +16895,7 @@ function _kbShowHelp() {
     m.innerHTML = `<div class="modal" style="max-width: 440px;">
       <h2>⌨️ 鍵盤快捷鍵</h2>
       <table class="kb-help-table">
+        <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>指令面板（搜尋業主 / 案件、直接下指令）</td></tr>
         <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>切換分頁（總覽/案件/收益/單據/業主/設定）</td></tr>
         <tr><td><kbd>N</kbd></td><td>新增案件</td></tr>
         <tr><td><kbd>Shift</kbd>+<kbd>N</kbd></td><td>新增業主</td></tr>

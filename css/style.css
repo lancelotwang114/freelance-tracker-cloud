@@ -4172,6 +4172,7 @@ html[data-palette="candy"] {
   --primary: #b24e73; --primary-dark: #9a4062; --primary-light: #fce4ec; --on-primary: #ffffff;
   --success: #855fb2; --success-light: #efe6f8; --warning: #9d6222; --warning-light: #fdeedd; --danger: #c93a3a; --danger-light: #fbe3e1;
   --orange: #c56a3a; --orange-light: #fde8dc; --gold: #9d6222; --tint: #fff3ea;
+  --info: #47739a; --info-light: #e6f0f8;
   --brand-from: #f5a3bd; --brand-to: #b79be0; --input-bg: #ffffff;
   --shadow: 0 1px 2px rgba(120, 60, 90, .05), 0 4px 14px -6px rgba(120, 60, 90, .12);
 }
@@ -4180,6 +4181,7 @@ html[data-palette="candy"][data-theme="dark"] {
   --primary: #f4a3c0; --primary-dark: #ea8bb0; --primary-light: #3d2230; --on-primary: #3a1426;
   --success: #c9a8f0; --success-light: #2c2240; --warning: #f5c38a; --warning-light: #372a1a; --danger: #f58f8f; --danger-light: #3d1c1c;
   --orange: #f5b07a; --orange-light: #3a2617; --gold: #f5c38a; --tint: #322626;
+  --info: #9cc0e2; --info-light: #1c2a38;
   --brand-from: #f7a8c0; --brand-to: #c9a8f0; --input-bg: #221a25;
   --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 4px 14px -6px rgba(0, 0, 0, .5);
 }
@@ -4529,3 +4531,187 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [role="button"]:fo
 }
 .client-chip { text-shadow: 0 0 2px rgba(0, 0, 0, .45); }  /* 白字壓在淺業主色上仍看得清 */
 .client-header .dot { filter: saturate(.6) brightness(1.06); border-radius: 4px; }
+
+/* ==================== 改版 第 1 階段：案件工作區 ==================== */
+/* 統一狀態標籤（全站共用；顏色＝預覽那套：進行中藍 / 待收橘 / 已收紫 / 估價虛線） */
+.st-pill { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 9px 2px 6px; white-space: nowrap; line-height: 1.5; }
+.st-pill .msr { font-size: 15px; vertical-align: 0; }
+.st-pending { background: var(--info-light, #e6f0f8); color: var(--info, #47739a); }
+.st-done-unpaid { background: var(--warning-light); color: var(--warning); }
+.st-partial { background: var(--orange-light); color: var(--orange); }
+.st-paid { background: var(--success-light); color: var(--success); }
+.st-prepaid { background: var(--success-light); color: var(--success); border: 1px dashed currentColor; }
+.st-cancelled { background: var(--bg); color: var(--muted); }
+.st-estimate { background: var(--tint); color: var(--warning); border: 1px dashed currentColor; }
+/* 篩選列 */
+#job-filter.filter-bar { display: block; padding: 0; margin-bottom: 10px; }
+.jf { background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.jf-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; }
+.jf-seg { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.jf-seg button { border: 0; background: transparent; border-radius: 999px; padding: 5px 12px; cursor: pointer; color: var(--muted); font: inherit; font-size: 13px; transition: background-color .2s, color .2s; }
+.jf-seg button.on { background: var(--card); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+select.jf-pick { width: auto; border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--muted); }
+select.jf-pick.on { color: var(--primary); border-color: var(--primary); font-weight: 600; }
+.jf-more-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--card); border-radius: 999px; padding: 5px 12px; cursor: pointer; color: var(--muted); font: inherit; font-size: 13px; }
+.jf-more-btn.on { color: var(--primary); border-color: var(--primary); }
+.jf-more-btn .msr { font-size: 17px; }
+.jf-more-btn .cnt, .jf-tabs .cnt { font-size: 11px; background: var(--bg); border-radius: 999px; padding: 0 7px; margin-left: 4px; color: var(--muted); font-weight: 600; }
+.jf-more { padding: 4px 12px 10px; display: grid; gap: 6px; border-top: 1px dashed var(--border); }
+.jf-more-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding-top: 6px; }
+.jf-more-lbl, .jf-range span { font-size: 12px; color: var(--muted); min-width: 32px; }
+.jf-range { display: flex; gap: 6px; align-items: center; padding: 0 12px 10px; }
+.jf-range input { width: auto; max-width: 150px; }
+.jf-tabs { display: flex; gap: 2px; padding: 0 8px; border-top: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.jf-tabs button { border: 0; background: transparent; padding: 9px 10px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; font: inherit; font-size: 13px; font-weight: 500; }
+.jf-tabs button.on { color: var(--primary); border-bottom-color: var(--primary); }
+.jf-tabs button.on .cnt { background: var(--primary-light); color: var(--primary); }
+.jf-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--bg); }
+.jf-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--primary-light); color: var(--primary); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; font-weight: 600; }
+.jf-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; }
+.jf-chip button:hover { background: rgba(0,0,0,.06); }
+.jf-chip .msr { font-size: 15px; vertical-align: 0; }
+/* 快速新增列 */
+.quick-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 10px; background: var(--tint); border: 1px solid var(--border); border-radius: 16px; }
+.quick-row #qr-client { flex: 0 1 150px; } .quick-row #qr-date { flex: 0 1 140px; } .quick-row #qr-title { flex: 1 1 220px; } .quick-row #qr-price { flex: 0 1 100px; } .quick-row #qr-qty { flex: 0 0 64px; }  /* 寬度不夠時名稱欄自己換行，不會被擠扁 */
+.quick-row input, .quick-row select { margin: 0; min-width: 0; }
+@media (max-width: 640px) { .quick-row { display: none; } }  /* 手機用底部「＋」新增，快速新增列收起，列表不被往下擠 */
+/* 案件列（新版）：頭像 / 標題＋副標 / 狀態 / 金額 / 常駐動作 */
+.row-compact.jr { grid-template-columns: 28px minmax(0, 1fr) auto auto auto; gap: 12px; padding: 9px 12px; background: none; }
+.row-compact.jr:hover { background: color-mix(in srgb, var(--primary-light) 40%, transparent); }
+.row-compact.jr.jr-editing { background: var(--primary-light); box-shadow: inset 3px 0 0 var(--primary); }
+.row-compact.jr .client-chip { width: 28px; height: 28px; border-radius: 9px; font-size: 13px; }
+.jr-main { min-width: 0; }
+.jr-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jr-title .msr { font-size: 15px; color: var(--muted); vertical-align: -2px; }
+.jr-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jr-amt { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; min-width: 84px; }
+.row-quick-actions.jr-act { opacity: 1; gap: 4px; }
+.jr-act button { width: 30px; height: 30px; min-width: 30px; min-height: 30px; border-radius: 9px; color: var(--muted); }
+.jr-act button .msr { font-size: 17px; vertical-align: 0; }
+.jr-act button.on-done { background: var(--info-light, #e6f0f8); color: var(--info, #47739a); border-color: transparent; }
+.jr-act button.on-paid { background: var(--success-light); color: var(--success); border-color: transparent; }
+.jr-act button:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+@media (max-width: 640px) {  /* 手機兩行：名稱＋金額 / 副標＋狀態；完成 / 收款用既有的左右滑動手勢（按鈕收起） */
+  .row-compact.jr { grid-template-columns: 28px minmax(0, 1fr) auto; row-gap: 2px; column-gap: 10px; }
+  .row-compact.jr .client-chip { grid-row: 1 / 3; align-self: center; }
+  .row-compact.jr .jr-main { grid-column: 2; grid-row: 1 / 3; }
+  .row-compact.jr .jr-amt { grid-column: 3; grid-row: 1; min-width: 0; }
+  .row-compact.jr .st-pill { grid-column: 3; grid-row: 2; justify-self: end; font-size: 11px; padding: 1px 7px 1px 5px; }
+  .row-compact.jr .st-pill .msr { font-size: 13px; }
+  .row-compact.jr .jr-act { display: none; }
+}
+/* 分組標題：黏在頂部列下方、改淡色帶 */
+.jobs-group-head { top: var(--topbar-h, 0px); background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(6px); border-bottom: 1px solid var(--border); border-radius: 0; padding: 7px 12px; z-index: 3; }
+.jobs-group-label { font-size: 12px; color: var(--muted); }
+/* 編輯抽屜：寬螢幕從右側滑出（不擋列表，可直接點下一筆），列表讓出位置 */
+.job-drawer-close { margin-left: auto; }
+@media (min-width: 1000px) {
+  #job-modal.modal-bg { justify-content: flex-end; align-items: stretch; background: transparent; pointer-events: none; }
+  #job-modal .modal.job-modal-v2 { pointer-events: auto; width: 600px; max-width: 600px; height: 100vh; max-height: none; border-radius: 0; border-left: 1px solid var(--border); box-shadow: -24px 0 60px -28px rgba(120, 60, 90, .45); }
+  body:has(#job-modal.open) main { margin-left: max(0px, calc((100vw - 600px - 900px) / 2)); margin-right: 600px; }
+}
+@media (min-width: 1000px) and (prefers-reduced-motion: no-preference) { #job-modal.open .modal.job-modal-v2 { animation: jdIn .28s cubic-bezier(.2, .8, .2, 1); } @keyframes jdIn { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } } }
+@media (max-width: 640px) { #job-modal .modal.job-modal-v2 { max-height: 100dvh; height: 100dvh; border-radius: 0; } }
+/* 進度條 */
+.job-progress { margin: 2px 0 6px; }
+.jp { display: grid; grid-template-columns: repeat(4, 1fr); }
+.jp-step { position: relative; border: 0; background: none; padding: 30px 2px 4px; text-align: center; font: inherit; color: var(--muted); cursor: default; display: grid; gap: 1px; }
+.jp-step.act { cursor: pointer; }
+.jp-step::before { content: ""; position: absolute; top: 11px; left: -50%; right: 50%; height: 2px; background: var(--border); }
+.jp-step:first-child::before { display: none; }
+.jp-dot { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--border); background: var(--card); display: grid; place-items: center; z-index: 1; transition: background-color .2s, border-color .2s; }
+.jp-dot .msr { font-size: 15px; vertical-align: 0; }
+.jp-l { font-size: 12px; font-weight: 600; }
+.jp-d { font-size: 11px; }
+.jp-step.on { color: var(--text); }
+.jp-step.on .jp-dot { background: var(--primary); border-color: var(--primary); color: #fff; }
+.jp-step.on::before { background: var(--primary); }
+.jp-step.act:hover .jp-dot { border-color: var(--primary); }
+.jp-note { font-size: 13px; color: var(--warning); background: var(--tint); border-radius: 10px; padding: 8px 10px; }
+.jp-note .msr { font-size: 17px; margin-right: 4px; }
+
+/* ==================== 改版 第 2 階段：總覽「需要處理」 ==================== */
+.dash-queue { padding: 0; overflow: hidden; }
+.dq-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px; }
+.dq-head h3 { margin: 0; font-size: 15px; }
+.dq-tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.dq-tabs button { border: 0; background: transparent; padding: 9px 10px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; font: inherit; font-size: 13px; font-weight: 500; }
+.dq-tabs button.on { color: var(--primary); border-bottom-color: var(--primary); }
+.dq-tabs .cnt { font-size: 11px; background: var(--bg); border-radius: 999px; padding: 0 7px; margin-left: 4px; color: var(--muted); font-weight: 600; }
+.dq-tabs button.on .cnt { background: var(--primary-light); color: var(--primary); }
+.dq-tabs button.warn .cnt { background: var(--danger-light); color: var(--danger); }
+.dq-pane { padding: 4px 4px 8px; }
+.dq-pane .empty { padding: 26px 12px; }
+.dq-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px 0; font-size: 12px; color: var(--muted); }
+.dash-queue .today-todo-card { background: none !important; border: 0 !important; box-shadow: none; padding: 10px 12px; margin: 0; }
+.dash-queue .today-todo-card.is-empty { padding-top: 10px; padding-bottom: 10px; }
+.dq-sub { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.dq-sub .msr { font-size: 17px; color: var(--primary); }
+.dash-queue .alerts { padding: 0 12px 6px; }
+.dash-queue .alerts .alert-agg { box-shadow: none; border: 0; padding: 0; background: none; }
+#recent-jobs > .row-compact.jr:last-child { border-bottom: 0; }
+
+/* ==================== 改版 第 3 階段：手機底部導覽 / 指令面板 / 手機請款步驟條 ==================== */
+.nav-ic, .nav-mobile-only { display: none; }
+@media (max-width: 640px) {
+  /* 底部導覽：沿用頁籤列，固定到底部、可左右捲；「＋」停靠右端（右側留空給它） */
+  nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 0 !important; padding: 4px 78px calc(4px + env(safe-area-inset-bottom)) 4px !important; border-top: 1px solid var(--border); border-bottom: 0; box-shadow: 0 -8px 24px -14px rgba(120, 60, 90, .35); -webkit-mask-image: none !important; mask-image: none !important; scroll-snap-type: x proximity; }
+  nav.tabs button { flex: 0 0 auto; min-width: 62px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 8px 5px !important; font-size: 11px; border-bottom: 0 !important; scroll-snap-align: start; position: relative; }
+  nav.tabs .nav-ic { display: block; font-size: 23px; width: auto; }
+  nav.tabs .nav-mobile-only { display: flex; }
+  nav.tabs button.active { color: var(--primary); }
+  nav.tabs button.active .nav-ic { font-variation-settings: "FILL" 1; }
+  nav.tabs .badge { position: absolute; top: 2px; right: 10px; }
+  .fab-wrap { right: 0 !important; bottom: 0 !important; width: 78px; height: calc(62px + env(safe-area-inset-bottom)); display: flex; align-items: center; justify-content: center; padding-bottom: env(safe-area-inset-bottom); background: linear-gradient(90deg, transparent, var(--card) 16px); z-index: 31; }
+  .fab-wrap .fab-mini, .fab-wrap .fab-sub, .fab-wrap .fab-menu { display: none !important; }
+  .fab-wrap .fab { width: 50px !important; min-width: 50px; height: 50px; border-radius: 16px; font-size: 26px; box-shadow: 0 8px 20px -6px rgba(178, 78, 115, .55); }
+  body:has(#fab-wrap[style*="none"]) nav.tabs { padding-right: 4px !important; }  /* 單據頁原本就隱藏＋ → 不留空位 */
+  main { padding-bottom: 110px !important; }
+  .mascot-container { bottom: 76px !important; }
+  .mascot-bubble { bottom: 140px !important; }
+}
+/* 指令面板 */
+.cmd-ov { position: fixed; inset: 0; z-index: 9000; background: rgba(40, 20, 30, .28); display: none; align-items: flex-start; justify-content: center; padding: 12vh 16px 16px; }
+.cmd-ov.open { display: flex; }
+.cmd-box { width: min(580px, 100%); background: var(--card); border-radius: 18px; box-shadow: 0 24px 60px -16px rgba(120, 60, 90, .45); overflow: hidden; }
+.cmd-in-wrap { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--muted); }
+.cmd-in-wrap input { border: 0; padding: 4px 0; font-size: 16px; outline: none; background: transparent; box-shadow: none; }
+.cmd-in-wrap kbd { font-size: 11px; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+.cmd-list { max-height: 55vh; overflow: auto; padding: 6px; }
+.cmd-grp { font-size: 11px; color: var(--muted); padding: 8px 12px 4px; letter-spacing: 1px; }
+.cmd-it { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; cursor: pointer; }
+.cmd-it .msr { color: var(--muted); }
+.cmd-it.on { background: var(--primary-light); color: var(--primary); }
+.cmd-it.on .msr { color: var(--primary); }
+.cmd-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-k { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .cmd-ov.open .cmd-box { animation: sgRise .2s cubic-bezier(.2, .8, .2, 1); } }
+/* 手機版月底請款步驟條（桌面完全不顯示、不影響） */
+.inv-mstepper, .inv-mpay { display: none; }
+@media (max-width: 640px) {
+  .inv-mstepper { display: block; margin-bottom: 10px; }
+  .ims-steps { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 10px 4px 8px; }
+  .ims-step { position: relative; border: 0; background: none; padding: 30px 0 0; font: inherit; color: var(--muted); display: grid; justify-items: center; }
+  .ims-step::before { content: ""; position: absolute; top: 12px; left: -50%; right: 50%; height: 2px; background: var(--border); }
+  .ims-step:first-child::before { display: none; }
+  .ims-n { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); background: var(--card); display: grid; place-items: center; font-size: 12px; font-weight: 700; z-index: 1; }
+  .ims-n .msr { font-size: 16px; }
+  .ims-l { font-size: 10.5px; line-height: 1.25; text-align: center; }
+  .ims-step.done .ims-n { background: var(--success-light); border-color: var(--success); color: var(--success); }
+  .ims-step.done::before, .ims-step.cur::before { background: var(--primary); }
+  .ims-step.cur { color: var(--text); font-weight: 600; }
+  .ims-step.cur .ims-n { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .ims-nav { position: fixed; left: 0; right: 0; bottom: calc(62px + env(safe-area-inset-bottom)); z-index: 29; display: flex; justify-content: space-between; gap: 10px; padding: 8px 16px; background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(8px); border-top: 1px solid var(--border); }
+  .ims-nav .btn { flex: 1; justify-content: center; }
+  .inv-mpay { display: block; }
+  .inv-mpay h3 { margin: 0 0 8px; font-size: 15px; }
+  .inv-mpay-sum { font-size: 14px; margin: 0 0 12px; }
+  .inv-mpay-hint { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+  #tab-invoice[data-mstep="1"] :is(.ms-2, .ms-3, .ms-4, .ms-5),
+  #tab-invoice[data-mstep="2"] :is(.ms-1, .ms-3, .ms-4, .ms-5),
+  #tab-invoice[data-mstep="3"] :is(.ms-1, .ms-2, .ms-4, .ms-5),
+  #tab-invoice[data-mstep="4"] :is(.ms-1, .ms-2, .ms-3, .ms-5, .inv-controls),
+  #tab-invoice[data-mstep="5"] :is(.ms-1, .ms-2, .ms-3, .ms-4, .inv-controls) { display: none !important; }
+  #tab-invoice[data-mstep="4"] .doc-toolbar, #tab-invoice[data-mstep="5"] .doc-toolbar, #tab-invoice[data-mstep="2"] .doc-toolbar { display: none; }
+  #tab-invoice { padding-bottom: 70px; }
+}
