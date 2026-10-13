@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-13-v3.44.0">
+<meta name="app-version" content="2026-10-13-v3.45.0">
 <meta name="theme-color" content="#b24e73">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -153,10 +153,10 @@
     <!-- v3.29.1：行事曆分頁使用量 0 → 先隱藏（功能與 renderCalendar 保留，移除 hidden 即復原） -->
     <button data-tab="calendar" class="hidden">行事曆</button>
     <button data-tab="revenue">收益</button>
-    <!-- v3.30.0：業主（usage 1 次）隱藏 — 業主頁改從案件列業主色塊 / 單據「業主資料」/ 設定「業主管理」進入 -->
-    <button data-tab="clients" class="hidden">業主</button>
     <!-- v3.30.0：請款單 + 報價單合併為「單據」，內部仍是 invoice / quote 兩個 tab，靠 #doc-switch 切換 -->
     <button data-tab="invoice">單據</button>
+    <!-- v3.45.0：業主頁籤放回（頂部列改版後空間夠；偶爾用 → 放最後），設定頁入口拿掉 -->
+    <button data-tab="clients">業主</button>
     <!-- v3.39.0：設定改從頭像選單進入（快捷鍵 6 仍可用） -->
     <button data-tab="settings" class="hidden">設定</button>
   </nav>
@@ -798,11 +798,6 @@
       </div>
     </div>
 
-    <!-- v3.30.0：業主分頁按鈕隱藏後的列表入口 -->
-    <div class="card" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-      <div><b><span class="msr">groups</span> 業主管理</b><div style="font-size: 12px; color: var(--muted);">業主列表、聯絡資訊、個別統計</div></div>
-      <button class="btn btn-outline btn-sm" onclick="switchTab('clients')">開啟 ›</button>
-    </div>
 
     <h4 class="settings-group">同步與備份</h4>
 

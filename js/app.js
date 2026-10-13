@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-13-v3.44.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-13-v3.45.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -16718,7 +16718,7 @@ function showOnboardingAgain() {
 // ============== v3.28.0：鍵盤快捷鍵系統（BACKLOG #2，使用者核准）==============
 // 規則：焦點在輸入元件時不攔（Esc 例外）；modal 開著時只有 Esc 作用；
 //       單鍵為主，不搶瀏覽器 Ctrl/Cmd 組合（Ctrl+Z undo 例外）
-const KB_TABS = ['dashboard', 'jobs', 'revenue', 'clients', 'invoice', 'settings'];  // v3.29.1：行事曆分頁隱藏，移出快捷鍵
+const KB_TABS = ['dashboard', 'jobs', 'revenue', 'invoice', 'clients', 'settings'];  // v3.45.0：跟導覽列順序一致（4 單據 / 5 業主）  // v3.29.1：行事曆分頁隱藏，移出快捷鍵
 let _kbRowIdx = -1;   // jobs 列表鍵盤游標（-1 = 未啟用）
 
 function _kbTyping() {
@@ -16764,7 +16764,7 @@ function _kbShowHelp() {
     m.innerHTML = `<div class="modal" style="max-width: 440px;">
       <h2>⌨️ 鍵盤快捷鍵</h2>
       <table class="kb-help-table">
-        <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>切換分頁（總覽/案件/收益/業主/單據/設定）</td></tr>
+        <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>切換分頁（總覽/案件/收益/單據/業主/設定）</td></tr>
         <tr><td><kbd>N</kbd></td><td>新增案件</td></tr>
         <tr><td><kbd>Shift</kbd>+<kbd>N</kbd></td><td>新增業主</td></tr>
         <tr><td><kbd>/</kbd></td><td>全域搜尋</td></tr>
