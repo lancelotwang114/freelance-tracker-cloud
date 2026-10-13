@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-13-v3.46.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-13-v3.47.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -5424,6 +5424,9 @@ const SCHEMA_MIGRATIONS = {
       config.quoteSheet = JSON.parse(JSON.stringify(QUOTE_LEGACY_V329));
     }
   }
+  // 單據改版（v3.47.0）刻意不升 schema：validDays / quoteHistory 都是選填，讀取端一律給預設（validDays ?? 30、quoteHistory 需要時才建）。
+  //   原因：v3.46.1 以前的版本遇到較新 schema 的雲端檔仍會照推（cloudPushNow unwrap 失敗分支），
+  //   一升 schema，還沒更新的那台就可能用舊資料蓋掉雲端 → 違反「資料不能回溯」鐵則。
 };
 
 function runMigrations(state) {
@@ -5508,6 +5511,7 @@ function save() {
   if (typeof cloudScheduleCalendarSync === 'function') {
     cloudScheduleCalendarSync();
   }
+  if (typeof _docSavedTick === 'function') _docSavedTick();  // 單據改版：「已自動儲存」提示（純畫面）
 }
 
 // v3.1.0-fix：統一的「config 寫 localStorage + 觸發雲端同步」入口
@@ -5521,6 +5525,7 @@ function saveConfigOnly() {
   if (typeof cloudPendingChangesCount !== 'undefined') cloudPendingChangesCount++;
   if (typeof cloudSchedulePush === 'function') cloudSchedulePush();
   if (typeof cloudScheduleCalendarSync === 'function') cloudScheduleCalendarSync();
+  if (typeof _docSavedTick === 'function') _docSavedTick();  // 單據改版：「已自動儲存」提示（純畫面）
 }
 
 // v3.8.0：alertKey → config 欄位 mapping（desktop channel 寫 config.enable*Alert）
@@ -6981,46 +6986,59 @@ function renderBadge() {
 }
 
 // ============== Dashboard ==============
-// v3.42.0：「本月已收」主角卡 — 比上月同期（1～今天日期）+ 近 6 個月已收趨勢線；已收的歸月規則與 stat-paid 相同（payment.date）
+// v3.42.0：「本月已收」主角卡 — 比上月同期（1～今天日期）；已收的歸月規則與 stat-paid 相同（payment.date）
+// 單據改版：趨勢線改成「本月 vs 上月」每日累積兩條線 ＋ 數字；比上月同期顯示 +/- 金額與百分比
 function _renderPaidHeroTrend(active, m) {
   const [yy, mm] = m.split('-').map(Number);
-  const months = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(yy, mm - 1 - i, 1);
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  }
-  const prevM = months[4];
+  const pd = new Date(yy, mm - 2, 1);
+  const prevM = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, '0')}`;
+  const curDays = new Date(yy, mm, 0).getDate(), prevDays = new Date(yy, mm - 1, 0).getDate();
   const day = new Date().getDate();
-  const sums = Object.fromEntries(months.map(k => [k, 0]));
-  let prevSame = 0;
+  const cd = new Array(curDays + 1).fill(0), pdays = new Array(prevDays + 1).fill(0);
   active.forEach(j => (j.payments || []).forEach(p => {
-    const k = getMonth(p.date), amt = +p.amount || 0;
-    if (k in sums) sums[k] += amt;
-    if (k === prevM && +String(p.date).slice(8, 10) <= day) prevSame += amt;
+    const k = getMonth(p.date), d = +String(p.date).slice(8, 10), amt = +p.amount || 0;
+    if (k === m && d >= 1 && d <= curDays) cd[d] += amt;
+    if (k === prevM && d >= 1 && d <= prevDays) pdays[d] += amt;
   }));
-  const cur = sums[m];
+  for (let i = 1; i < cd.length; i++) cd[i] += cd[i - 1];
+  for (let i = 1; i < pdays.length; i++) pdays[i] += pdays[i - 1];
+  const cur = cd[Math.min(day, curDays)], prevSame = pdays[Math.min(day, prevDays)], prevAll = pdays[prevDays];
   const dEl = document.getElementById('stat-paid-delta');
   if (dEl) {
-    // 上月同期 0 → 百分比沒意義，不顯示
-    dEl.classList.toggle('hidden', !prevSame);
-    if (prevSame) {
-      const pct = Math.round((cur - prevSame) / prevSame * 100);
-      dEl.className = 'stat-hero-delta ' + (pct >= 0 ? 'up' : 'down');
-      dEl.textContent = `${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct)}% 比上月同期`;
+    const diff = cur - prevSame;
+    dEl.classList.toggle('hidden', !cur && !prevSame);
+    if (cur || prevSame) {
+      const pct = prevSame ? Math.round(diff / prevSame * 100) : null;
+      dEl.className = 'stat-hero-delta ' + (diff >= 0 ? 'up' : 'down');
+      dEl.textContent = `${diff >= 0 ? '+' : '-'}${fmt(Math.abs(diff))}${pct !== null ? `（${pct >= 0 ? '+' : '-'}${Math.abs(pct)}%）` : ''} 比上月同期`;
       dEl.title = `上月 1～${day} 日已收 ${fmt(prevSame)}`;
     }
   }
+  const lg = document.getElementById('stat-paid-legend');
+  const dd = Math.min(day, curDays), pdd = Math.min(day, prevDays), pm = pd.getMonth() + 1;
+  if (lg) lg.innerHTML = `<span><i class="lg-cur"></i>本月 ${mm}/1–${mm}/${dd}　${fmt(cur)}</span><span><i class="lg-prev"></i>上月同期 ${pm}/1–${pm}/${pdd}　${fmt(prevSame)}</span><span>${pm} 月整月 ${fmt(prevAll)}</span>`;
   const svg = document.getElementById('stat-paid-spark');
   if (!svg) return;
-  const vals = months.map(k => sums[k]);
-  const W = 240, H = 56, max = Math.max(...vals, 1);
-  const pts = vals.map((v, i) => [i * W / 5, H - 4 - v / max * (H - 12)]);
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-  svg.innerHTML = `<defs><linearGradient id="paid-spark-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color: var(--primary); stop-opacity: .22"/><stop offset="1" style="stop-color: var(--primary); stop-opacity: 0"/></linearGradient></defs>` +
-    `<path d="${line} L${W} ${H} L0 ${H} Z" fill="url(#paid-spark-fill)"/>` +
-    `<path d="${line}" fill="none" style="stroke: var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` +
-    `<title>近 6 個月已收：${months.map((k, i) => `${k.slice(5)}月 ${fmt(vals[i])}`).join('、')}</title>`;
+  const W = 240, H = 56, n = Math.max(curDays, prevDays), max = Math.max(cd[curDays], prevAll, 1);
+  const pt = (d, v) => `${((d - 1) / (n - 1) * W).toFixed(1)} ${(H - 4 - v / max * (H - 12)).toFixed(1)}`;
+  const path = (arr, upto) => { let s = ''; for (let d = 1; d <= upto; d++) s += (d > 1 ? 'L' : 'M') + pt(d, arr[d]); return s; };
+  const curLine = path(cd, Math.min(day, curDays));
+  const dot = (d, v, style) => `<path d="M${pt(d, v)} l0 0" fill="none" style="${style}" stroke-width="6" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+  svg.innerHTML = `<path d="${path(pdays, prevDays)}" fill="none" style="stroke: var(--muted)" stroke-width="1.5" stroke-dasharray="4 3" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` +
+    `<path d="${curLine}" fill="none" style="stroke: var(--primary)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` +
+    dot(Math.min(day, prevDays), prevSame, 'stroke: var(--muted)') + dot(Math.min(day, curDays), cur, 'stroke: var(--primary)') +
+    `<title>本月 1～${day} 日已收 ${fmt(cur)}；上月同期 ${fmt(prevSame)}；上月整月 ${fmt(prevAll)}</title>`;
 }
+
+// 單據改版：頁首顯示今天日期＋時間（每 30 秒更新）
+function renderTbToday() {
+  const el = document.getElementById('tb-today');
+  if (!el) return;
+  const d = new Date();
+  el.textContent = `${d.getMonth() + 1}/${d.getDate()} 週${'日一二三四五六'[d.getDay()]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+setTimeout(renderTbToday, 0);
+setInterval(renderTbToday, 30 * 1000);
 
 function renderDashboard() {
   // v3.6.0：完全無資料時顯示 empty state 引導卡，4 張 stat 數字仍是 $0 但有 CTA
@@ -7644,6 +7662,79 @@ function _jobProgressClick(act) {
   }
 }
 
+// ============== 單據改版：共用（已自動儲存提示 / 更多選單） ==============
+let _docSavedAt = 0;
+function _docSavedTick() {
+  _docSavedAt = Date.now();
+  const t = new Date(_docSavedAt);
+  const txt = `已自動儲存 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  document.querySelectorAll('[data-doc-saved]').forEach(el => { el.innerHTML = `<span class="msr">check_circle</span>${txt}`; el.classList.add('on'); });
+}
+document.addEventListener('click', e => { document.querySelectorAll('details.doc-more[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
+document.addEventListener('click', e => { const b = e.target.closest('.doc-more-menu button'); if (b) b.closest('details').open = false; });
+
+// ============== 單據改版：請款單 — 分段摘要 / 這張（請款歷史）/ 新增請款單 / 紙上亮一下 ==============
+let _invFlashJob = null;
+let _invSecClosed = new Set();  // 收合中的分段（只存 session）
+function toggleInvSec(k) { _invSecClosed.has(k) ? _invSecClosed.delete(k) : _invSecClosed.add(k); _afterDrawInvoice(); }
+// 請款歷史視窗：篩選只是畫面狀態（不存）
+let _invHistFilter = { st: 'all', cid: '' };
+function openInvHist(cid) {
+  _invHistFilter.cid = cid || '';
+  const m = document.getElementById('inv-hist-modal');
+  if (m && m.parentElement !== document.body) document.body.appendChild(m);  // 搬到 body，避免被側欄的堆疊層壓在頂部列下面
+  m?.classList.add('open');
+  renderInvoiceHistory();
+}
+function closeInvHist() { document.getElementById('inv-hist-modal')?.classList.remove('open'); }
+function _afterDrawInvoice() {
+  const snap = getCurrentInvoiceSnapshot();
+  const v = id => document.getElementById(id);
+  // 範圍與帳號
+  document.querySelector('.dsec-b[data-sec="range"]')?.classList.toggle('closed', _invSecClosed.has('range'));
+  document.querySelector('.dsec-h[onclick*="range"]')?.classList.toggle('closed', _invSecClosed.has('range'));
+  const acct = v('inv-pay-account')?.selectedOptions[0]?.text || '未選收款帳號';
+  if (v('inv-sum-range') && snap) v('inv-sum-range').textContent = `${snap.periodLabel} · ${acct}`;
+  if (v('inv-sum-pick') && snap) v('inv-sum-pick').textContent = `已選 ${snap.jobs.length} 筆 · ${fmt(snap.totalAmount)}`;
+  if (v('inv-sum-disp')) v('inv-sum-disp').textContent = `底部個人資訊：${v('inv-show-personal')?.checked ? '開' : '關'}`;
+  renderInvVersions(snap);
+  if (_invFlashJob) {
+    const tr = document.querySelector(`#invoice-print tr[data-jid="${CSS.escape(_invFlashJob)}"]`);
+    if (tr) { tr.classList.remove('inv-flash'); void tr.offsetWidth; tr.classList.add('inv-flash'); }
+    _invFlashJob = null;
+  }
+}
+let _invNewOpen = false;
+function renderInvVersions(snap) {
+  const box = document.getElementById('inv-ver-row');
+  if (!box) return;
+  const ST = Object.fromEntries(INVOICE_STATUSES.map(s => [s.v, s.label.replace(/^\S+\s/, '')]));
+  const list = snap ? (state.invoiceHistory || []).filter(e => e.clientId === snap.client.id).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')) : [];
+  const monthOpts = [...(document.getElementById('inv-month')?.options || [])].map(o => o.value);
+  box.innerHTML = `<span class="doc-label">這張</span>
+    <select class="doc-ver" onchange="if (this.value) reissueInvoice(this.value)" aria-label="開啟這個業主的請款歷史">
+      <option value="">${snap ? escapeHtml(snap.periodLabel) : '—'}（目前畫面）</option>
+      ${list.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.periodLabel || '')} · ${escapeHtml(ST[e.status] || e.status || '')} · ${fmt(e.totalAmount || 0)}（${(e.createdAt || '').slice(0, 10)} 匯出）</option>`).join('')}
+    </select>
+    <span class="doc-ver-hint">${list.length ? `這個業主有 ${list.length} 張請款紀錄` : '這個業主還沒有匯出過請款單'}</span>`;
+  const nb = document.getElementById('inv-new-box');
+  if (nb) nb.innerHTML = `${_invNewOpen ? `<span class="inv-new-form"><select id="inv-new-client" aria-label="業主">${sortedClientsForPicker().map(c => `<option value="${escapeHtml(c.id)}"${snap && c.id === snap.client.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select><select id="inv-new-month" aria-label="月份">${monthOpts.map(m => `<option value="${m}"${m === thisMonth() ? ' selected' : ''}>${m}</option>`).join('')}</select><button type="button" class="btn btn-primary btn-sm" onclick="createInvoiceDraft()">建立</button><button type="button" class="btn btn-ghost btn-sm" onclick="_invNewOpen = false; _afterDrawInvoice()">取消</button></span>`
+      : `<button type="button" class="btn btn-primary btn-sm doc-new" onclick="_invNewOpen = true; _afterDrawInvoice()"><span class="msr">add</span>新增請款單</button>`}`;
+}
+// 新增請款單 = 開新草稿：選業主＋月份（單月），勾選重置；匯出時照舊自動記進請款歷史
+function createInvoiceDraft() {
+  const cid = document.getElementById('inv-new-client')?.value, m = document.getElementById('inv-new-month')?.value;
+  if (!getClient(cid) || !m) return;
+  document.getElementById('inv-client').value = cid;
+  document.getElementById('inv-mode').value = 'single';
+  document.getElementById('inv-month').value = m;
+  if (typeof onInvModeChange === 'function') onInvModeChange();
+  invPick = { key: '', exclude: new Set(), include: new Set() };
+  _invNewOpen = false;
+  drawInvoice();
+  toast(`已開新的請款單草稿：${getClient(cid).name} · ${m}`);
+}
+
 // ============== 改版：手機版月底請款步驟條（桌面不顯示；只切換既有區塊，功能不變） ==============
 const INV_MSTEPS = ['對象與月份', '勾選與折扣', '預覽與匯出', '寄出紀錄', '收款'];
 let _invMStep = 1;
@@ -7654,7 +7745,6 @@ function renderInvMStepper() {
   sec.dataset.mstep = _invMStep;
   box.innerHTML = `<div class="ims-steps">${INV_MSTEPS.map((l, i) => `<button type="button" class="ims-step${i + 1 < _invMStep ? ' done' : ''}${i + 1 === _invMStep ? ' cur' : ''}" onclick="setInvMStep(${i + 1})"><span class="ims-n">${i + 1 < _invMStep ? '<span class="msr">check</span>' : i + 1}</span><span class="ims-l">${l}</span></button>`).join('')}</div>
     <div class="ims-nav"><button type="button" class="btn btn-outline" onclick="setInvMStep(${_invMStep - 1})" ${_invMStep === 1 ? 'disabled' : ''}><span class="msr">arrow_back</span>上一步</button><button type="button" class="btn btn-primary" onclick="setInvMStep(${_invMStep + 1})" ${_invMStep === INV_MSTEPS.length ? 'disabled' : ''}>下一步<span class="msr">arrow_forward</span></button></div>`;
-  if (_invMStep === 4) { const c = document.getElementById('card-invoice-history'); if (c && c.classList.contains('collapsed')) { c.classList.remove('collapsed'); renderInvoiceHistory(); } }
   if (_invMStep === 5) renderInvMPay();
 }
 function renderInvMPay() {
@@ -8426,9 +8516,42 @@ function renderClientDetail() {
   renderClientTagsChips();
   refreshAllTagSuggestions();
 
+  // 單據改版：這個業主的請款單 / 報價單
+  renderClientDocs(c);
+
   // 案件歷史時間軸
   renderClientJobsTimeline(c, allJobs);
   document.getElementById('client-detail-jobs-count').textContent = `(${allJobs.length} 筆，含取消)`;
+}
+
+// 單據改版：業主資料頁「單據」— 只列出與跳轉，編輯一律在單據頁
+function renderClientDocs(c) {
+  const box = document.getElementById('client-detail-docs');
+  if (!box) return;
+  const ST = Object.fromEntries(INVOICE_STATUSES.map(s => [s.v, s.label.replace(/^\S+\s/, '')]));
+  const inv = (state.invoiceHistory || []).filter(e => e.clientId === c.id).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const qh = Array.isArray(c.quoteHistory) ? c.quoteHistory : [];
+  const cid = escapeHtml(c.id);
+  const invRows = inv.slice(0, 8).map(e => `<div class="cdoc-row"><span class="cdoc-d">${escapeHtml(e.periodLabel || '')}</span><span class="cdoc-amt">${fmt(e.totalAmount || 0)}</span><span class="cdoc-st" data-status="${escapeHtml(e.status || '')}">${escapeHtml(ST[e.status] || e.status || '')}</span><button type="button" class="btn btn-ghost btn-sm" onclick="openClientInvoice('${escapeHtml(e.id)}')">開啟</button></div>`).join('');
+  const qRows = c.quoteSheet ? `<div class="cdoc-row"><span class="cdoc-d">${escapeHtml(c.quoteSheet.date || '未填日期')}</span><span class="cdoc-amt">目前版本</span><span></span><button type="button" class="btn btn-ghost btn-sm" onclick="openClientQuoteVer('${cid}', -1)">開啟</button></div>` +
+    qh.slice(0, 6).map((v, i) => `<div class="cdoc-row"><span class="cdoc-d">${escapeHtml(v.date || '')}</span><span class="cdoc-amt">歷史版本</span><span></span><button type="button" class="btn btn-ghost btn-sm" onclick="openClientQuoteVer('${cid}', ${i})">開啟</button></div>`).join('') : '';
+  box.innerHTML = `<h3 style="font-size: 14px; margin-bottom: 10px;"><span class="msr">description</span> 單據</h3>
+    <div class="cdoc-grid">
+      <div><div class="cdoc-t">請款單 <span class="reminder-hint">${inv.length} 張</span></div>
+        ${invRows || '<p class="reminder-hint">還沒有匯出過請款單</p>'}
+        ${inv.length > 8 ? `<button type="button" class="btn btn-ghost btn-sm" onclick="gotoInvoice('${cid}'); setTimeout(() => openInvHist('${cid}'), 80)">看全部 ${inv.length} 張</button>` : ''}</div>
+      <div><div class="cdoc-t">報價單 ${c.quoteSheet ? `<span class="reminder-hint">${qh.length} 個歷史版本</span>` : ''}</div>
+        ${qRows || `<p class="reminder-hint">還沒有報價單</p><button type="button" class="btn btn-outline btn-sm" onclick="openClientQuote('${cid}')">從公版開一份</button>`}
+        ${qh.length > 6 ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openClientQuoteVer('${cid}', -1)">看全部版本</button>` : ''}</div>
+    </div>`;
+}
+function openClientInvoice(id) {
+  switchTab('invoice');
+  setTimeout(() => reissueInvoice(id), 60);  // 等 gotoInvoice 同一節奏：切頁後再套條件
+}
+function openClientQuoteVer(cid, v) {
+  openClientQuote(cid);
+  setQuoteVersion(v);
 }
 
 function renderClientInsights(c, aJobs, cycles) {
@@ -9236,6 +9359,10 @@ function _catSvg(p) {
   ${p.headExtra || ''}
   ${p.muzzle ? `<ellipse cx="120" cy="116" rx="28" ry="20" fill="${p.muzzle}"/>` : ''}
   <g id="eyes">${eye(98)}${eye(142)}</g>
+  <g id="eyesHappy" fill="none" stroke="${p.mouth || '#2B2B2B'}" stroke-width="5" stroke-linecap="round"><path d="M87 99 Q98 85 109 99"/><path d="M131 99 Q142 85 153 99"/></g>
+  <g id="fxBlush"><ellipse cx="80" cy="117" rx="13" ry="7" fill="#FF8FA3" opacity=".8"/><ellipse cx="160" cy="117" rx="13" ry="7" fill="#FF8FA3" opacity=".8"/></g>
+  <g id="fxHearts" fill="#FF4D79"><path d="M98 107 C82 95 85 80 98 88 C111 80 114 95 98 107Z"/><path d="M142 107 C126 95 129 80 142 88 C155 80 158 95 142 107Z"/></g>
+  <g id="fxStars" fill="#FFC93C"><path d="M44 56 l5 11 11 5 -11 5 -5 11 -5 -11 -11 -5 11 -5z"/><path d="M196 44 l4 8 8 4 -8 4 -4 8 -4 -8 -8 -4 8 -4z"/><path d="M206 98 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3z"/></g>
   ${p.blush ? '<ellipse cx="82" cy="114" rx="9" ry="5" fill="#F7B5B5" opacity=".7"/><ellipse cx="158" cy="114" rx="9" ry="5" fill="#F7B5B5" opacity=".7"/>' : ''}
   <path d="M116 108 L124 108 L120 113 Z" fill="${p.nose || '#E88A8A'}"/>
   <path id="mouth" d="M110 118 Q115 124 120 117 Q125 124 130 118" stroke="${p.mouth || '#2B2B2B'}" stroke-width="3" fill="none" stroke-linecap="round"/>
@@ -9265,10 +9392,10 @@ const MASCOT_MESSAGES = {
   'job-paid':         ['收到錢錢囉 開心', '叮，入帳！', '💰 又進帳了', '錢錢拿到手，太爽', '心情大好，去喝杯咖啡吧'],
   'job-fully-paid':   ['結清了！這筆完美收尾', '尾款收齊，超開心', '完美完美！', '一筆好結束 ✨'],
   'client-create':    ['新業主加入，加油！', '又一個合作對象', '記得好好對待新業主', '緣分啊～'],
-  'job-cancel':       ['好可惜...下次有機會', '沒事，下一個', '別放心上'],
-  'job-delete':       ['不要了？掰掰～', '當作沒發生過', '清乾淨了'],
+  'job-cancel':       ['下一個會更好！', '保留體力迎接新案子 💪', '好案子在後面等你'],
+  'job-delete':       ['清爽多了！', '整理得真乾淨 ✨', '乾淨俐落～'],
   'goal-reached-monthly': ['🎯 月目標達標了，你是神！', '本月目標 ✓，太厲害了', '達標！犒賞自己一下', '神之手再現'],
-  'app-startup-overdue':  ['有人欠你錢喔，記得催一下', '提醒：有逾期未收款的案件', '別忘了去收款！', '催款時間到～'],
+  'app-startup-overdue':  ['有款項等你收，收完更開心！', '錢錢在路上，記得去收 💰', '收款時間到，一起把它收回來～'],
   'timer-start':      ['開始計時，專注！', '加油，火力全開', '今天也要好好工作', '集中精神～'],
   'timer-stop':       ['辛苦了，喝口水', '工時記下了！', '休息一下', '做得好～'],
   'streak-3':         ['3 連發，狀態爆棚！', '今天手感超好', '一鼓作氣，再來幾個！', '一波接一波 🔥'],
@@ -9281,8 +9408,28 @@ const MASCOT_MESSAGES = {
   'import-success':   ['資料來了！歡迎回來', '匯入成功，繼續加油', '你的資料安然送達'],
   'undo-action':      ['上一步…撤回中', '反悔了？沒事', '幫你還原～'],
   'sleeping':         ['💤 zzZ…', '我先睡一下…', '叫我我會起來'],
-  'wake-up':          ['啊？我剛打瞌睡', '你回來啦～', '我醒了我醒了'],
+  'wake-up':          ['你回來啦～歡迎！', '充飽電了，一起加油！', '我醒了，繼續衝～'],
+  // 單據改版：自己講話用的打氣句
+  'cheer':            ['你做得很好，繼續保持！', '每一筆都是累積，超棒的', '今天的你也很努力 💪', '慢慢來，比較快', '相信自己，你可以的！', '接案人生，你最強 ✨', '記得喝水、伸個懶腰～', '你的作品越來越好了'],
 };
+// 單據改版：事件 → 表情（mood）；loading / searching 類不加表情
+const MASCOT_EVENT_TO_MOOD = {
+  'job-create': 'happy', 'job-done': 'proud', 'job-paid': 'love', 'job-fully-paid': 'love', 'client-create': 'happy',
+  'goal-reached-monthly': 'excited', 'streak-3': 'excited', 'big-payment': 'excited', 'import-success': 'happy',
+  'timer-stop': 'proud', 'idle-greeting': 'happy', 'app-startup-quiet': 'happy', 'wake-up': 'happy', 'cheer': 'happy',
+  'job-cancel': 'happy', 'job-delete': 'happy', 'app-startup-overdue': 'cheer',
+};
+const MASCOT_CHAT_MS = 30 * 1000;  // 單據改版：沒人點也每 30 秒自己講一句
+let _mascotLastSpoke = 0, _mascotChatCursor = 0, _mascotMoodTimer = null;
+function mascotSetMood(mood, ms) {
+  const c = document.getElementById('mascot-container');
+  if (!c) return;
+  if (_mascotMoodTimer) { clearTimeout(_mascotMoodTimer); _mascotMoodTimer = null; }
+  if (!mood) { delete c.dataset.mood; mascotSetMouth(MASCOT_STATE_TO_MOUTH[mascotState.current] || 'happy'); return; }
+  c.dataset.mood = mood;
+  mascotSetMouth('big');
+  _mascotMoodTimer = setTimeout(() => mascotSetMood(null), ms || MASCOT_BUBBLE_HIDE_MS);
+}
 
 const MASCOT_COOLDOWN_MS = 30 * 1000;          // 同類事件 30 秒不重複
 const MASCOT_BUBBLE_HIDE_MS = 5000;            // 對話框 5 秒消失
@@ -9442,8 +9589,8 @@ function mascotSetState(state) {
   MASCOT_STATES.forEach(s => c.classList.remove(`state-${s}`));
   c.classList.add(`state-${state}`);
   mascotState.current = state;
-  // 嘴巴跟著變
-  mascotSetMouth(MASCOT_STATE_TO_MOUTH[state]);
+  // 嘴巴跟著變（單據改版：有表情時維持大笑）
+  mascotSetMouth(c.dataset.mood ? 'big' : MASCOT_STATE_TO_MOUTH[state]);
   // v3.23.3：眼睛跟著變（sleeping 閉眼，其他開眼）
   mascotSetEyes(state === 'sleeping' ? 'closed' : 'open');
   // 暫態自動回 idle
@@ -9508,6 +9655,9 @@ function mascotInit() {
     mascotDailyRemind();
     mascotUpdateBadge();
   }, 60 * 1000);
+  // 單據改版：每 5 秒看一次，距上次講話滿 30 秒就自己講一句
+  _mascotLastSpoke = Date.now();
+  setInterval(mascotAutoChat, 5 * 1000);
 }
 
 // ============== v3.35.0：貓咪輪替 + 提醒（截止 / 放太久 / 本月已賺） ==============
@@ -9540,10 +9690,11 @@ function mascotCollectReminders() {
   if (due.length) {
     const d = due[0].endDate || due[0].date;
     const overdue = due.filter(j => (j.endDate || j.date) < today).length;
+    // 單據改版：文案全面正向（打氣，不數落）
     const text = due.length === 1
-      ? (d < today ? `「${t(due[0])}」已經逾期 ${daysBetween(d, today)} 天了，點我看看`
-        : d === today ? `「${t(due[0])}」今天要交喔，點我看看` : `「${t(due[0])}」明天截止，記得交件 🐾`)
-      : `有 ${due.length} 筆案件今明兩天要交${overdue ? `（${overdue} 筆已逾期）` : ''}，點我看看`;
+      ? (d < today ? `「${t(due[0])}」再衝刺一下就能交件囉！點我看看`
+        : d === today ? `「${t(due[0])}」今天交件，加油加油！點我看看` : `「${t(due[0])}」明天交件，你一定沒問題 🐾`)
+      : `有 ${due.length} 筆案件等你大顯身手${overdue ? `，先從最早的 ${overdue} 筆開始` : ''}！點我看看`;
     out.push({ text, ids: due.map(j => j.id), label: '🐾 快截止的案件' });
   }
   // 2. 放太久：開始日已過 7 天還沒完成（已在截止清單的不重複）
@@ -9553,8 +9704,8 @@ function mascotCollectReminders() {
   if (stale.length) {
     out.push({
       text: stale.length === 1
-        ? `「${t(stale[0])}」放了 ${daysBetween(stale[0].date, today)} 天還沒完成，點我看看`
-        : `有 ${stale.length} 筆案件放超過 ${MASCOT_STALE_DAYS} 天還沒完成，點我看看`,
+        ? `「${t(stale[0])}」在等你回來完成它～點我看看`
+        : `有 ${stale.length} 筆案件等你收尾，完成一筆就很棒！點我看看`,
       ids: stale.map(j => j.id), label: `🐾 放超過 ${MASCOT_STALE_DAYS} 天的案件`
     });
   }
@@ -9568,18 +9719,18 @@ function mascotCollectReminders() {
     if (d.startsWith(ym)) cur += +p.amount || 0;
     else if (d.startsWith(prevYm) && d <= prevCut) prev += +p.amount || 0;
   }));
-  const pct = prev > 0 ? Math.round(Math.abs(cur - prev) / prev * 100) : 0;
+  const pct = prev > 0 ? Math.round((cur - prev) / prev * 100) : 0;
   out.push({
     text: cur > 0
-      ? `本月已賺 ${fmt(cur)}${prev > 0 ? `，比上月同期${cur >= prev ? '多' : '少'} ${pct}%` : ''} 🐾`
-      : '本月還沒有入帳，一起加油！'
+      ? `本月已賺 ${fmt(cur)}${prev > 0 && pct > 0 ? `，比上月同期多 ${pct}%，超強！` : '，繼續衝！'} 🐾`
+      : '新的一個月，第一筆入帳就在前面，一起加油！'
   });
   return out;
 }
 
 function mascotShowReminder(r) {
   mascotSay(null, r.text, {
-    hideMs: 10000, alert: true,
+    hideMs: 10000, alert: true, mood: r.ids ? 'cheer' : 'proud',
     action: r.ids ? () => { lockJobsToIds(r.ids, r.label); switchTab('jobs'); render(); } : null
   });
 }
@@ -9674,11 +9825,49 @@ function mascotSay(eventType, customMsg, opts = {}) {
   if (eventType && MASCOT_EVENT_TO_STATE[eventType]) {
     mascotSetState(MASCOT_EVENT_TO_STATE[eventType]);
   }
+  // 單據改版：表情（自訂訊息預設開心）＋ 講話時整隻探出來
+  const mood = opts.mood !== undefined ? opts.mood : eventType ? MASCOT_EVENT_TO_MOOD[eventType] : 'happy';
+  mascotSetMood(mood || null, opts.hideMs || MASCOT_BUBBLE_HIDE_MS);
+  if (c) c.classList.add('talking');
+  document.body.classList.add('mascot-talking');
+  _mascotLastSpoke = Date.now();
+}
+
+// 單據改版：自己講話的內容 — 提醒（正向文案）＋ 本月 / 今年成果 ＋ 時段問候 ＋ 打氣句
+function mascotChatterLines() {
+  const lines = mascotCollectReminders().map(r => r);
+  const m = thisMonth(), y = m.slice(0, 4), act = activeJobs();
+  const doneN = act.filter(j => j.done && getMonth(j.doneAt || j.date) === m).length;
+  if (doneN) lines.push({ text: `本月已經完成 ${doneN} 筆，效率超好！`, mood: 'proud' });
+  let yPaid = 0;
+  act.forEach(j => (j.payments || []).forEach(p => { if ((p.date || '').startsWith(y)) yPaid += +p.amount || 0; }));
+  if (yPaid) lines.push({ text: `今年已經累積 ${fmt(yPaid)}，一步一步越來越好 ✨`, mood: 'excited' });
+  const h = new Date().getHours();
+  lines.push({ text: h < 11 ? '早安！今天也一起加油 ☀️' : h < 14 ? '午安～記得吃飯補充能量' : h < 18 ? '下午也火力全開！' : '晚上辛苦了，做完就好好休息 🌙', mood: 'happy' });
+  const cheer = MASCOT_MESSAGES.cheer;
+  lines.push({ text: cheer[Math.floor(Math.random() * cheer.length)], mood: Math.random() < 0.5 ? 'love' : 'happy' });
+  return lines;
+}
+function mascotAutoChat() {
+  if (!mascotState.enabled || document.hidden) return;
+  if (Date.now() - _mascotLastSpoke < MASCOT_CHAT_MS) return;
+  if (mascotState.current === 'sleeping') return;  // 睡著 = 使用者離開了，不吵
+  if (!document.getElementById('mascot-bubble')?.classList.contains('hidden')) return;
+  if (document.querySelector('.modal-bg.open')) return;  // 編輯視窗開著不插嘴
+  const ae = document.activeElement;
+  if (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) return;  // 正在打字不插嘴
+  const lines = mascotChatterLines();
+  const r = lines[_mascotChatCursor % lines.length];
+  _mascotChatCursor++;
+  if (r.ids) mascotShowReminder(r);
+  else mascotSay(null, r.text, { hideMs: 7000, mood: r.mood || 'happy' });
 }
 
 function mascotHideBubble() {
   const bubble = document.getElementById('mascot-bubble');
   if (bubble) bubble.classList.add('hidden');
+  document.getElementById('mascot-container')?.classList.remove('talking');
+  document.body.classList.remove('mascot-talking');
   if (mascotState.hideTimer) { clearTimeout(mascotState.hideTimer); mascotState.hideTimer = null; }
 }
 
@@ -11728,6 +11917,7 @@ const QUOTE_DEFAULT = {
   rush: [],
   payTerms: '',
   payAccountId: '',
+  validDays: 30,  // 有效期限：報價日起幾天（0 = 不顯示）
   notes: [{ title: '備註', lines: '' }]
 };
 const QUOTE_LEGACY_V329 = {
@@ -11792,14 +11982,110 @@ function _quoteSave() {
 // quoteMutable 回 null 時：切回公版、重畫編輯區，這次輸入不寫入
 function _quoteTargetGone() {
   quoteTarget = '';
+  quoteViewVer = -1;
   renderQuoteEditor();
   renderQuoteTarget();
   renderQuoteSheet();
   toast('⚠️ 這個業主已被刪除，已切回公版（剛才的輸入未儲存）', 5000);
 }
 
+// ===== 單據改版：報價單版本歷史 =====
+// 目前這份照舊存在 client.quoteSheet / config.quoteSheet（原本的編輯、存檔流程不變）；
+// 歷史版本另存 client.quoteHistory / config.quoteHistory（新的在前），是唯讀快照。
+// 另開欄位（不塞進 quoteSheet）：業主資料逐欄位合併。注意：「存成新版本」會改 quoteSheet.date，
+//   兩台同時改同一份報價單仍可能衝突（走既有衝突處理＋衝突備份）。
+let quoteViewVer = -1;    // -1 = 目前這份（可編輯）；>= 0 = 看第幾個歷史版本（唯讀）
+let quoteOpenCat = 0;     // 價目分類目錄：目前展開第幾類
+const _qeOpen = new Set(['price']);  // 展開中的分段（只存 session）
+let quoteCompare = false; // 紙面標出和上一版不同的價格
+function _quoteHistory() {
+  const c = quoteTarget ? getClient(quoteTarget) : null;
+  if (quoteTarget && !c) return [];
+  return (c ? c.quoteHistory : config.quoteHistory) || [];
+}
+function _quoteHistoryMutable() {
+  const c = quoteTarget ? getClient(quoteTarget) : null;
+  if (quoteTarget && !c) return null;
+  if (c) { if (!Array.isArray(c.quoteHistory)) c.quoteHistory = []; return c.quoteHistory; }
+  if (!Array.isArray(config.quoteHistory)) config.quoteHistory = [];
+  return config.quoteHistory;
+}
+function getQuoteSheetShown() {
+  const h = _quoteHistory();
+  return quoteViewVer >= 0 && h[quoteViewVer] ? h[quoteViewVer].sheet : getQuoteSheet();
+}
+function _quotePrevSheet() {
+  const h = _quoteHistory(), i = quoteViewVer < 0 ? 0 : quoteViewVer + 1;
+  return h[i] ? h[i].sheet : null;
+}
+function setQuoteVersion(v) { quoteViewVer = +v; if (quoteViewVer >= _quoteHistory().length) quoteViewVer = -1; renderQuoteEditor(); renderQuoteTarget(); renderQuoteSheet(); }
+function toggleQuoteCompare(on) { quoteCompare = !!on; renderQuoteTarget(); renderQuoteSheet(); }
+// 存成新版本：目前這份存成歷史快照，再以它為起點、報價日期改今天
+async function newQuoteVersion() {
+  const cur = getQuoteSheet();
+  if (!await uiConfirm(`把目前這份報價單（報價日期 ${cur.date || '未填'}）存成歷史版本，並以它為起點開一份新的（報價日期改成今天）？`)) return;
+  quoteViewVer = -1;
+  const m = quoteMutable(); if (!m) { _quoteTargetGone(); return; }
+  const hist = _quoteHistoryMutable(); if (!hist) { _quoteTargetGone(); return; }
+  hist.unshift({ id: uid(), date: m.date || todayStr(), savedAt: new Date().toISOString(), sheet: JSON.parse(JSON.stringify(m)) });
+  m.date = todayStr();
+  _quoteSave();
+  renderQuoteEditor(); renderQuoteTarget(); renderQuoteSheet();
+  toast('已存成歷史版本；新版本日期為今天');
+}
+// 版本列（下拉＋比較＋新增）
+function renderQuoteVersions() {
+  const box = document.getElementById('quote-ver-row');
+  if (!box) return;
+  const h = _quoteHistory(), cur = getQuoteSheet(), ro = quoteViewVer >= 0, prev = _quotePrevSheet();
+  box.innerHTML = `<span class="doc-label">版本</span>
+    <select class="doc-ver" onchange="setQuoteVersion(this.value)" aria-label="報價單版本">
+      <option value="-1"${!ro ? ' selected' : ''}>${escapeHtml(cur.date || '未填日期')}（目前・可編輯）</option>
+      ${h.map((v, i) => `<option value="${i}"${quoteViewVer === i ? ' selected' : ''}>${escapeHtml(v.date || '')}（歷史）</option>`).join('')}
+    </select>
+    <label class="doc-cmp${prev ? '' : ' off'}"><input type="checkbox" ${quoteCompare && prev ? 'checked' : ''} ${prev ? '' : 'disabled'} onchange="toggleQuoteCompare(this.checked)">和上一版比較</label>
+    ${ro ? `<span class="doc-ro"><span class="msr">lock</span>歷史版本，只能看與下載</span><button type="button" class="btn btn-ghost btn-sm" onclick="setQuoteVersion(-1)">回到目前版本</button>` : `<span class="doc-ver-hint">${h.length ? `共 ${h.length} 個歷史版本` : '還沒有歷史版本'}</span>`}
+    <button type="button" class="btn btn-outline btn-sm doc-new" onclick="newQuoteVersion()"><span class="msr">history</span>存成新版本</button>`;
+  const nb = document.getElementById('quote-new-box');
+  if (!nb) return;
+  const rest = sortedClientsForPicker().filter(c => !c.quoteSheet);
+  nb.innerHTML = _quoteNewOpen
+    ? `<span class="inv-new-form">${rest.length ? `<select id="quote-new-client" aria-label="業主">${rest.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('')}</select><button type="button" class="btn btn-primary btn-sm" onclick="createClientQuote()">建立</button>` : '<span class="doc-ver-hint">每個業主都已經有報價單</span>'}<button type="button" class="btn btn-ghost btn-sm" onclick="_quoteNewOpen = false; renderQuoteVersions()">取消</button></span>`
+    : `<button type="button" class="btn btn-primary btn-sm doc-new" onclick="_quoteNewOpen = true; renderQuoteVersions()"><span class="msr">add</span>新增報價單</button>`;
+}
+// 新增報價單：幫還沒有報價單的業主，從公版複製一份（報價日期今天）
+let _quoteNewOpen = false;
+function createClientQuote() {
+  const c = getClient(document.getElementById('quote-new-client')?.value);
+  if (!c || c.quoteSheet) return;
+  _quoteNewOpen = false;
+  quoteTarget = c.id; quoteViewVer = -1;
+  const m = quoteMutable(); if (!m) { _quoteTargetGone(); return; }
+  m.date = todayStr();
+  _quoteSave();
+  renderQuoteEditor(); renderQuoteTarget(); renderQuoteSheet();
+  toast(`已建立「${c.name}」的報價單（從公版複製）`);
+}
+// 和上一版比較：價格不同的那格標出舊價（只在畫面上；匯出 / 列印前會關掉）
+// 比對鑰匙：類別｜項目｜細項｜數量＋同名第幾個（例：名片設計 單面 / 雙面 只差數量，不能撞在一起）
+function _quoteRowKeys(q) {
+  const seen = {}, keys = [];
+  (q && q.cats || []).forEach(c => (c.items || []).forEach(r => {
+    const b = `${c.name}|${r.item}|${r.detail}|${r.qty}`;
+    seen[b] = (seen[b] || 0) + 1;
+    keys.push([`${b}#${seen[b]}`, r]);
+  }));
+  return keys;
+}
+function _quotePriceMap(q) {
+  const m = {};
+  _quoteRowKeys(q).forEach(([k, r]) => { m[k] = r.price; });
+  return m;
+}
+
 function setQuoteTarget(cid) {
   quoteTarget = getClient(cid) ? cid : '';
+  quoteViewVer = -1;
   renderQuoteEditor();
   renderQuoteTarget();
   renderQuoteSheet();
@@ -11808,6 +12094,7 @@ function setQuoteTarget(cid) {
 // 業主詳細頁「📄 報價單」
 function openClientQuote(cid) {
   quoteTarget = getClient(cid) ? cid : '';
+  quoteViewVer = -1;
   switchTab('quote');
 }
 
@@ -11820,11 +12107,12 @@ function renderQuoteTarget() {
     sortedClientsForPicker().map(c => `<option value="${escapeHtml(c.id)}"${c.id === quoteTarget ? ' selected' : ''}>${escapeHtml(c.name)}${c.quoteSheet ? '' : '（尚未建立）'}</option>`).join('');
   sel.value = quoteTarget;
   _renderQuoteChips();
+  renderQuoteVersions();
   const c = quoteTarget ? getClient(quoteTarget) : null;
   const hint = document.getElementById('quote-target-hint');
   if (hint) hint.textContent = (quoteTarget && !c) ? '⚠️ 這個業主已被刪除，開始編輯前請改選對象。'
     : !c ? '公版：新業主的報價單從這份複製。'
-    : c.quoteSheet ? `「${c.name}」專屬報價單（與公版互不影響）。`
+    : c.quoteSheet ? `「${c.name}」專屬報價單（與公版互不影響）。改價前想留舊價對照 → 先按「存成新版本」。`
     : `目前顯示公版內容；一開始編輯就會建立「${c.name}」專屬報價單。`;
   const rb = document.getElementById('quote-reset-btn');
   if (rb) {
@@ -11833,7 +12121,7 @@ function renderQuoteTarget() {
   }
 }
 
-// v3.40.0：報價對象按鈕 — 只列公版 + 已建立的業主；其餘收進「＋ 幫業主建立…」
+// v3.40.0：報價對象按鈕 — 只列公版 + 已建立的業主；單據改版：建立新的走「新增報價單」
 function _docChip(label, active, onclick, extraCls, sub) {
   return `<button type="button" class="doc-chip${active ? ' active' : ''}${extraCls || ''}" onclick="${onclick}">${escapeHtml(label)}${sub ? `<span class="doc-chip-sub">${escapeHtml(sub)}</span>` : ''}</button>`;
 }
@@ -11843,11 +12131,9 @@ function _renderQuoteChips() {
   const all = sortedClientsForPicker();
   const cur = quoteTarget ? getClient(quoteTarget) : null;
   const built = all.filter(c => c.quoteSheet);
-  const rest = all.filter(c => !c.quoteSheet && c.id !== quoteTarget);
   box.innerHTML = _docChip('公版', !quoteTarget, "setQuoteTarget('')") +
     built.map(c => _docChip(c.name, c.id === quoteTarget, `setQuoteTarget('${escapeHtml(c.id)}')`)).join('') +
-    (cur && !cur.quoteSheet ? _docChip(cur.name, true, '', ' draft', '未建立') : '') +
-    (rest.length ? `<select class="doc-chip-more" onchange="if (this.value) setQuoteTarget(this.value)"><option value="">＋ 幫業主建立…</option>${rest.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('')}</select>` : '');
+    (cur && !cur.quoteSheet ? _docChip(cur.name, true, '', ' draft', '未建立') : '');
 }
 
 function getQuotePayAccount(q) {
@@ -11878,25 +12164,34 @@ function renderQuote() {
 function renderQuoteSheet() {
   const view = document.getElementById('quote-view');
   if (!view) return;
-  const q = getQuoteSheet();
+  const q = getQuoteSheetShown();
   const e = escapeHtml;
   const money = v => v == null || v === '' ? '另報價' : 'NT$' + Number(v).toLocaleString();
+  const prevMap = quoteCompare && _quotePrevSheet() ? _quotePriceMap(_quotePrevSheet()) : null;
+  const rowKey = new Map(_quoteRowKeys(q).map(([k, r]) => [r, k]));
+  const priceCell = (c, r) => {
+    const k = rowKey.get(r);
+    const changed = prevMap && (k in prevMap) && (prevMap[k] ?? null) !== (r.price ?? null);
+    return `<span class="qs-pr${r.price == null ? ' ask' : ''}${changed ? ' qs-chg' : ''}">${changed ? `<span class="qs-old">${money(prevMap[k])}</span>` : ''}${money(r.price)}</span>`;
+  };
+  const vd = +(q.validDays ?? 30) || 0;  // 沒有這欄（舊資料）= 預設 30 天，與編輯欄一致
+  const validTo = q.date && vd > 0 ? addDays(new Date(q.date + 'T00:00:00'), vd) : '';
   const acct = getQuotePayAccount(q);
   const holder = acct ? (acct.holderName || (config.userInfo && config.userInfo.name) || '') : '';
   const payRows = [['付款條件', q.payTerms], ['銀行', acct && acct.bank], ['帳號', acct && acct.account], ['戶名', holder]].filter(x => x[1]);
   const secs = q.cats.map(c => `<div class="qs-sec"><span class="qs-tag">${e(c.name)}</span><div>` +
-    c.items.map((r, i) => `<div class="qs-row"><span>${i > 0 && c.items[i - 1].item === r.item ? '' : e(r.item)}</span><span class="qs-sub">${e(r.detail)}</span><span class="qs-sub">${e(r.qty)}</span><span class="qs-pr${r.price == null ? ' ask' : ''}">${money(r.price)}</span></div>`).join('') +
+    c.items.map((r, i) => `<div class="qs-row"><span>${i > 0 && c.items[i - 1].item === r.item ? '' : e(r.item)}</span><span class="qs-sub">${e(r.detail)}</span><span class="qs-sub">${e(r.qty)}</span>${priceCell(c, r)}</div>`).join('') +
     `</div></div>`).join('');
   const notes = q.notes.map(g => ({ t: g.title, l: String(g.lines || '').split('\n').filter(x => x.trim()) })).filter(g => g.l.length);
   view.innerHTML = `<div class="qs-sheet">
     <div class="qs-band"><div>${brandLogoImg('qs-logo')}<h1>${e(q.title)}</h1><small>${e(q.en)}</small>${q.client ? `<div class="qs-client">${e(q.client)}</div>` : ''}</div>
-      <div class="qs-meta">${[['聯絡人', q.contactName], ['電話', q.phone], ['Email', q.email], ['報價日期', q.date]].filter(x => x[1]).map(([k, v]) => `<span>${k}</span><b>${e(v)}</b>`).join('')}</div></div>
+      <div class="qs-meta">${[['聯絡人', q.contactName], ['電話', q.phone], ['Email', q.email], ['報價日期', q.date], ['有效期限', validTo]].filter(x => x[1]).map(([k, v]) => `<span>${k}</span><b>${e(v)}</b>`).join('')}</div></div>
     <div class="qs-body">${secs}
       <div class="qs-bt">
         ${q.rush.length ? `<div class="qs-bx"><h3>急件費</h3><div class="qs-kv">${q.rush.map(r => `<span>${e(r.label)}</span><b class="qs-hot">${e(r.value)}</b>`).join('')}</div></div>` : ''}
         ${payRows.length ? `<div class="qs-bx"><h3>付款方式</h3><div class="qs-kv">${payRows.map(([k, v]) => `<span>${k}</span><b>${e(v)}</b>`).join('')}</div></div>` : ''}
         ${notes.length ? `<div class="qs-bx"><h3>備註</h3><div class="qs-ng">${notes.map(g => `<span class="qs-gt">${e(g.t)}</span><ul>${g.l.map(n => `<li>${e(n)}</li>`).join('')}</ul>`).join('')}</div></div>` : ''}
-      </div></div></div>`;
+      </div>${validTo ? `<div class="qs-valid">本報價自報價日起 ${vd} 天內有效（至 ${validTo}）</div>` : ''}</div></div>`;
   // 類別標籤欄寬 = 最長標籤 + 間距（如 youtube 這種長名稱），所有區塊對齊
   const tags = [...view.querySelectorAll('.qs-tag')].map(t => t.offsetWidth + 16);
   view.firstElementChild.style.setProperty('--qs-tagw', Math.max(76, ...tags) + 'px');
@@ -11905,40 +12200,61 @@ function renderQuoteSheet() {
 function renderQuoteEditor() {
   const ed = document.getElementById('quote-editor');
   if (!ed) return;
-  const q = getQuoteSheet();
+  const q = getQuoteSheetShown();
   const e = escapeHtml;
   const inp = (path, v, ph = '', type = 'text') => `<input data-qp="${path}" value="${e(v == null ? '' : v)}" placeholder="${ph}" type="${type}">`;
   const ops = (a, i, j) => `<span class="qe-ops"><button type="button" data-qa="${a}Up" data-c="${i}" data-i="${j}" title="上移">↑</button><button type="button" data-qa="${a}Down" data-c="${i}" data-i="${j}" title="下移">↓</button><button type="button" class="qe-del" data-qa="${a}Del" data-c="${i}" data-i="${j}" title="刪除">✕</button></span>`;
   const accts = (config.userInfo && config.userInfo.paymentAccounts) || [];
-  ed.innerHTML = `
-    <h4>抬頭</h4>
-    <div class="qe-grid2">${inp('title', q.title, '標題')}${inp('en', q.en, '英文小字')}</div>
-    <h4>客戶名稱</h4>
-    ${inp('client', q.client, '業主名稱', 'text').replace('<input', '<input list="quote-client-list"')}
-    <datalist id="quote-client-list">${(state.clients || []).map(c => `<option value="${e(c.name)}">`).join('')}</datalist>
-    <h4>聯絡資訊 / 報價日期</h4>
-    <div class="qe-grid2">${inp('contactName', q.contactName, '聯絡人')}${inp('phone', q.phone, '電話')}${inp('email', q.email, 'Email')}${inp('date', q.date, '', 'date')}</div>
-    <h4>價目</h4>
-    ${q.cats.map((c, ci) => `<div class="qe-cat"><div class="qe-ch">${inp(`cats.${ci}.name`, c.name, '類別')}${ops('cat', ci, '')}</div>
-      ${c.items.map((r, ii) => `<div class="qe-it">${inp(`cats.${ci}.items.${ii}.item`, r.item, '項目')}${inp(`cats.${ci}.items.${ii}.detail`, r.detail, '細項')}${inp(`cats.${ci}.items.${ii}.qty`, r.qty, '數量（例：一張）')}${inp(`cats.${ci}.items.${ii}.price`, r.price, '另報價', 'number')}${ops('it', ci, ii)}</div>`).join('')}
-      <button type="button" class="qe-add" data-qa="itAdd" data-c="${ci}">＋ 項目</button></div>`).join('')}
-    <button type="button" class="qe-add" data-qa="catAdd">＋ 類別</button>
-    <h4>急件費</h4>
-    ${q.rush.map((r, ri) => `<div class="qe-rush">${inp(`rush.${ri}.label`, r.label, '條件')}${inp(`rush.${ri}.value`, r.value, '加價')}<button type="button" class="qe-del" data-qa="rushDel" data-c="${ri}">✕</button></div>`).join('')}
-    <button type="button" class="qe-add" data-qa="rushAdd">＋ 急件條件</button>
-    <h4>付款方式</h4>
-    ${inp('payTerms', q.payTerms, '付款條件（留空不顯示）')}
-    <select data-qp="payAccountId" style="margin-top:4px;">
-      <option value="">跟請款單目前選的帳號</option>
-      ${accts.map(a => `<option value="${e(a.id)}"${a.id === q.payAccountId ? ' selected' : ''}>${e(a.label || a.bank || '未命名')}${a.account ? '（' + e(a.account) + '）' : ''}</option>`).join('')}
-    </select>
-    <div class="qe-hint">${accts.length ? '銀行／帳號／戶名從收款帳號帶入，到「請款單」分頁管理。' : '還沒有收款帳號 → 到「請款單」分頁新增，這裡會自動帶入。'}</div>
-    <h4>備註（分組，一行一條）</h4>
-    ${q.notes.map((g, gi) => `<div class="qe-cat"><div class="qe-ch">${inp(`notes.${gi}.title`, g.title, '分組名稱')}${ops('ng', gi, '')}</div>
-      <textarea data-qp="notes.${gi}.lines" rows="${Math.max(2, String(g.lines || '').split('\n').length)}">${e(g.lines)}</textarea></div>`).join('')}
-    <button type="button" class="qe-add" data-qa="ngAdd">＋ 備註分組</button>`;
+  // 單據改版：分段（標題列＋一行摘要，可收合）；價目用分類目錄一次只展開一類；價目欄位補回小標籤
+  const lf = (lbl, html) => `<label class="qe-f"><span>${lbl}</span>${html}</label>`;
+  const sec = (k, title, sum, body) => `<div class="qe-sec${_qeOpen.has(k) ? ' open' : ''}" data-sec="${k}"><button type="button" class="qe-sec-h" data-qsec="${k}"><span class="qe-sec-t">${title}</span><span class="qe-sec-s">${e(sum)}</span><span class="msr">expand_more</span></button><div class="qe-sec-b">${body}</div></div>`;
+  if (quoteOpenCat >= q.cats.length) quoteOpenCat = Math.max(0, q.cats.length - 1);
+  const vd = +(q.validDays ?? 30);
+  const itemN = q.cats.reduce((n, c) => n + c.items.length, 0);
+  ed.innerHTML =
+    sec('head', '抬頭與客戶', `${q.title || '（無標題）'} · ${q.client || '未填客戶'} · ${q.date || '未填日期'} · ${vd ? vd + ' 天內有效' : '不顯示期限'}`, `
+      <div class="qe-grid2">${lf('標題', inp('title', q.title, '標題'))}${lf('英文小字', inp('en', q.en, '英文小字'))}</div>
+      ${lf('客戶名稱', inp('client', q.client, '業主名稱', 'text').replace('<input', '<input list="quote-client-list"'))}
+      <datalist id="quote-client-list">${(state.clients || []).map(c => `<option value="${e(c.name)}">`).join('')}</datalist>
+      <div class="qe-grid2">${lf('聯絡人', inp('contactName', q.contactName, '聯絡人'))}${lf('電話', inp('phone', q.phone, '電話'))}${lf('Email', inp('email', q.email, 'Email'))}${lf('報價日期', inp('date', q.date, '', 'date'))}</div>
+      ${lf('有效期限（報價日起）', `<select data-qp="validDays">${[[30, '30 天（一個月）'], [14, '14 天'], [60, '60 天'], [0, '不顯示']].map(([d, l]) => `<option value="${d}"${vd === d ? ' selected' : ''}>${l}</option>`).join('')}</select>`)}`) +
+    sec('price', '價目', `${q.cats.length} 類 · ${itemN} 個項目`, `
+      <div class="qe-toc">${q.cats.map((c, ci) => `<button type="button" class="${ci === quoteOpenCat ? 'on' : ''}" data-qcat="${ci}">${e(c.name || '（未命名）')}<small>${c.items.length}</small></button>`).join('')}</div>
+      ${q.cats.map((c, ci) => `<div class="qe-cat qe-pcat${ci === quoteOpenCat ? '' : ' qe-cat-hidden'}" data-ci="${ci}"><div class="qe-ch">${inp(`cats.${ci}.name`, c.name, '類別')}${ops('cat', ci, '')}</div>
+        ${c.items.map((r, ii) => `<div class="qe-it">${lf('項目', inp(`cats.${ci}.items.${ii}.item`, r.item, '項目'))}${lf('細項', inp(`cats.${ci}.items.${ii}.detail`, r.detail, '細項'))}${lf('數量', inp(`cats.${ci}.items.${ii}.qty`, r.qty, '例：一張'))}${lf('單價', inp(`cats.${ci}.items.${ii}.price`, r.price, '另報價', 'number'))}${ops('it', ci, ii)}</div>`).join('')}
+        <button type="button" class="qe-add" data-qa="itAdd" data-c="${ci}">＋ 項目</button></div>`).join('')}
+      <button type="button" class="qe-add" data-qa="catAdd">＋ 類別</button>`) +
+    sec('rush', '急件費', q.rush.length ? `${q.rush.length} 個條件` : '無', `
+      ${q.rush.map((r, ri) => `<div class="qe-rush">${inp(`rush.${ri}.label`, r.label, '條件')}${inp(`rush.${ri}.value`, r.value, '加價')}<button type="button" class="qe-del" data-qa="rushDel" data-c="${ri}">✕</button></div>`).join('')}
+      <button type="button" class="qe-add" data-qa="rushAdd">＋ 急件條件</button>`) +
+    sec('pay', '付款方式', q.payTerms || '未填付款條件', `
+      ${lf('付款條件', inp('payTerms', q.payTerms, '付款條件（留空不顯示）'))}
+      ${lf('收款帳號', `<select data-qp="payAccountId"><option value="">跟請款單目前選的帳號</option>${accts.map(a => `<option value="${e(a.id)}"${a.id === q.payAccountId ? ' selected' : ''}>${e(a.label || a.bank || '未命名')}${a.account ? '（' + e(a.account) + '）' : ''}</option>`).join('')}</select>`)}
+      <div class="qe-hint">${accts.length ? '銀行／帳號／戶名從收款帳號帶入，到「請款單」分頁管理。' : '還沒有收款帳號 → 到「請款單」分頁新增，這裡會自動帶入。'}</div>`) +
+    sec('notes', '備註', q.notes.map(g => g.title).filter(Boolean).join('、') || '無', `
+      ${q.notes.map((g, gi) => `<div class="qe-cat"><div class="qe-ch">${inp(`notes.${gi}.title`, g.title, '分組名稱')}${ops('ng', gi, '')}</div>
+        <textarea data-qp="notes.${gi}.lines" rows="${Math.max(2, String(g.lines || '').split('\n').length)}">${e(g.lines)}</textarea></div>`).join('')}
+      <button type="button" class="qe-add" data-qa="ngAdd">＋ 備註分組</button>`);
+  // 歷史版本：整個編輯區反灰、不能改（輸入 / 按鈕 handler 也會擋）
+  const ro = quoteViewVer >= 0;
+  ed.classList.toggle('qe-readonly', ro);
+  if (ro) ed.querySelectorAll('input, select, textarea, button:not([data-qsec]):not([data-qcat])').forEach(x => { x.disabled = true; });
 }
 
+// 單據改版：分類目錄切換（不重畫，保留輸入焦點）/ 紙上那一類亮一下
+function _qeApplyCat() {
+  document.querySelectorAll('#quote-editor .qe-toc button').forEach(b => b.classList.toggle('on', +b.dataset.qcat === quoteOpenCat));
+  document.querySelectorAll('#quote-editor .qe-pcat').forEach(d => d.classList.toggle('qe-cat-hidden', +d.dataset.ci !== quoteOpenCat));
+}
+let _qsFlashT = null;
+function _qsFlash(ci) {
+  clearTimeout(_qsFlashT);
+  _qsFlashT = setTimeout(() => {
+    const sec = document.querySelectorAll('#quote-view .qs-sec')[ci];
+    if (!sec) return;
+    sec.classList.remove('qs-flash'); void sec.offsetWidth; sec.classList.add('qs-flash');
+  }, 120);
+}
 function _quoteSwap(a, i, j) { if (j >= 0 && j < a.length) [a[i], a[j]] = [a[j], a[i]]; }
 const QUOTE_ACTIONS = {
   catUp: (q, c) => _quoteSwap(q.cats, c, c - 1), catDown: (q, c) => _quoteSwap(q.cats, c, c + 1),
@@ -11956,19 +12272,26 @@ const QUOTE_ACTIONS = {
 document.getElementById('quote-editor')?.addEventListener('input', ev => {
   const p = ev.target.dataset.qp;
   if (!p) return;
+  if (quoteViewVer >= 0) return;  // 歷史版本唯讀
   const keys = p.split('.');
   let o = quoteMutable();
   if (!o) { _quoteTargetGone(); return; }  // v3.32.0
   keys.slice(0, -1).forEach(k => { o = o[k]; });
   const last = keys[keys.length - 1];
-  o[last] = last === 'price' ? (ev.target.value === '' ? null : Number(ev.target.value)) : ev.target.value;
+  o[last] = last === 'price' ? (ev.target.value === '' ? null : Number(ev.target.value)) : last === 'validDays' ? Number(ev.target.value) : ev.target.value;
   _quoteSave();          // v3.32.0：公版 → config / 業主 → state.clients
   renderQuoteTarget();   // 第一次編輯 → 提示從「尚未建立」變「專屬」
   renderQuoteSheet();
+  if (keys[0] === 'cats') _qsFlash(+keys[1]);  // 單據改版：紙上那一類亮一下
 });
 document.getElementById('quote-editor')?.addEventListener('click', async ev => {
+  const sh = ev.target.closest('[data-qsec]');
+  if (sh) { const k = sh.dataset.qsec; _qeOpen.has(k) ? _qeOpen.delete(k) : _qeOpen.add(k); sh.parentNode.classList.toggle('open', _qeOpen.has(k)); return; }
+  const tc = ev.target.closest('[data-qcat]');
+  if (tc) { quoteOpenCat = +tc.dataset.qcat; _qeApplyCat(); _qsFlash(quoteOpenCat); return; }
   const b = ev.target.closest('[data-qa]');
   if (!b) return;
+  if (quoteViewVer >= 0) return;  // 歷史版本唯讀
   const a = b.dataset.qa, c = +b.dataset.c, cur = getQuoteSheet();
   // confirm 放在 quoteMutable() 之前：取消時不該把預設值寫進 config 推 Drive
   if (a === 'catDel' && !await uiConfirm(`刪除類別「${cur.cats[c].name}」和底下所有項目？`)) return;
@@ -11976,6 +12299,11 @@ document.getElementById('quote-editor')?.addEventListener('click', async ev => {
   const m = quoteMutable();
   if (!m) { _quoteTargetGone(); return; }  // v3.32.0
   QUOTE_ACTIONS[a](m, c, +b.dataset.i);
+  // 單據改版：分類新增 / 移動後，目錄跟著停在那一類
+  if (a === 'catAdd') quoteOpenCat = m.cats.length - 1;
+  else if (a === 'catUp' && c > 0) quoteOpenCat = c - 1;
+  else if (a === 'catDown' && c < m.cats.length - 1) quoteOpenCat = c + 1;
+  else if (a === 'catDel') quoteOpenCat = Math.max(0, Math.min(c, m.cats.length - 1));
   _quoteSave();  // v3.32.0
   renderQuoteEditor();
   renderQuoteTarget();
@@ -12012,6 +12340,12 @@ async function resetQuoteSheet() {
 }
 
 async function captureQuoteCanvas() {
+  if (!quoteCompare) return _captureQuoteCanvasRaw();
+  quoteCompare = false; renderQuoteSheet();
+  try { return await _captureQuoteCanvasRaw(); }
+  finally { quoteCompare = true; renderQuoteSheet(); }
+}
+async function _captureQuoteCanvasRaw() {
   const sheet = document.querySelector('#quote-view .qs-sheet');
   if (!sheet) return null;
   toastProgress('🎨 渲染中...');
@@ -12311,7 +12645,21 @@ function renderInvoiceHistory() {
     box.innerHTML = '<div class="reminder-hint" style="text-align: center; padding: 20px;">還沒有任何請款紀錄。匯出第一張請款單後就會出現在這裡。</div>';
     return;
   }
-  const sorted = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  // 單據改版：篩選（全部 / 未收款 / 已收齊）＋ 業主
+  const F = _invHistFilter;
+  const fb = document.getElementById('inv-hist-filters');
+  if (fb) {
+    const cids = [...new Set(list.map(e => e.clientId))];
+    const cname = id => (getClient(id) || {}).name || (list.find(e => e.clientId === id) || {}).clientName || '（無業主名）';
+    fb.innerHTML = [['all', '全部'], ['open', '未收款'], ['paid', '已收齊']].map(([k, l]) => `<button type="button" class="doc-chip${F.st === k ? ' active' : ''}" onclick="_invHistFilter.st = '${k}'; renderInvoiceHistory()">${l}</button>`).join('') +
+      `<select aria-label="業主" onchange="_invHistFilter.cid = this.value; renderInvoiceHistory()"><option value="">全部業主</option>${cids.map(id => `<option value="${escapeHtml(id || '')}"${id === F.cid ? ' selected' : ''}>${escapeHtml(cname(id))}</option>`).join('')}</select>`;
+  }
+  // 已收齊 = 狀態標已收齊，或這張的案件實際都收齊了（狀態是手動標的，常忘了改）
+  const isPaid = e => e.status === 'paid' || ((e.jobIds || []).length > 0 && e.jobIds.every(id => { const j = state.jobs.find(x => x.id === id); return j && jobIsFullyPaid(j); }));
+  const shown = list.filter(e => (!F.cid || e.clientId === F.cid) &&
+    (F.st === 'all' || (F.st === 'paid' ? isPaid(e) : !isPaid(e) && e.status !== 'cancelled')));
+  if (!shown.length) { box.innerHTML = '<div class="reminder-hint" style="text-align: center; padding: 20px;">沒有符合條件的請款紀錄。</div>'; return; }
+  const sorted = [...shown].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   box.innerHTML = sorted.map(e => {
     const dt = new Date(e.createdAt);
     const dtStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
@@ -12331,7 +12679,7 @@ function renderInvoiceHistory() {
         </div>
         <div class="invoice-history-actions">
           <select class="invoice-history-status" onchange="setInvoiceHistoryStatus('${e.id}', this.value)" title="更新狀態">${statusOptions}</select>
-          <button class="btn btn-outline btn-sm" onclick="reissueInvoice('${e.id}')" title="套用相同條件重新編輯/匯出">📋 重發</button>
+          <button class="btn btn-outline btn-sm" onclick="closeInvHist(); reissueInvoice('${e.id}')" title="套用相同條件重新編輯/匯出">📋 開啟</button>
           <button class="btn btn-ghost btn-sm" onclick="deleteInvoiceHistory('${e.id}')" title="刪除這筆紀錄" style="color: var(--danger);">🗑️</button>
         </div>
       </div>`;
@@ -13034,6 +13382,7 @@ function toggleInvPick(id, checked, inFilter) {
   invPick.include.delete(id);
   if (inFilter && !checked) invPick.exclude.add(id);
   if (!inFilter && checked) invPick.include.add(id);
+  _invFlashJob = id;  // 單據改版：紙上對應那行亮一下
   drawInvoice();
 }
 
@@ -13194,7 +13543,7 @@ async function clearInvoiceWholeDiscount() {
   toast('已清除整單折扣');
 }
 
-// v3.40.0：請款對象按鈕 — 只列本期有案件的業主（待收多的在前，標待收金額）；其餘收進「更多業主…」
+// v3.40.0：請款對象按鈕 — 單據改版：只列本期還沒收齊的業主（待收多的在前）；收齊的不列，其他業主走「新增請款單」
 function pickInvClient(cid) {
   const sel = document.getElementById('inv-client');
   if (!sel || sel.disabled || !cid) return;
@@ -13207,9 +13556,9 @@ function _invClientStats(rangeStart, rangeEnd) {
     if (j.cancelled || !j.clientId) return;
     const d = j.date || '';
     if (d < rangeStart || d > rangeEnd) return;
-    const s = stat[j.clientId] || (stat[j.clientId] = { n: 0, unpaid: 0 });
+    const s = stat[j.clientId] || (stat[j.clientId] = { n: 0, unpaid: 0, undone: 0 });
     s.n++;
-    if (j.done) s.unpaid += jobUnpaidAmount(j);
+    if (j.done) s.unpaid += jobUnpaidAmount(j); else s.undone++;
   });
   return stat;
 }
@@ -13221,20 +13570,20 @@ function _renderInvChips(cid, rangeStart, rangeEnd) {
   if (sel && sel.disabled) { box.innerHTML = cur ? _docChip(cur.name, true, '') : ''; return; }  // 業主唯讀模式：只顯示自己
   const stat = _invClientStats(rangeStart, rangeEnd);
   const all = sortedClientsForPicker();
-  const active = all.filter(c => stat[c.id]).sort((a, b) => (stat[b.id].unpaid - stat[a.id].unpaid) || (stat[b.id].n - stat[a.id].n));
-  if (cur && !stat[cid]) active.push(cur);  // 目前選的業主本期沒案件也要看得到
-  const rest = all.filter(c => !active.includes(c));
+  const open = c => stat[c.id] && (stat[c.id].unpaid > 0 || stat[c.id].undone > 0);
+  const active = all.filter(open).sort((a, b) => (stat[b.id].unpaid - stat[a.id].unpaid) || (stat[b.id].n - stat[a.id].n));
+  if (cur && !active.includes(cur)) active.push(cur);  // 目前選的業主（已收齊 / 本期無案件）也要看得到
   box.innerHTML = active.map(c => {
     const s = stat[c.id];
-    const sub = !s ? '本期無案件' : s.unpaid > 0 ? `待收 ${fmt(s.unpaid)}` : `${s.n} 筆`;
+    const sub = !s ? '本期無案件' : s.unpaid > 0 ? `待收 ${fmt(s.unpaid)}` : s.undone > 0 ? `${s.undone} 筆未完成` : '已收齊';
     return _docChip(c.name, c.id === cid, `pickInvClient('${escapeHtml(c.id)}')`, '', sub);
-  }).join('') +
-    (rest.length ? `<select class="doc-chip-more" onchange="pickInvClient(this.value)"><option value="">更多業主…</option>${rest.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('')}</select>` : '');
+  }).join('') || '<span class="doc-ver-hint">這期都收齊了</span>';
 }
 
 function drawInvoice() {
   _ensureSheetFont();  // v3.39.0：請款單紙面改報價單風格（襯線標題）
   setTimeout(renderInvMStepper, 0);  // 改版：手機步驟條跟著刷新（第 5 步收款摘要）
+  setTimeout(_afterDrawInvoice, 0);  // 單據改版：分段摘要 / 這張版本列 / 紙上亮一下
   const cid = document.getElementById('inv-client').value;
   const mode = document.getElementById('inv-mode')?.value || 'single';
   const c = getClient(cid);
@@ -13385,7 +13734,7 @@ function drawInvoice() {
             else if (j.done) stLabel = '<span class="badge-status done-unpaid">$ 待收款</span>';
             else stLabel = '<span class="badge-status pending">進行中</span>';
           }
-          return `<tr>
+          return `<tr data-jid="${j.id}">
             <td class="inv-nowrap">${j.date||'-'}</td>
             <td>${escapeHtml(j.title||'-')}${(j.details || '').trim() ? `<div class="inv-detail">${escapeHtml(j.details)}</div>` : ''}</td>
             <td class="num">${fmt(unit)}</td>

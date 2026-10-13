@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-13-v3.46.1">
+<meta name="app-version" content="2026-10-13-v3.47.0">
 <meta name="theme-color" content="#b24e73">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -89,6 +89,7 @@
             <h1 id="page-title">收工</h1>
             <span class="tb-brand-en">Shougong</span>
           </div>
+          <span class="tb-today" id="tb-today" title="今天"></span>
         </div>
         <div class="sub" id="page-sub">
           個人自由工作者工具 ·
@@ -198,7 +199,10 @@
               <span id="stat-year-sub">年度累積</span> <span class="value" id="stat-year">NT$0</span>
             </div>
           </div>
-          <svg class="stat-hero-spark" id="stat-paid-spark" viewBox="0 0 240 56" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="stat-hero-chart">
+            <svg class="stat-hero-spark" id="stat-paid-spark" viewBox="0 0 240 56" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <div class="stat-hero-legend" id="stat-paid-legend"></div>
+          </div>
         </div>
       </div>
       <div class="stat warning clickable" onclick="dashStatJump('unpaid')" title="點擊查看本月完成待收款的案件">
@@ -611,6 +615,9 @@
         <div id="client-contact-saved-hint" class="reminder-hint" style="margin-top: 4px; opacity: 0; transition: opacity .2s;">✓ 已儲存</div>
       </div>
 
+      <!-- 單據改版：這個業主的請款單 / 報價單 -->
+      <div class="card" id="client-detail-docs"></div>
+
       <!-- 案件歷史時間軸 -->
       <div class="card">
         <h3 style="font-size: 14px; margin-bottom: 10px;">📋 案件歷史 <span id="client-detail-jobs-count" class="reminder-hint"></span></h3>
@@ -636,20 +643,29 @@
       <div class="doc-target-row ms-1">
         <span class="doc-label">請款對象</span>
         <div class="doc-chips" id="inv-chips"></div>
+        <span class="doc-new-box" id="inv-new-box"></span>
+        <button type="button" class="btn btn-outline btn-sm" id="inv-hist-btn" onclick="openInvHist()"><span class="msr">history</span>請款歷史</button>
         <a href="#" class="doc-link" onclick="event.preventDefault(); viewClientDetail(document.getElementById('inv-client').value)">業主資料 ›</a>
       </div>
       <div class="doc-actions ms-3">
         <button class="btn btn-primary" onclick="exportInvoicePDF()"><span class="msr">picture_as_pdf</span>下載 PDF</button>
         <button class="btn btn-outline" onclick="exportInvoicePNG()"><span class="msr">image</span>下載圖片</button>
         <button class="btn btn-outline" onclick="copyInvoiceImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email"><span class="msr">content_copy</span>複製圖片</button>
-        <button class="btn btn-outline" onclick="printInvoice()"><span class="msr">print</span>列印</button>
-        <button class="btn btn-outline" onclick="copyInvoiceText()"><span class="msr">notes</span>複製純文字</button>
+        <details class="doc-more"><summary class="btn btn-outline">更多<span class="msr">expand_more</span></summary>
+          <div class="doc-more-menu"><button type="button" onclick="printInvoice()"><span class="msr">print</span>列印</button><button type="button" onclick="copyInvoiceText()"><span class="msr">notes</span>複製純文字</button></div>
+        </details>
+        <span class="doc-saved" data-doc-saved></span>
       </div>
+      <!-- 單據改版：這張（請款歷史）；新增請款單在上面對象列 -->
+      <div class="doc-ver-row ms-1" id="inv-ver-row"></div>
     </div>
     <!-- v3.39.0：請款單左右排版（同報價單）— 左：控制 / 對帳 / 歷史；右：請款單預覽 -->
     <div class="invoice-layout">
     <div class="invoice-side no-print">
     <div class="card no-print inv-controls" style="padding: 12px;">
+      <!-- 單據改版：分段面板 — 每段標題列帶一行摘要 -->
+      <button type="button" class="dsec-h ms-1" onclick="toggleInvSec('range')"><span class="dsec-t">範圍與帳號</span><span class="dsec-s" id="inv-sum-range"></span><span class="msr">expand_more</span></button>
+      <div class="dsec-b ms-1" data-sec="range">
 
       <!-- v3.2.0-ui：第 1 列 — 業主 + 請款範圍（兩欄並排，請款範圍 wrap 到第二行避免擠壓） -->
       <!-- 修：select 全域 width:100% 在 flex 內會 overflow，用 flex-wrap + explicit min-width 解決 -->
@@ -690,6 +706,8 @@
         </div>
       </div>
 
+      </div><!-- /範圍與帳號 -->
+      <div class="dsec-h static ms-2"><span class="dsec-t">勾選與折扣</span><span class="dsec-s" id="inv-sum-pick"></span></div>
       <!-- 顯示狀態 preset（高頻：月底請款↔對帳切換，留在主行；細項收進下方 ⚙） -->
       <div class="ms-2" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px;">
         <span style="color: var(--muted); font-size: 12px;">顯示狀態：</span>
@@ -705,7 +723,7 @@
 
       <!-- v3.27.3（R7）：低頻控制收進 ⚙ 顯示設定（個資 toggle + 狀態細項），控制區 6 行 → 3 行 -->
       <details class="inv-settings ms-3" id="inv-settings">
-        <summary>⚙ 顯示設定（個人資訊 / 狀態細項）</summary>
+        <summary class="dsec-h"><span class="dsec-t">顯示設定</span><span class="dsec-s" id="inv-sum-disp"></span><span class="msr">expand_more</span></summary>
         <div class="inv-settings-body">
           <!-- v3.2.0-ui：請款單顯示 toggle（個人 + 發票） -->
           <div style="display: flex; gap: 14px; margin-top: 8px; font-size: 13px; flex-wrap: wrap; align-items: center;">
@@ -738,6 +756,7 @@
 
     </div>
 
+    <!-- 單據改版：我的對帳 / 請款歷史 改成分頁 -->
     <!-- v3.24.1：請款單對帳區（業主看不到，匯出 PDF/PNG 不會包含） -->
     <div class="card no-print ms-4" id="invoice-net-breakdown" style="margin-top: 14px;">
       <h3 style="font-size: 15px; margin-bottom: 8px;"><span class="msr">account_balance_wallet</span> 我的對帳（業主看不到）</h3>
@@ -747,17 +766,13 @@
       <div id="invoice-net-breakdown-body" style="font-family: monospace; font-size: 13px; line-height: 1.8;"></div>
     </div>
 
-    <!-- v3.12.0：請款單歷史（每次匯出留紀錄、可改 status / 重發 / 刪除） -->
-    <div class="card collapsible collapsed no-print ms-4" id="card-invoice-history">
-      <div class="card-head" onclick="toggleCard('card-invoice-history'); renderInvoiceHistory();">
-        <h3><span class="msr">history</span> 請款單歷史 <span id="invoice-history-count" class="reminder-hint" style="font-weight: 400;"></span></h3>
-        <span class="card-status">紀錄每次匯出的請款單</span>
-        <span class="toggle-arrow">▼</span>
-      </div>
-      <div class="card-body">
-        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
-          每次匯出 PDF / 圖片 / 列印 / 複製文字 都會留一筆。可標 status、重發、或刪除舊紀錄。
-        </p>
+    <!-- v3.12.0：請款單歷史（每次匯出留紀錄、可改 status / 重發 / 刪除）；單據改版：改成視窗，從對象列「請款歷史」開 -->
+    <div class="card no-print ms-4 inv-mhist"><button type="button" class="btn btn-outline" onclick="openInvHist()"><span class="msr">history</span>開啟請款歷史</button></div>
+    <div class="modal-bg no-print" id="inv-hist-modal" onclick="if (event.target === this) closeInvHist()">
+      <div class="modal inv-hist-modal">
+        <div class="inv-hist-head"><h2>請款歷史 <span id="invoice-history-count" class="reminder-hint" style="font-weight: 400;"></span></h2><button type="button" class="btn btn-ghost btn-sm" onclick="closeInvHist()">關閉</button></div>
+        <div class="inv-hist-filters" id="inv-hist-filters"></div>
+        <p class="inv-hist-note">每次匯出 PDF / 圖片 / 列印 / 複製文字 都會留一筆。可改狀態、開啟重發、或刪除舊紀錄。</p>
         <div id="invoice-history-list"></div>
       </div>
     </div>
@@ -775,14 +790,19 @@
         <span class="doc-label">報價對象</span>
         <div class="doc-chips" id="quote-chips"></div>
         <select id="quote-target" class="hidden" onchange="setQuoteTarget(this.value)"></select>
+        <span class="doc-new-box" id="quote-new-box"></span>
       </div>
+      <!-- 單據改版：版本列（目前 / 歷史版本、和上一版比較、存成新版本） -->
+      <div class="doc-ver-row" id="quote-ver-row"></div>
       <span id="quote-target-hint" class="doc-hint"></span>
       <div class="doc-actions">
         <button class="btn btn-primary" onclick="exportQuotePDF()"><span class="msr">picture_as_pdf</span>下載 PDF</button>
         <button class="btn btn-outline" onclick="exportQuotePNG()"><span class="msr">image</span>下載圖片</button>
         <button class="btn btn-outline" onclick="copyQuoteImage()" title="複製到剪貼簿，可直接貼到 LINE / Messenger / Email"><span class="msr">content_copy</span>複製圖片</button>
-        <button class="btn btn-outline" onclick="window.print()"><span class="msr">print</span>列印</button>
-        <button class="btn btn-outline" id="quote-reset-btn" onclick="resetQuoteSheet()"><span class="msr">restart_alt</span>還原預設</button>
+        <details class="doc-more"><summary class="btn btn-outline">更多<span class="msr">expand_more</span></summary>
+          <div class="doc-more-menu"><button type="button" onclick="window.print()"><span class="msr">print</span>列印</button><button type="button" id="quote-reset-btn" onclick="resetQuoteSheet()"><span class="msr">restart_alt</span>還原預設</button></div>
+        </details>
+        <span class="doc-saved" data-doc-saved></span>
       </div>
       <p class="doc-hint">單價留空 = 顯示「另報價」；欄位留空 = 報價單上不顯示。改動會自動存檔並同步到雲端。</p>
     </div>
