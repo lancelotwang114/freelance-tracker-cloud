@@ -4848,3 +4848,21 @@ body.mascot-talking .mascot-bubble { bottom: 156px; }
 @media (max-width: 1139px) { body.mascot-talking .mascot-container { width: 100px !important; height: 100px !important; } body.mascot-talking .mascot-bubble { bottom: 128px; } }
 @media (max-width: 640px) { body.mascot-talking .mascot-container { width: 84px !important; height: 84px !important; } body.mascot-talking .mascot-bubble { bottom: 168px !important; } }
 .tb-today { margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--border); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; align-self: center; }
+
+/* ==================== UX 簡化：新增案件 / 新增業主 ==================== */
+/* 新增模式（.compact）：不顯示進度條、區塊標題、估價單切換、總金額欄、底部「取消」（右上 ✕ 可關） */
+#job-modal.compact .job-progress, #job-modal.compact .job-section-label, #job-modal.compact .estimate-toggle,
+#job-modal.compact .job-amt-eq, #job-modal.compact .job-amt-total, #job-modal.compact .modal-actions > .btn-outline:first-child { display: none !important; }
+#job-modal.compact .job-amt-grid { grid-template-columns: minmax(0, 1.6fr) auto 96px !important; }
+.job-total-line { display: none; }
+#job-modal.compact .job-total-line { display: block; margin-top: 6px; font-size: 15px; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; min-height: 22px; }
+.client-more { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.client-more > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 6px 0; list-style: none; }
+.client-more > summary::before { content: '▸ '; }
+.client-more[open] > summary::before { content: '▾ '; }
+.client-more > summary:hover { color: var(--primary); }
+/* 系統「減少動態效果」：小幫手、背景粒子不動 */
+@media (prefers-reduced-motion: reduce) {
+  .mascot-container, .mascot-container *, .dust-particle { animation: none !important; transition: none !important; }
+}
+#job-modal.compact .job-section { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }

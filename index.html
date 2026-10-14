@@ -15,7 +15,7 @@
 <meta charset="UTF-8">
 <!-- v3.28.6：移除 maximum-scale / user-scalable=no — 開放手機捏合縮放（WCAG 1.4.4） -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="app-version" content="2026-10-13-v3.47.0">
+<meta name="app-version" content="2026-10-14-v3.48.0">
 <meta name="theme-color" content="#b24e73">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -256,7 +256,7 @@
     <div class="filter-bar" id="job-filter"></div>
     <!-- 改版：快速新增列 — 走原本的新增流程；業主預設最近一筆、日期預設今天 -->
     <div class="quick-row" id="quick-row">
-      <select id="qr-client" aria-label="業主"></select>
+      <select id="qr-client" aria-label="業主" onchange="onQuickRowClientChange()"></select>
       <input type="date" id="qr-date" aria-label="日期">
       <input type="text" id="qr-title" placeholder="快速新增：案件名稱，Enter 送出" onkeydown="if(event.key==='Enter'){event.preventDefault();quickRowAdd();}">
       <input type="number" id="qr-price" placeholder="單價" min="0" inputmode="numeric" onkeydown="if(event.key==='Enter'){event.preventDefault();quickRowAdd();}">
@@ -309,9 +309,9 @@
   <section id="tab-calendar" class="hidden">
     <div class="card">
       <div class="cal-nav">
-        <button class="btn-icon" onclick="calPrev()">◀</button>
+        <button class="btn-icon" onclick="calPrev()" aria-label="上個月" title="上個月">◀</button>
         <h2 id="cal-title">—</h2>
-        <button class="btn-icon" onclick="calNext()">▶</button>
+        <button class="btn-icon" onclick="calNext()" aria-label="下個月" title="下個月">▶</button>
         <button class="btn btn-outline btn-sm" onclick="calToday()">今天</button>
       </div>
       <div class="cal-grid" id="cal-grid"></div>
@@ -582,7 +582,7 @@
         <div id="client-tags-chips" class="tags-chips-row"></div>
         <div style="display: flex; gap: 6px; margin-top: 6px;">
           <input type="text" id="client-tag-input" placeholder="輸入標籤後按 Enter（例：VIP、長期、潛在）" list="all-tag-suggestions" onkeydown="onClientTagKeydown(event)" style="flex: 1;">
-          <button class="btn btn-outline btn-sm" onclick="addClientTagFromInput()">＋</button>
+          <button class="btn btn-outline btn-sm" onclick="addClientTagFromInput()" aria-label="加入標籤" title="加入標籤">＋</button>
         </div>
         <datalist id="all-tag-suggestions"></datalist>
       </div>
@@ -1099,7 +1099,7 @@
     <!-- 關於 -->
     <div class="settings-about" style="text-align: center; font-size: 12px; color: var(--muted); padding: 24px 0 0;">
       <a onclick="showOnboardingAgain()" style="color: var(--primary); cursor: pointer; font-size: 12px;">↻ 再次顯示歡迎引導</a>
-      <div style="margin-top: 6px; font-size: 11px;">外包收益管理工具 · v1.3</div>
+      <div style="margin-top: 6px; font-size: 11px;">收工 Shougong</div>
     </div>
   </section>
 
@@ -1274,7 +1274,7 @@
     <!-- 改版：金額搬到名稱正下方（最常改的四項集中在上方） -->
     <!-- v3.2.0：金額拆成 單價 × 數量；amount 仍是「總金額」自動算 -->
     <!-- v3.40.2：數量窄欄 + × / = 符號，單價與總金額放寬 -->
-    <div style="display: grid; grid-template-columns: minmax(0, 1.3fr) auto 84px auto minmax(0, 1.3fr); gap: 8px; align-items: start;">
+    <div class="job-amt-grid" style="display: grid; grid-template-columns: minmax(0, 1.3fr) auto 84px auto minmax(0, 1.3fr); gap: 8px; align-items: start;">
       <div>
         <label for="job-unit-price">單價</label>
         <input type="number" id="job-unit-price" placeholder="0" oninput="onJobUnitOrQtyChange()">
@@ -1284,8 +1284,8 @@
         <label for="job-quantity">數量</label>
         <input type="number" id="job-quantity" placeholder="1" min="1" step="1" value="1" oninput="onJobUnitOrQtyChange()">
       </div>
-      <span class="job-amt-op">=</span>
-      <div>
+      <span class="job-amt-op job-amt-eq">=</span>
+      <div class="job-amt-total">
         <label for="job-amount">總金額</label>
         <input type="number" id="job-amount" placeholder="0" oninput="updateJobAmountSummary(); onJobAmountManualEdit();">
         <!-- v3.24.18：千分位即時 hint，避免大數字眼花 -->
@@ -1293,13 +1293,15 @@
       </div>
     </div>
 
+    <!-- UX 簡化：新增模式只顯示一行合計（總金額欄收起，照單價 × 數量自動算） -->
+    <div class="job-total-line" id="job-total-line"></div>
     <!-- v3.37.0：新增模式（.compact）收起的欄位一律標 .job-more -->
     <div class="job-more">
     <label>標籤（選填，可多個）</label>
     <div id="job-tags-chips" class="tags-chips-row"></div>
     <div style="display: flex; gap: 6px; margin-top: 4px;">
       <input type="text" id="job-tag" placeholder="輸入後按 Enter（例：廣告、設計、動畫）" list="tag-suggestions" onkeydown="onJobTagKeydown(event)" style="flex: 1;">
-      <button type="button" class="btn btn-outline btn-sm" onclick="addJobTagFromInput()">＋</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="addJobTagFromInput()" aria-label="加入標籤" title="加入標籤">＋</button>
     </div>
     </div>
     <datalist id="tag-suggestions"></datalist>
@@ -1363,7 +1365,7 @@
     <div id="job-amount-summary" class="job-more" style="background: var(--primary-light); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-top: 8px; min-height: 16px;"></div>
     </div>
     <!-- v3.37.0：新增模式只露常用欄位，其餘點這顆展開 -->
-    <button type="button" class="btn btn-ghost btn-sm job-more-toggle" onclick="toggleJobMoreFields()">更多欄位 ▾（截止日、標籤、說明、折扣、收款、勞報…）</button>
+    <button type="button" class="btn btn-ghost btn-sm job-more-toggle" onclick="toggleJobMoreFields()">更多欄位 ▾（估價單、截止日、標籤、說明、折扣、收款、勞報…）</button>
     <!-- /區 2 -->
 
     <!-- ===== 區 3：進度 + 收款 ===== -->
@@ -1487,6 +1489,8 @@
       <button class="btn btn-danger hidden" id="job-delete-btn" onclick="deleteJob()">刪除</button>
       <!-- v3.29.1：新增模式專用 — 補登已做完的案件一鍵存（實測常見「新增 → 2 秒後列表點完成」） -->
       <button class="btn btn-success hidden" id="job-save-done-btn" onclick="saveJobAsDone()">✓ 存為已完成</button>
+      <!-- UX 簡化：新增模式 — 存完不關，留業主 / 日期，接著輸入下一筆 -->
+      <button class="btn btn-outline hidden" id="job-save-next-btn" onclick="saveJobAndNext()">存並新增下一筆</button>
       <button class="btn btn-primary" onclick="saveJob()">儲存</button>
     </div>
   </div>
@@ -1500,6 +1504,9 @@
     <input type="text" id="client-name" placeholder="例：A 公司">
     <label>顏色標記</label>
     <div id="color-picker" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+    <!-- UX 簡化：新增業主只要名稱＋顏色；其餘選填設定收進這裡（編輯時有填過會自動展開） -->
+    <details class="client-more" id="client-more">
+    <summary>更多設定（備註、付款方式、介紹人分潤、固定請款日、提醒天數）</summary>
     <label for="client-note">備註（例：聯絡人、匯款帳號等）</label>
     <textarea id="client-note"></textarea>
 
@@ -1591,6 +1598,7 @@
     <p style="font-size: 11px; color: var(--muted); margin-top: 2px;">
       留空就走設定頁的全域天數。某些業主收款慢，可單獨調高（例如 30 天才提醒）。
     </p>
+    </details>
 
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeClientModal()">取消</button>
@@ -1722,7 +1730,7 @@
 <!-- 初次使用引導 -->
 <div class="modal-bg" id="onboarding-modal">
   <div class="modal" style="max-width: 480px;">
-    <h2>👋 歡迎使用外包收益管理工具</h2>
+    <h2>👋 歡迎使用收工</h2>
     <p style="font-size: 14px; color: var(--muted); margin-bottom: 16px;">這是給接案工作者用的記帳 + 排程 + 請款工具。第一次打開，你想怎麼開始？</p>
 
     <div class="checkbox-stack">

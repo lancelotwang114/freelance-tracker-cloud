@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-13-v3.47.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-10-14-v3.48.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -7597,13 +7597,25 @@ function _dayLabel(d) {
   return `${rel}${dt.getFullYear() !== new Date().getFullYear() ? dt.getFullYear() + ' 年 ' : ''}${dt.getMonth() + 1} 月 ${dt.getDate()} 日（${'日一二三四五六'[dt.getDay()]}）`;
 }
 // 快速新增列：業主預設＝最近新增的那筆案件的業主；日期預設今天（使用者改過就保留）
+let _qrNewClient = false, _qrPick = '';
+function onQuickRowClientChange() {
+  const sel = document.getElementById('qr-client');
+  if (sel.value !== '__new_client__') { sel.dataset.prev = sel.value; return; }
+  sel.value = sel.dataset.prev || sel.options[0]?.value || '';
+  _qrNewClient = true;  // saveClient 存好後把新業主選回快速新增列
+  openClientModal();
+}
 function _fillQuickRow() {
   const sel = document.getElementById('qr-client');
   if (!sel) return;
-  const keep = sel.value;
-  sel.innerHTML = sortedClientsForPicker().map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  const keep = _qrPick || sel.value; _qrPick = '';
+  // 沒有業主時先放空白選項，選「＋ 新增業主…」才會觸發 change
+  sel.innerHTML = (state.clients.length ? '' : '<option value="">選擇業主</option>') +
+    sortedClientsForPicker().map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('') +
+    '<option value="__new_client__">＋ 新增業主…</option>';
   const last = state.jobs.length ? state.jobs[state.jobs.length - 1].clientId : '';
   sel.value = getClient(keep) ? keep : (getClient(last) ? last : (sel.options[0]?.value || ''));
+  sel.dataset.prev = sel.value;
   const d = document.getElementById('qr-date');
   if (d && !d.value) d.value = todayStr();
 }
@@ -11543,7 +11555,7 @@ function isNotifEnabled() {
 
 function sendTestNotification() {
   if (!isNotifEnabled()) return;
-  new Notification('外包收益管理', {
+  new Notification('收工', {
     body: '✓ 通知已啟用！截止日、拖款警告會即時跳出。',
     icon: 'icons/icon.svg',
     tag: 'ftracker-test'
@@ -14345,6 +14357,7 @@ async function openJobModal() {
   _jobCreateVia = 'fab';  // v3.25.3（R25）：一般新增路徑（duplicateJob 會改成 'duplicate'）
   document.getElementById('job-duplicate-btn')?.classList.add('hidden');
   document.getElementById('job-save-done-btn')?.classList.remove('hidden');  // v3.29.1
+  document.getElementById('job-save-next-btn')?.classList.remove('hidden');  // UX 簡化
   document.getElementById('job-export-estimate-btn')?.classList.add('hidden');
   document.getElementById('job-confirm-estimate-btn')?.classList.add('hidden');
   // v2.6: 子任務 + 計時器（v3.10.0：新案件還沒 ID，計時器只能顯示 0:00:00）
@@ -14524,6 +14537,8 @@ function updateJobAmountSummary() {
   // v3.24.18：千分位即時 hint（讓使用者輸入大數字時看得清楚）
   const fmtHint = document.getElementById('job-amount-formatted');
   if (fmtHint) fmtHint.textContent = base > 0 ? `≈ ${fmt(base)}` : '';
+  const tl = document.getElementById('job-total-line');  // UX 簡化：新增模式的一行合計
+  if (tl) tl.textContent = base > 0 ? `合計 ${fmt(base)}` : '';
   const type = document.querySelector('input[name="job-discount-type"]:checked')?.value || 'none';
   const dval = +document.getElementById('job-discount-value').value || 0;
   let final = base, disc = 0;
@@ -14808,6 +14823,7 @@ async function editJob(id) {
   updateJobAmountSummary();
   document.getElementById('job-duplicate-btn')?.classList.remove('hidden');
   document.getElementById('job-save-done-btn')?.classList.add('hidden');  // v3.29.1：編輯模式不顯示
+  document.getElementById('job-save-next-btn')?.classList.add('hidden');
   // 估價單模式：顯示「轉正」與「估價單 PDF」按鈕
   document.getElementById('job-export-estimate-btn')?.classList.toggle('hidden', !j.isEstimate);
   document.getElementById('job-confirm-estimate-btn')?.classList.toggle('hidden', !j.isEstimate);
@@ -14853,6 +14869,7 @@ function duplicateJob() {
   set('job-delete-btn', el => el.classList.add('hidden'));
   set('job-duplicate-btn', el => el.classList.add('hidden'));
   set('job-save-done-btn', el => el.classList.remove('hidden'));  // v3.29.1
+  set('job-save-next-btn', el => el.classList.remove('hidden'));
   set('job-discount-summary-hint', el => { el.textContent = ''; });  // v3.31.0：複製出的新案件不帶整單折扣備註
   set('job-modal', el => el.classList.remove('compact'));  // v3.37.0：複製的欄位都有值 → 全部展開
   // 清狀態（新案件預設未完成、未收款、未取消、日期改成今天）
@@ -14880,6 +14897,19 @@ function onJobDoneChange() {
   renderJobProgress();
 }
 // v3.29.1：新增模式「✓ 存為已完成」— 勾完成（自動填完成日）後走一般 saveJob
+// UX 簡化：存並新增下一筆 — 走原本 saveJob（驗證 / 紀錄一致），成功後重開新增，保留業主與日期
+async function saveJobAndNext() {
+  const cid = document.getElementById('job-client').value, d = document.getElementById('job-date').value;
+  saveJob();
+  if (document.getElementById('job-modal').classList.contains('open')) return;  // 驗證沒過 → 留在原畫面
+  if (!(await openJobModal())) return;
+  if (getClient(cid)) { document.getElementById('job-client').value = cid; onJobClientChange(); }
+  if (d) document.getElementById('job-date').value = d;
+  _jobFormSnapshot = _jobFormSig();
+  document.getElementById('job-title')?.focus();
+  toast('已儲存，接著輸入下一筆');
+}
+
 function saveJobAsDone() {
   const doneEl = document.getElementById('job-done');
   const dateEl = document.getElementById('job-done-at');
@@ -15092,7 +15122,9 @@ function openClientModal() {
   setPaymentMode('normal');
   refreshCommissionDropdown('');
   renderColorPicker(COLORS[state.clients.length % COLORS.length]);
+  const more = document.getElementById('client-more'); if (more) more.open = false;  // UX 簡化：新增只露名稱＋顏色
   document.getElementById('client-modal').classList.add('open');
+  document.getElementById('client-name')?.focus();
 }
 
 function editClient(id) {
@@ -15110,6 +15142,9 @@ function editClient(id) {
   setPaymentMode(c.prepaidMode ? 'prepaid' : 'normal');
   refreshCommissionDropdown(c.commissionTo || '');
   renderColorPicker(c.color);
+  // UX 簡化：有填過任何選填設定 → 「更多設定」直接展開，看得到
+  const more = document.getElementById('client-more');
+  if (more) more.open = !!(c.note || c.prepaidMode || c.commissionTo || c.commissionRate || c.billingDay || c.unpaidRemindDaysOverride != null);
   document.getElementById('client-modal').classList.add('open');
 }
 
@@ -15210,6 +15245,7 @@ function refreshCommissionDropdown(selected) {
 
 function closeClientModal() {
   document.getElementById('client-modal').classList.remove('open');
+  _qrNewClient = false;  // 從快速新增列開的業主視窗被取消 → 不要讓之後別處新增的業主被選進快速新增列
   // v3.0.0：移除 releaseEditLock（v2 編輯鎖已拆）
 }
 
@@ -15256,8 +15292,9 @@ function saveClient() {
     if (document.getElementById('job-modal').classList.contains('open')) {
       _fillJobClientOptions(newId);
       onJobClientChange();
-    }
+    } else if (_qrNewClient) _qrPick = newId;  // 從快速新增列來的 → 選回新業主
   }
+  _qrNewClient = false;
   save(); closeClientModal(); render(); toast('已儲存');
 }
 
