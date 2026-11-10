@@ -21,7 +21,7 @@
 // v3.0.0-alpha.1：所有 localStorage key 加 cloud- 前綴，與 v2（同 origin lancelotwang114.github.io）完全隔離
 const STORAGE_KEY = 'cloud-freelance-tracker-v1';
 const CONFIG_KEY = 'cloud-freelance-tracker-config';
-const APP_VERSION = '2026-10-14-v3.48.0';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
+const APP_VERSION = '2026-11-10-v3.48.1';  // 與 index.html 的 meta、service-worker.js 的 CACHE_VERSION 同步
 
 // ============== ☁️ Cloud Auth Layer（v3.0.0-alpha.1 起新增）==============
 // 後續 commit 會在這個區塊加：sync indicator 接通 / 持久化（token + 過期時間）/ 操作日誌埋點
@@ -44,6 +44,9 @@ const GOOGLE_CLIENT_ID = '571304600737-nfvsh00822f4b5p00msetkld6qq11vf2.apps.goo
 //   client_secret 只存在 Worker 的加密環境變數，前端與 repo 都沒有。
 //   目的：silent refresh 從「開 Google popup（睡醒喚醒時會被瀏覽器擋 → 每天要求重登）」改成背景 fetch，無感續約。
 const TOKEN_BROKER_URL = 'https://tracker-token-broker.james40114.workers.dev';
+// v3.48.1：iPhone 主畫面 App 擋 Google popup → 改整頁跳轉登入，跳回這個網址（Google 後台與 Worker 白名單都要登記）
+const CLOUD_REDIRECT_URI = 'https://lancelotwang114.github.io/freelance-tracker-cloud/';
+const CLOUD_OAUTH_STATE_KEY = 'cloud-oauthState_v1';  // 跳轉前存的防偽隨機碼（暫存，非業務資料）
 
 // DRIVE_SCOPE
 //   drive.appfolder：只能存取本 app 自己建的「應用程式資料夾」，看不到使用者其他 Drive 檔案。
@@ -163,6 +166,15 @@ function cloudWaitForGoogleSDK(maxAttempts = 50) {
 
 // app 啟動時自動呼叫一次（檔尾有自啟動 IIFE）
 async function cloudInitGoogleAuth() {
+  // v3.48.1：先讀「從 Google 跳回來」的參數（後面會產生新的 state 覆蓋）
+  const qs = new URLSearchParams(location.search);
+  let savedState = null;
+  try { savedState = localStorage.getItem(CLOUD_OAUTH_STATE_KEY); localStorage.removeItem(CLOUD_OAUTH_STATE_KEY); } catch (_) {}
+  const redirectReturn = (qs.has('code') || qs.has('error')) && qs.has('state')
+    ? { code: qs.get('code'), error: qs.get('error'), stateOk: !!savedState && qs.get('state') === savedState }
+    : null;
+  if (redirectReturn) history.replaceState(null, '', location.pathname + location.hash);
+
   // Step 1：先試著從 localStorage 還原（v3.0.0-alpha.1 commit 6）
   // 若 token 還沒過期，立刻渲染為「已登入」，不用等 GIS SDK 載入
   const restored = cloudLoadAuthState();
@@ -193,18 +205,24 @@ async function cloudInitGoogleAuth() {
   });
   // v3.25.0：code flow client — 登入拿 authorization code，丟 Worker 換 access+refresh token
   // initCodeClient 可能不存在（GIS SDK 舊版快取）→ null，cloudSignIn 會 fallback 到 tokenClient
+  // v3.48.1：iPhone 主畫面 App（navigator.standalone）且在正式站 → 整頁跳轉；其他照舊 popup
+  const useRedirect = navigator.standalone === true && location.origin + location.pathname === CLOUD_REDIRECT_URI;
   if (google.accounts.oauth2.initCodeClient) {
+    const state = useRedirect ? [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('') : undefined;
     cloudAuthState.codeClient = google.accounts.oauth2.initCodeClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: AUTH_SCOPES,
-      ux_mode: 'popup',
+      ...(useRedirect ? { ux_mode: 'redirect', redirect_uri: CLOUD_REDIRECT_URI, state } : { ux_mode: 'popup' }),
       callback: cloudOnCodeResponse,
       // 使用者關掉 popup / popup 開不起來 → 走這裡不走 callback，要把手動登入旗標清掉
       error_callback: (err) => {
         console.warn('[cloud-auth] code flow popup error:', err);
         _isManualSignIn = false;
+        // v3.48.1：視窗被擋要看得到，不能只寫 console
+        if (err && err.type === 'popup_failed_to_open') alert('Google 登入視窗被擋住了。請允許彈出視窗後再試一次。');
       },
     });
+    cloudAuthState.redirectState = state;
   }
   cloudAuthState.initialized = true;
 
@@ -247,6 +265,16 @@ async function cloudInitGoogleAuth() {
   // fire-and-forget：init 內部有 cloudInitInProgress 併發保護，不會撞車
   if (restored && typeof cloudInitTrackerFile === 'function') {
     cloudInitTrackerFile().catch(e => console.error('[cloud-init] restored path async failed:', e));
+  }
+
+  // v3.48.1：從 Google 整頁跳轉回來 → 驗 state 後換 token，走既有手動登入流程
+  if (redirectReturn) {
+    if (!redirectReturn.stateOk) {
+      alert('Google 登入失敗：驗證碼不符，請再按一次登入。');
+    } else {
+      _isManualSignIn = true;
+      cloudOnCodeResponse(redirectReturn.error ? { error: redirectReturn.error } : { code: redirectReturn.code }, CLOUD_REDIRECT_URI);
+    }
   }
 
   // v3.22.2 + v3.22.10：多重事件觸發 refresh check
@@ -355,6 +383,9 @@ function cloudSignIn() {
   // v3.24.22：帶 hint 加速重登 — 指定上次的 Google 帳號，避免跳出帳號選擇器
   const hint = cloudAuthState.user && cloudAuthState.user.email;
   if (cloudAuthState.codeClient) {
+    if (cloudAuthState.redirectState) {
+      try { localStorage.setItem(CLOUD_OAUTH_STATE_KEY, cloudAuthState.redirectState); } catch (_) {}
+    }
     cloudAuthState.codeClient.requestCode();
     return;
   }
@@ -369,7 +400,7 @@ function cloudSignIn() {
 // v3.25.0：code flow callback — 拿到 authorization code → 丟 Worker /exchange 換 token
 // 換到的 payload 跟 GIS token response 同形（access_token / expires_in），直接餵給 cloudOnTokenResponse
 // 重用既有的 userinfo / 持久化 / init tracker / schedule refresh 全套流程
-async function cloudOnCodeResponse(resp) {
+async function cloudOnCodeResponse(resp, redirectUri) {
   if (resp.error) {
     // 使用者關掉 popup / 拒絕授權 → 跟手動登入失敗同樣處理
     console.warn('[cloud-auth] code flow error:', resp);
@@ -383,7 +414,7 @@ async function cloudOnCodeResponse(resp) {
     const r = await fetch(TOKEN_BROKER_URL + '/exchange', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: resp.code }),
+      body: JSON.stringify({ code: resp.code, redirect_uri: redirectUri }),  // undefined → Worker 用 postmessage
     });
     const data = await r.json();
     if (!r.ok || data.error) throw new Error(data.error_description || data.error || ('HTTP ' + r.status));

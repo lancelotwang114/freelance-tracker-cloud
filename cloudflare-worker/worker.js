@@ -6,6 +6,8 @@
 
 const CLIENT_ID = '571304600737-nfvsh00822f4b5p00msetkld6qq11vf2.apps.googleusercontent.com';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+// 'postmessage' = GIS popup 模式；正式站網址 = iPhone 主畫面 App 的整頁跳轉模式（需在 Google 後台登記）
+const REDIRECT_URIS = ['postmessage', 'https://lancelotwang114.github.io/freelance-tracker-cloud/'];
 
 // 只允許正式站 + 本機開發
 function isAllowedOrigin(origin) {
@@ -48,11 +50,13 @@ export default {
     let params;
     if (path === '/exchange') {
       if (!body.code) return json({ error: 'missing_code' }, 400, cors);
+      const redirectUri = body.redirect_uri || 'postmessage';
+      if (!REDIRECT_URIS.includes(redirectUri)) return json({ error: 'bad_redirect_uri' }, 400, cors);
       params = {
         code: body.code,
         client_id: CLIENT_ID,
         client_secret: env.GOOGLE_CLIENT_SECRET,
-        redirect_uri: 'postmessage', // GIS popup 模式的 code 用這個固定值
+        redirect_uri: redirectUri, // 必須和取得 code 時用的一致
         grant_type: 'authorization_code',
       };
     } else if (path === '/refresh') {
